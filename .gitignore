@@ -38,3 +38,7 @@ drizzle/meta/*.json
 # Misc
 coverage/
 .vercel
+
+# OpenNext (Cloudflare Workers build output)
+.open-next/
+cloudflare-env.d.ts
