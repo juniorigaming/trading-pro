@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --color-dark-950: #000000;
+  --color-dark-900: #0a0a0f;
+  --color-dark-850: #101018;
+  --color-dark-800: #16161f;
+  --color-dark-750: #1c1c28;
+  --color-dark-700: #232330;
+  --color-dark-600: #2d2d3d;
+  --color-dark-500: #3a3a4d;
+  --color-emerald: #10b981;
+  --color-emerald-bright: #34d399;
+  --color-rose: #f43f5e;
+  --color-rose-bright: #fb7185;
+  --color-amber: #f59e0b;
+  --color-sky: #38bdf8;
+  --color-violet: #a78bfa;
+  --color-slate-text: #cbd5e1;
+  --color-slate-muted: #94a3b8;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #000000;
+  color: #f8fafc;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2d2d3d;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4d;
+}
+
+/* Remove native number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.glass-card {
+  background: #0d0d14;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+.glass-card-strong {
+  background: #0a0a10;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+}
+
+.text-glow-emerald {
+  text-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
