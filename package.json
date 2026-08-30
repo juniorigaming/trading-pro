@@ -1,5 +1,6 @@
 {
   "name": "nextjs-postgresql-template",
+  "packageManager": "bun@1.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
