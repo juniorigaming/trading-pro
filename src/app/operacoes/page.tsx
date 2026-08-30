@@ -61,7 +61,7 @@ export default function OperacoesPage() {
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
       <header className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Operações</h1>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Operações</h1>
           <p className="text-sm text-slate-muted mt-1">Histórico completo das suas operações registradas ({trades.length})</p>
         </div>
       </header>
@@ -74,7 +74,7 @@ export default function OperacoesPage() {
               placeholder="Buscar por ativo, setup..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition"
+              className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition"
             />
           </div>
           <select value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)} className="bg-dark-800 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald/30">
@@ -90,12 +90,12 @@ export default function OperacoesPage() {
             <option value="BUY">BUY</option>
             <option value="SELL">SELL</option>
           </select>
-          <button onClick={exportCSV} className="inline-flex items-center gap-1.5 px-3 py-2.5 bg-dark-800 hover:bg-dark-700 border border-white/5 text-white text-xs font-semibold rounded-xl transition">
+          <button onClick={exportCSV} className="inline-flex items-center gap-1.5 px-3 py-2.5 bg-dark-800 hover:bg-dark-700 border border-white/5 text-text-primary text-xs font-semibold rounded-xl transition">
             <Download size={14} /> CSV
           </button>
           <Link
             href="/operacoes/novo"
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald to-emerald-bright hover:from-emerald-bright hover:to-emerald text-white text-sm font-bold rounded-xl shadow-[0_0_15px_rgba(16,185,129,0.2)] transition active:scale-[0.98]"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-[0_0_15px_rgba(16,185,129,0.2)] transition active:scale-[0.98]"
           >
             <Plus size={16} />
             Nova Operação
@@ -107,7 +107,7 @@ export default function OperacoesPage() {
               key={f}
               onClick={() => setResultFilter(f)}
               className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition ${
-                resultFilter === f ? "bg-emerald/10 text-emerald border-emerald/20" : "text-slate-muted hover:text-white hover:bg-white/[0.04] border-white/[0.05]"
+                resultFilter === f ? "bg-emerald/10 text-emerald border-emerald/20" : "text-slate-muted hover:text-text-primary hover:bg-white/[0.04] border-white/[0.05]"
               }`}
             >
               {f}
@@ -143,10 +143,10 @@ export default function OperacoesPage() {
               {filtered.map((t: Trade) => (
                 <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition">
                   <td className="px-4 py-3">
-                    <p className="text-xs font-medium text-white">{new Date(t.date).toLocaleDateString("pt-BR")}</p>
+                    <p className="text-xs font-medium text-text-primary">{new Date(t.date).toLocaleDateString("pt-BR")}</p>
                     <p className="text-[10px] text-slate-muted">{t.time}</p>
                   </td>
-                  <td className="px-4 py-3 font-bold text-white">
+                  <td className="px-4 py-3 font-bold text-text-primary">
                     {t.asset} {t.isDemo && <span className="text-[9px] text-sky ml-1">(demo)</span>}
                   </td>
                   <td className="px-4 py-3">

@@ -2,48 +2,175 @@
 
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --color-dark-950: #000000;
-  --color-dark-900: #0a0a0f;
-  --color-dark-850: #101018;
-  --color-dark-800: #16161f;
-  --color-dark-750: #1c1c28;
-  --color-dark-700: #232330;
-  --color-dark-600: #2d2d3d;
-  --color-dark-500: #3a3a4d;
-  --color-emerald: #10b981;
-  --color-emerald-bright: #34d399;
-  --color-rose: #f43f5e;
-  --color-rose-bright: #fb7185;
-  --color-amber: #f59e0b;
-  --color-sky: #38bdf8;
-  --color-violet: #a78bfa;
-  --color-slate-text: #cbd5e1;
-  --color-slate-muted: #94a3b8;
+
+  /* Map Tailwind color tokens to theme CSS variables so components adapt automatically. */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-dark-950: var(--background);
+  --color-dark-900: var(--surface);
+  --color-dark-850: var(--surface);
+  --color-dark-800: var(--surface-2);
+  --color-dark-750: var(--surface-2);
+  --color-dark-700: var(--surface-3);
+  --color-dark-600: var(--surface-3);
+  --color-dark-500: var(--border);
+
+  --color-slate-text: var(--text-secondary);
+  --color-slate-muted: var(--text-muted);
+  --color-slate-300: var(--text-secondary);
+  --color-slate-400: var(--text-muted);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+
+  /* Semantic colors (do NOT change with accent). */
+  --color-emerald: var(--success);
+  --color-emerald-bright: var(--success);
+  --color-rose: var(--danger);
+  --color-rose-bright: var(--danger);
+  --color-amber: var(--warning);
+  --color-sky: var(--info);
+
+  /* Accent (user selectable). */
+  --color-accent: var(--user-accent);
+  --color-accent-soft: var(--user-accent-soft);
+  --color-violet: var(--user-accent);
 }
 
+/* ============================================================
+   DESIGN TOKENS — DARK (default)
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  --background: #07090d;
+  --surface: #0d1017;
+  --surface-2: #121722;
+  --surface-3: #181e29;
+
+  --border: #202632;
+  --border-subtle: #161b24;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #a8b3c4;
+  --text-muted: #64748b;
+
+  --success: #10b981;
+  --danger: #f43f5e;
+  --warning: #f59e0b;
+  --info: #38bdf8;
+
+  --overlay-subtle: rgba(255, 255, 255, 0.04);
+  --overlay-hover: rgba(255, 255, 255, 0.08);
+  --border-white: rgba(255, 255, 255, 0.09);
+  --shadow-color: rgba(0, 0, 0, 0.5);
+
+  color-scheme: dark;
+}
+
+/* ============================================================
+   DESIGN TOKENS — LIGHT
+   ============================================================ */
+[data-theme="light"] {
+  --background: #f4f7fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef2f7;
+
+  --border: #e2e8f0;
+  --border-subtle: #edf2f7;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+
+  --success: #059669;
+  --danger: #e11d48;
+  --warning: #d97706;
+  --info: #0284c7;
+
+  --overlay-subtle: rgba(15, 23, 42, 0.03);
+  --overlay-hover: rgba(15, 23, 42, 0.06);
+  --border-white: rgba(15, 23, 42, 0.08);
+  --shadow-color: rgba(100, 116, 139, 0.18);
+
+  color-scheme: light;
+}
+
+/* ============================================================
+   ACCENT COLORS
+   ============================================================ */
+[data-accent="green"] {
+  --user-accent: #10d9a0;
+  --user-accent-hover: #0fc590;
+  --user-accent-soft: rgba(16, 217, 160, 0.14);
+}
+[data-accent="blue"] {
+  --user-accent: #3b82f6;
+  --user-accent-hover: #2563eb;
+  --user-accent-soft: rgba(59, 130, 246, 0.14);
+}
+[data-accent="purple"] {
+  --user-accent: #8b5cf6;
+  --user-accent-hover: #7c3aed;
+  --user-accent-soft: rgba(139, 92, 246, 0.14);
+}
+[data-accent="cyan"] {
+  --user-accent: #06b6d4;
+  --user-accent-hover: #0891b2;
+  --user-accent-soft: rgba(6, 182, 212, 0.14);
+}
+
+/* ============================================================
+   DENSITY
+   ============================================================ */
+[data-density="comfortable"] {
+  --space-card: 24px;
+  --space-card-sm: 20px;
+  --row-height: 48px;
+  --input-height: 44px;
+  --table-pad-y: 14px;
+  --nav-pad-y: 12px;
+}
+[data-density="compact"] {
+  --space-card: 16px;
+  --space-card-sm: 14px;
+  --row-height: 38px;
+  --input-height: 34px;
+  --table-pad-y: 8px;
+  --nav-pad-y: 8px;
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
 html {
   scroll-behavior: smooth;
 }
 
 body {
-  background-color: #000000;
-  color: #f8fafc;
+  background-color: var(--background);
+  color: var(--text-primary);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
+::selection {
+  background: var(--user-accent-soft);
+  color: var(--text-primary);
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+/* Consistent, accessible focus for keyboard navigation. */
+:focus-visible {
+  outline: 2px solid var(--user-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
-::-webkit-scrollbar-thumb {
-  background: #2d2d3d;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3a3a4d;
-}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-subtle); }
 
 /* Remove native number input spinners */
 input[type="number"]::-webkit-inner-spin-button,
@@ -51,23 +178,29 @@ input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-input[type="number"] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
+/* ============================================================
+   SURFACE HELPERS (theme aware)
+   ============================================================ */
 .glass-card {
-  background: #0d0d14;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
-
 .glass-card-strong {
-  background: #0a0a10;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 14px;
 }
 
 .text-glow-emerald {
   text-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
 }
+
+/* Accent helper utilities (avoid hardcoded accent in components). */
+.bg-accent { background-color: var(--user-accent); }
+.bg-accent-soft { background-color: var(--user-accent-soft); }
+.text-accent { color: var(--user-accent); }
+.border-accent { border-color: var(--user-accent); }
+.border-accent-soft { border-color: color-mix(in srgb, var(--user-accent) 30%, transparent); }

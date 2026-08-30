@@ -20,6 +20,7 @@ export interface TradeInput {
   riskAmount?: number | null;
   resultAmount: number;
   resultType: "WIN" | "LOSS" | "BREAK EVEN";
+  resultOverrideReason?: string;
   htfBias?: string;
   ltfBias?: string;
   liquidityType?: string;
@@ -52,6 +53,47 @@ export interface TradeInput {
   lesson?: string;
   notes?: string;
   screenshotUrl?: string;
+  preTradeScreenshotUrl?: string;
+  postEntryScreenshotUrl?: string;
+  postExitScreenshotUrl?: string;
+  dxyScreenshotUrl?: string;
+  status?: string;
+  playbook?: string;
+  dxyBias?: string;
+  drawOnLiquidity?: string;
+  poi?: string;
+  entryZone?: string;
+  invalidation?: string;
+  timeStop?: string;
+  expectedSession?: string;
+  exitReason?: string;
+  dxyHtfBias?: string;
+  dxyH1Bias?: string;
+  dxyLocation?: string;
+  dxyLiquidityTarget?: string;
+  dxyConfirmation?: string;
+  us02y?: string;
+  us10y?: string;
+  realYield?: string;
+  intermarketConfirm?: string;
+  maeAmount?: number | null;
+  mfeAmount?: number | null;
+  maePrice?: number | null;
+  mfePrice?: number | null;
+  setupScore?: number | null;
+  executionScore?: number | null;
+  movedStopWithoutRule?: boolean;
+  movedBeEarly?: boolean;
+  increasedRisk?: boolean;
+  tradedDuringNews?: boolean;
+  chasedPrice?: boolean;
+  didNotWaitMss?: boolean;
+  ignoredHtf?: boolean;
+  ignoredMacro?: boolean;
+  ignoredDxy?: boolean;
+  tradedOutOfSession?: boolean;
+  tradedOutsidePlan?: boolean;
+  unrealizedPnl?: number | null;
   isDemo?: boolean;
 }
 
@@ -63,8 +105,26 @@ export interface ComputedTradeFields {
   resultPercent: number | null;
 }
 
-export function computeTradeFields(input: TradeInput): ComputedTradeFields {
+/**
+ * Automatic result determination:
+ * result > 0 => WIN, result < 0 => LOSS, result === 0 => BREAK EVEN.
+ * An explicit override is only honored if a documented reason is provided.
+ */
+export function resolveResultType(input: TradeInput): { resultType: "WIN" | "LOSS" | "BREAK EVEN" } {
+  const amount = Number(input.resultAmount) || 0;
+  const auto =
+    amount > 0 ? "WIN" : amount < 0 ? "LOSS" : "BREAK EVEN";
+  const desired = input.resultType;
+  if (desired && desired !== auto && input.resultOverrideReason && input.resultOverrideReason.trim().length > 0) {
+    return { resultType: desired };
+  }
+  return { resultType: auto };
+}
+
+export function computeTradeFields(input: TradeInput, forcedResultType?: "WIN" | "LOSS" | "BREAK EVEN"): ComputedTradeFields & { resultType: "WIN" | "LOSS" | "BREAK EVEN" } {
   const { entryPrice, stopLoss, takeProfit, accountBalanceAtTrade, riskPercent, resultAmount } = input;
+  const resolved = resolveResultType(input);
+  const resultType = forcedResultType || resolved.resultType;
 
   let riskAmount = input.riskAmount ?? null;
   if ((riskAmount === null || riskAmount === undefined) && accountBalanceAtTrade && riskPercent) {
@@ -92,7 +152,7 @@ export function computeTradeFields(input: TradeInput): ComputedTradeFields {
     resultPercent = (resultAmount / accountBalanceAtTrade) * 100;
   }
 
-  return { riskAmount, plannedRR, realizedRR, resultR, resultPercent };
+  return { riskAmount, plannedRR, realizedRR, resultR, resultPercent, resultType };
 }
 
 // Convert a DB row (decimals come back as strings from pg) into plain numbers for JSON.
@@ -105,6 +165,11 @@ export function serializeTrade(row: Record<string, unknown>) {
     "accountBalanceAtTrade",
     "riskAmount",
     "resultAmount",
+    "maeAmount",
+    "mfeAmount",
+    "maePrice",
+    "mfePrice",
+    "unrealizedPnl",
   ];
   const out: Record<string, unknown> = { ...row };
   for (const field of numericFields) {

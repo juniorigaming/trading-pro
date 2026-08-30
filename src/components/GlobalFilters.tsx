@@ -64,7 +64,7 @@ export default function GlobalFilters({ trades, filters, onChange }: Props) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Search size={16} className="text-slate-muted" />
-          <h3 className="text-sm font-bold text-white">Filtros Globais</h3>
+          <h3 className="text-sm font-bold text-text-primary">Filtros Globais</h3>
         </div>
         {JSON.stringify(filters) !== JSON.stringify(defaultFilters) && (
           <button onClick={() => onChange(defaultFilters)} className="text-[11px] text-emerald hover:underline font-medium">

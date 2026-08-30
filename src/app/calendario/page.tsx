@@ -47,7 +47,7 @@ export default function CalendarioPage() {
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
       <header className="mb-6 md:mb-8">
-        <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Calendário</h1>
+        <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Calendário</h1>
         <p className="text-sm text-slate-muted mt-1">Acompanhe seus resultados dia a dia</p>
       </header>
 
@@ -56,10 +56,10 @@ export default function CalendarioPage() {
       ) : (
         <div className="glass-card-strong p-5 md:p-6 mb-6">
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-lg font-extrabold text-white">{monthNames[month]} {year}</h2>
+            <h2 className="text-lg font-extrabold text-text-primary">{monthNames[month]} {year}</h2>
             <div className="flex gap-2">
-              <button onClick={() => changeMonth(-1)} className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 hover:text-white transition"><ChevronLeft size={18} /></button>
-              <button onClick={() => changeMonth(1)} className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 hover:text-white transition"><ChevronRight size={18} /></button>
+              <button onClick={() => changeMonth(-1)} className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 hover:text-text-primary transition"><ChevronLeft size={18} /></button>
+              <button onClick={() => changeMonth(1)} className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 hover:text-text-primary transition"><ChevronRight size={18} /></button>
             </div>
           </div>
 
@@ -103,17 +103,17 @@ export default function CalendarioPage() {
 
           <div className="mt-6 pt-5 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="glass-card p-4 rounded-xl">
-              <h3 className="text-xs font-bold text-white mb-1">Dias Operados</h3>
+              <h3 className="text-xs font-bold text-text-primary mb-1">Dias Operados</h3>
               <p className="text-2xl font-extrabold text-emerald">{daysOperated}</p>
               <p className="text-[10px] text-slate-muted">De {daysInMonth} dias no mês</p>
             </div>
             <div className="glass-card p-4 rounded-xl">
-              <h3 className="text-xs font-bold text-white mb-1">Win Rate por Dia</h3>
+              <h3 className="text-xs font-bold text-text-primary mb-1">Win Rate por Dia</h3>
               <p className="text-2xl font-extrabold text-emerald">{dayWinRate.toFixed(1)}%</p>
               <p className="text-[10px] text-slate-muted">Considerando dias com operação</p>
             </div>
             <div className="glass-card p-4 rounded-xl">
-              <h3 className="text-xs font-bold text-white mb-1">Resultado Mensal</h3>
+              <h3 className="text-xs font-bold text-text-primary mb-1">Resultado Mensal</h3>
               <p className={`text-2xl font-extrabold ${monthResult >= 0 ? "text-emerald" : "text-rose"}`}>{monthResult >= 0 ? "+" : ""}{formatCurrency(monthResult)}</p>
               <p className="text-[10px] text-slate-muted">Acumulado no mês</p>
             </div>
@@ -125,13 +125,13 @@ export default function CalendarioPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedDay(null)}>
           <div className="glass-card-strong p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-extrabold text-white">{new Date(selectedDay.date + "T00:00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}</h3>
-              <button onClick={() => setSelectedDay(null)} className="text-slate-muted hover:text-white"><X size={20} /></button>
+              <h3 className="text-lg font-extrabold text-text-primary">{new Date(selectedDay.date + "T00:00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}</h3>
+              <button onClick={() => setSelectedDay(null)} className="text-slate-muted hover:text-text-primary"><X size={20} /></button>
             </div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="glass-card p-3 rounded-xl text-center">
                 <p className="text-[10px] text-slate-muted uppercase">Operações</p>
-                <p className="text-xl font-extrabold text-white">{selectedDay.trades}</p>
+                <p className="text-xl font-extrabold text-text-primary">{selectedDay.trades}</p>
               </div>
               <div className="glass-card p-3 rounded-xl text-center">
                 <p className="text-[10px] text-slate-muted uppercase">Resultado</p>
@@ -144,6 +144,14 @@ export default function CalendarioPage() {
               <div className="glass-card p-3 rounded-xl text-center">
                 <p className="text-[10px] text-slate-muted uppercase">Resultado R</p>
                 <p className={`text-sm font-bold ${selectedDay.resultR >= 0 ? "text-emerald" : "text-rose"}`}>{formatR(selectedDay.resultR)}</p>
+              </div>
+              <div className="glass-card p-3 rounded-xl text-center">
+                <p className="text-[10px] text-slate-muted uppercase">Exec. Score</p>
+                <p className="text-sm font-bold text-text-primary">{selectedDay.avgExecutionScore ?? "—"}</p>
+              </div>
+              <div className="glass-card p-3 rounded-xl text-center">
+                <p className="text-[10px] text-slate-muted uppercase">Plano</p>
+                <p className="text-sm font-bold text-accent">{selectedDay.planAdherence != null ? `${selectedDay.planAdherence}%` : "—"}</p>
               </div>
             </div>
             <div className="mb-4">

@@ -67,6 +67,59 @@ export const trades = pgTable("trades", {
   lesson: text("lesson"),
   notes: text("notes"),
   screenshotUrl: text("screenshot_url"),
+  preTradeScreenshotUrl: text("pre_trade_screenshot_url"),
+  postEntryScreenshotUrl: text("post_entry_screenshot_url"),
+  postExitScreenshotUrl: text("post_exit_screenshot_url"),
+  dxyScreenshotUrl: text("dxy_screenshot_url"),
+
+  // Planning / lifecycle
+  status: text("status").notNull().default("CLOSED"), // WATCHLIST, PLANNED, WAITING_TRIGGER, READY, OPEN, CLOSED, CANCELLED
+  playbook: text("playbook"),
+  dxyBias: text("dxy_bias"),
+  drawOnLiquidity: text("draw_on_liquidity"),
+  poi: text("poi"),
+  entryZone: text("entry_zone"),
+  invalidation: text("invalidation"),
+  timeStop: text("time_stop"),
+  expectedSession: text("expected_session"),
+  exitReason: text("exit_reason"),
+
+  // Intermarket
+  dxyHtfBias: text("dxy_htf_bias"),
+  dxyH1Bias: text("dxy_h1_bias"),
+  dxyLocation: text("dxy_location"),
+  dxyLiquidityTarget: text("dxy_liquidity_target"),
+  dxyConfirmation: text("dxy_confirmation"),
+  us02y: text("us02y"),
+  us10y: text("us10y"),
+  realYield: text("real_yield"),
+  intermarketConfirm: text("intermarket_confirm"),
+
+  // MAE / MFE
+  maeAmount: decimal("mae_amount", { precision: 18, scale: 8 }),
+  mfeAmount: decimal("mfe_amount", { precision: 18, scale: 8 }),
+  maePrice: decimal("mae_price", { precision: 18, scale: 8 }),
+  mfePrice: decimal("mfe_price", { precision: 18, scale: 8 }),
+
+  // Scores
+  setupScore: integer("setup_score"),
+  executionScore: integer("execution_score"),
+
+  // Discipline flags
+  movedStopWithoutRule: boolean("moved_stop_without_rule").default(false),
+  movedBeEarly: boolean("moved_be_early").default(false),
+  increasedRisk: boolean("increased_risk").default(false),
+  tradedDuringNews: boolean("traded_during_news").default(false),
+  chasedPrice: boolean("chased_price").default(false),
+  didNotWaitMss: boolean("did_not_wait_mss").default(false),
+  ignoredHtf: boolean("ignored_htf").default(false),
+  ignoredMacro: boolean("ignored_macro").default(false),
+  ignoredDxy: boolean("ignored_dxy").default(false),
+  tradedOutOfSession: boolean("traded_out_of_session").default(false),
+  tradedOutsidePlan: boolean("traded_outside_plan").default(false),
+
+  unrealizedPnl: decimal("unrealized_pnl", { precision: 18, scale: 8 }),
+
   isDemo: boolean("is_demo").default(false),
 });
 
@@ -75,4 +128,38 @@ export const config = pgTable("config", {
   key: text("key").notNull().unique(),
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const macroCards = pgTable("macro_cards", {
+  id: serial("id").primaryKey(),
+  currency: text("currency").notNull().unique(),
+  bias: text("bias").notNull().default("Neutro"),
+  score: integer("score").notNull().default(0),
+  inflation: text("inflation").default("Neutral"),
+  employment: text("employment").default("Neutral"),
+  activity: text("activity").default("Neutral"),
+  centralBank: text("central_bank").default("Neutral"),
+  yieldDirection: text("yield_direction").default("Neutral"),
+  dxy: text("dxy").default("Neutral"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const dailyBias = pgTable("daily_bias", {
+  id: serial("id").primaryKey(),
+  date: text("date").notNull(),
+  currency: text("currency").notNull(),
+  session: text("session"),
+  inflation: text("inflation").default("Neutral"),
+  employment: text("employment").default("Neutral"),
+  activity: text("activity").default("Neutral"),
+  centralBank: text("central_bank").default("Neutral"),
+  yields: text("yields").default("Neutral"),
+  dxy: text("dxy").default("Neutral"),
+  biasFinal: text("bias_final").default("Neutro"),
+  conviction: integer("conviction").default(5),
+  thesis: text("thesis"),
+  invalidation: text("invalidation"),
+  dxyActual: text("dxy_actual"),
+  thesisResult: text("thesis_result"),
+  createdAt: timestamp("created_at").defaultNow(),
 });

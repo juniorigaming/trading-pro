@@ -43,7 +43,7 @@ export default function CapitalChart({ trades, initialCapital }: Props) {
     <div className="glass-card-strong p-5 md:p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h2 className="text-base font-bold text-white">Evolução do Capital</h2>
+          <h2 className="text-base font-bold text-text-primary">Evolução do Capital</h2>
           <p className="text-[11px] text-slate-muted mt-0.5">Saldo acumulado ao longo do período</p>
         </div>
         <div className="flex gap-1.5">
@@ -52,7 +52,7 @@ export default function CapitalChart({ trades, initialCapital }: Props) {
               key={r}
               onClick={() => setRange(r)}
               className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${
-                range === r ? "bg-emerald/15 text-emerald border border-emerald/20" : "text-slate-muted hover:text-white hover:bg-white/5"
+                range === r ? "bg-emerald/15 text-emerald border border-emerald/20" : "text-slate-muted hover:text-text-primary hover:bg-white/5"
               }`}
             >
               {r === "weekly" ? "Recentes" : r === "monthly" ? "Últimas 30 ops" : "Tudo"}
@@ -84,7 +84,7 @@ export default function CapitalChart({ trades, initialCapital }: Props) {
       <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-white/5">
         <div>
           <p className="text-[10px] text-slate-muted uppercase tracking-wider">Saldo Inicial</p>
-          <p className="text-sm font-bold text-white">{formatCurrency(initialCapital)}</p>
+          <p className="text-sm font-bold text-text-primary">{formatCurrency(initialCapital)}</p>
         </div>
         <div>
           <p className="text-[10px] text-slate-muted uppercase tracking-wider">Saldo Atual</p>

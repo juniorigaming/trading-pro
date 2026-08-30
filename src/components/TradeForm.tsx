@@ -6,6 +6,7 @@ import { Save, ImagePlus, X, AlertCircle } from "lucide-react";
 import { Trade, Config } from "@/lib/types";
 import { useConfig, useTrades } from "@/hooks/useTradeData";
 import { calculateMetrics } from "@/lib/calculations";
+import { setupScore, executionScore } from "@/lib/scores";
 import { formatCurrency } from "@/lib/utils";
 import NumberInput from "@/components/NumberInput";
 
@@ -231,6 +232,33 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     setFormError(null);
     setSubmitting(true);
 
+    const plannedRR = preview.plannedRR;
+    const scoreTrade = {
+      macroBias: form.macroBias,
+      dxyBias: form.dxyBias,
+      htfBias: form.htfBias,
+      drawOnLiquidity: form.liquidityType,
+      poi: form.liquidityType,
+      premiumDiscount: form.premiumDiscount,
+      displacement: form.displacement,
+      choch: form.choch,
+      fvg: form.fvg,
+      orderBlock: form.orderBlock,
+      trendConfirmation: form.trendConfirmation,
+      plannedRR,
+      riskPercent: parseFloat(form.riskPercent) || null,
+      liquiditySwept: form.liquiditySwept,
+    } as never;
+    const sScore = setupScore(scoreTrade)?.score ?? null;
+    const eScore = executionScore({
+      followedPlan: !!form.followedPlan,
+      earlyEntry: !!form.earlyEntry,
+      earlyExit: !!form.earlyExit,
+      revengeTrade: !!form.revengeTrade,
+      fomo: !!form.fomo,
+      overtrading: !!form.overtrading,
+    } as never)?.score ?? null;
+
     const payload = {
       date: form.date,
       time: form.time,
@@ -281,6 +309,8 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       lesson: form.lesson,
       notes: form.notes,
       screenshotUrl: form.screenshotUrl || null,
+      setupScore: sScore,
+      executionScore: eScore,
     };
 
     try {
@@ -317,7 +347,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               step === idx + 1 ? "bg-emerald/15 text-emerald border border-emerald/20" : "text-slate-muted hover:text-slate-200 border border-white/5 hover:bg-white/[0.03]"
             }`}
           >
-            <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-extrabold ${step === idx + 1 ? "bg-emerald text-white" : "bg-dark-800 text-slate-400"}`}>
+            <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-extrabold ${step === idx + 1 ? "bg-emerald text-text-primary" : "bg-dark-800 text-slate-400"}`}>
               {idx + 1}
             </span>
             {label}
@@ -377,21 +407,21 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               <FormSelect label="Londres capturou liquidez?" value={form.liquiditySwept} onChange={(v) => update("liquiditySwept", v)} options={["Sim", "Não", "Parcial"].map((s) => ({ value: s, label: s }))} />
             </div>
 
-            <h3 className="text-sm font-bold text-white mb-3">Estrutura</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-3">Estrutura</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-6">
               {STRUCTURE_FIELDS.map((item) => (
                 <CheckboxField key={item.key} label={item.label} checked={!!form[item.key as string]} onChange={(v) => update(item.key as string, v)} />
               ))}
             </div>
 
-            <h3 className="text-sm font-bold text-white mb-3">SMC</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-3">SMC</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-6">
               {SMC_FIELDS.map((item) => (
                 <CheckboxField key={item.key} label={item.label} checked={!!form[item.key as string]} onChange={(v) => update(item.key as string, v)} />
               ))}
             </div>
 
-            <h3 className="text-sm font-bold text-white mb-3">Contexto</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-3">Contexto</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {CONTEXT_FIELDS.map((item) => (
                 <CheckboxField key={item.key} label={item.label} checked={!!form[item.key as string]} onChange={(v) => update(item.key as string, v)} />
@@ -403,7 +433,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         {/* Step 4 - Macro & Discipline */}
         {step === 4 && (
           <div>
-            <h3 className="text-sm font-bold text-white mb-3">Macroeconomia</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-3">Macroeconomia</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               <FormSelect label="Evento" value={form.macroEvent} onChange={(v) => update("macroEvent", v)} options={["", "CPI", "NFP", "FOMC", "PCE", "GDP", "PMI", "Retail Sales", "Interest Rate", "Unemployment", "Outros"].map((s) => ({ value: s, label: s || "Nenhum" }))} />
               <FormField label="Moeda Afetada" value={form.macroCurrency} onChange={(v) => update("macroCurrency", v)} placeholder="USD" />
@@ -411,7 +441,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               <FormSelect label="Viés Macro" value={form.macroBias} onChange={(v) => update("macroBias", v)} options={["Bullish", "Bearish", "Neutro"].map((s) => ({ value: s, label: s }))} />
             </div>
 
-            <h3 className="text-sm font-bold text-white mb-3">Disciplina</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-3">Disciplina</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
               <CheckboxField label="Segui o Plano" checked={!!form.followedPlan} onChange={(v) => update("followedPlan", v)} />
               {DISCIPLINE_FIELDS.map((item) => (
@@ -419,7 +449,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               ))}
             </div>
 
-            <h3 className="text-sm font-bold text-white mb-3">Estado Emocional</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-3">Estado Emocional</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormSelect label="Antes da operação" value={form.emotionalBefore} onChange={(v) => update("emotionalBefore", v)} options={["Confiante", "Neutro", "Ansioso", "Com medo", "Eufórico", "Frustrado"].map((s) => ({ value: s, label: s }))} />
               <FormSelect label="Depois da operação" value={form.emotionalAfter} onChange={(v) => update("emotionalAfter", v)} options={["Satisfeito", "Neutro", "Frustrado", "Ansioso", "Eufórico"].map((s) => ({ value: s, label: s }))} />
@@ -447,7 +477,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
                 <div className="relative inline-block">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={form.screenshotUrl} alt="Screenshot" className="max-h-48 rounded-xl border border-white/10" />
-                  <button type="button" onClick={() => update("screenshotUrl", "")} className="absolute -top-2 -right-2 bg-rose text-white rounded-full p-1"><X size={14} /></button>
+                  <button type="button" onClick={() => update("screenshotUrl", "")} className="absolute -top-2 -right-2 bg-rose text-text-primary rounded-full p-1"><X size={14} /></button>
                 </div>
               ) : (
                 <label className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-white/10 text-slate-muted text-xs cursor-pointer hover:border-emerald/30 hover:text-emerald transition w-fit">
@@ -458,12 +488,12 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <textarea placeholder="O que eu fiz certo?" value={form.whatWentRight} onChange={(e) => update("whatWentRight", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
-              <textarea placeholder="O que eu fiz errado?" value={form.whatWentWrong} onChange={(e) => update("whatWentWrong", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
-              <textarea placeholder="O que devo repetir?" value={form.lesson} onChange={(e) => update("lesson", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
-              <textarea placeholder="Erros cometidos" value={form.mistakes} onChange={(e) => update("mistakes", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
+              <textarea placeholder="O que eu fiz certo?" value={form.whatWentRight} onChange={(e) => update("whatWentRight", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
+              <textarea placeholder="O que eu fiz errado?" value={form.whatWentWrong} onChange={(e) => update("whatWentWrong", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
+              <textarea placeholder="O que devo repetir?" value={form.lesson} onChange={(e) => update("lesson", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
+              <textarea placeholder="Erros cometidos" value={form.mistakes} onChange={(e) => update("mistakes", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
             </div>
-            <textarea placeholder="Observações e notas adicionais" value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={2} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
+            <textarea placeholder="Observações e notas adicionais" value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={2} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
           </div>
         )}
 
@@ -472,7 +502,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           <button
             type="button"
             onClick={() => setStep(Math.max(1, step - 1))}
-            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition ${step === 1 ? "invisible" : "bg-dark-800 text-white hover:bg-dark-700 border border-white/5"}`}
+            className={`px-4 py-2.5 rounded-xl text-sm font-bold transition ${step === 1 ? "invisible" : "bg-dark-800 text-text-primary hover:bg-dark-700 border border-white/5"}`}
           >
             Voltar
           </button>
@@ -480,7 +510,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             <button
               type="button"
               onClick={() => setStep(Math.min(steps.length, step + 1))}
-              className="px-5 py-2.5 bg-gradient-to-r from-emerald to-emerald-bright text-white text-sm font-bold rounded-xl shadow-[0_0_15px_rgba(16,185,129,0.2)] transition active:scale-[0.98]"
+              className="px-5 py-2.5 bg-accent text-white text-sm font-bold rounded-xl shadow-[0_0_15px_rgba(16,185,129,0.2)] transition active:scale-[0.98]"
             >
               Próximo
             </button>
@@ -488,7 +518,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             <button
               type="submit"
               disabled={submitting}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald to-emerald-bright hover:from-emerald-bright hover:to-emerald text-white text-sm font-bold rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.25)] transition active:scale-[0.98] disabled:opacity-60"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.25)] transition active:scale-[0.98] disabled:opacity-60"
             >
               <Save size={16} />
               {submitting ? "Salvando..." : trade ? "Atualizar Operação" : "Salvar Operação"}
@@ -501,7 +531,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 }
 
 function FormField({ label, type = "text", value, onChange, step, placeholder }: { label: string; type?: string; value: string | number; onChange: (v: string) => void; step?: string; placeholder?: string }) {
-  const base = "w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald/30 transition";
+  const base = "w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald/30 transition";
   if (type === "number") {
     return (
       <div className="flex flex-col gap-1.5">
@@ -532,7 +562,7 @@ function FormSelect({ label, value, onChange, options }: { label: string; value:
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald/30 transition appearance-none cursor-pointer"
+        className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-emerald/30 transition appearance-none cursor-pointer"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>

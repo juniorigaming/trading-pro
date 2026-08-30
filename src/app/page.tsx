@@ -7,8 +7,10 @@ import CapitalChart from "@/components/CapitalChart";
 import GlobalFilters, { FilterState, defaultFilters, applyFilters } from "@/components/GlobalFilters";
 import AlertCard from "@/components/AlertCard";
 import MetricTile from "@/components/MetricTile";
+import CommandCenter from "@/components/CommandCenter";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics, groupByAsset, groupBySession, groupBySetup, disciplineStats, buildCalendarData } from "@/lib/calculations";
+import { computeAccount } from "@/lib/account";
 import { formatCurrency, formatPercent, formatR, formatNumber } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -18,6 +20,7 @@ export default function DashboardPage() {
 
   const filteredTrades = useMemo(() => applyFilters(trades, filters), [trades, filters]);
   const initialCapital = config?.initialCapital ?? 10000;
+  const account = useMemo(() => computeAccount(trades, config), [trades, config]);
   const metrics = useMemo(() => calculateMetrics(filteredTrades, initialCapital), [filteredTrades, initialCapital]);
   const byAsset = useMemo(() => groupByAsset(filteredTrades).slice(0, 5), [filteredTrades]);
   const bySetup = useMemo(() => groupBySetup(filteredTrades).slice(0, 5), [filteredTrades]);
@@ -65,18 +68,21 @@ export default function DashboardPage() {
       <header className="mb-6 md:mb-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Dashboard</h1>
+            <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Dashboard</h1>
             <p className="text-sm text-slate-muted mt-1">Visão geral da sua performance de trading</p>
           </div>
           <Link
             href="/operacoes/novo"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald to-emerald-bright hover:from-emerald-bright hover:to-emerald text-white text-sm font-bold rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.25)] hover:shadow-[0_0_30px_rgba(16,185,129,0.35)] transition-all duration-300 active:scale-[0.98]"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-lg shadow-accent/20 transition-all duration-300 active:scale-[0.98]"
           >
             <Plus size={18} />
             Nova Operação
           </Link>
         </div>
       </header>
+
+      {/* Command Center */}
+      <CommandCenter />
 
       {hasDemo && (
         <div className="glass-card p-3.5 mb-6 flex flex-wrap items-center justify-between gap-3 border border-sky/20">
@@ -92,7 +98,7 @@ export default function DashboardPage() {
 
       {!hasDemo && trades.length === 0 && (
         <div className="glass-card p-5 mb-6 text-center">
-          <p className="text-sm text-slate-300 mb-3">Você ainda não tem operações registradas. Saldo inicial: <span className="font-bold text-white">{formatCurrency(initialCapital)}</span></p>
+          <p className="text-sm text-slate-300 mb-3">Você ainda não tem operações registradas. Saldo inicial: <span className="font-bold text-text-primary">{formatCurrency(initialCapital)}</span></p>
           <div className="flex justify-center gap-3">
             <Link href="/operacoes/novo" className="text-xs font-bold text-emerald hover:underline">+ Registrar primeira operação</Link>
             <button onClick={loadDemoData} className="text-xs font-bold text-sky hover:underline">Carregar dados de demonstração</button>
@@ -106,16 +112,16 @@ export default function DashboardPage() {
       {/* Key Metrics Row */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
-          label="Saldo Atual"
-          value={formatCurrency(metrics.currentCapital)}
-          sub={`Capital inicial: ${formatCurrency(initialCapital)}`}
-          positive={metrics.netResult >= 0}
+          label="Saldo Realizado"
+          value={formatCurrency(account.realizedBalance)}
+          sub={`Equity: ${formatCurrency(account.equity)}`}
+          positive={account.realizedPnl >= 0}
         />
         <StatCard
           label="Resultado Acumulado"
-          value={`${metrics.netResult >= 0 ? "+" : ""}${formatCurrency(metrics.netResult)}`}
-          sub={`Crescimento: ${metrics.growthPercent >= 0 ? "+" : ""}${formatNumber(metrics.growthPercent)}%`}
-          positive={metrics.netResult >= 0}
+          value={`${account.realizedPnl >= 0 ? "+" : ""}${formatCurrency(account.realizedPnl)}`}
+          sub={`Dep: ${formatCurrency(account.totalDeposits)} · Ret: ${formatCurrency(account.totalWithdrawals)}`}
+          positive={account.realizedPnl >= 0}
         />
         <StatCard
           label="Win Rate"
@@ -141,7 +147,7 @@ export default function DashboardPage() {
         <div className="space-y-4">
           <AlertCard metrics={metrics} config={config} discipline={discipline} />
           <div className="glass-card p-5">
-            <h3 className="text-sm font-bold text-white mb-4">Sequência Atual</h3>
+            <h3 className="text-sm font-bold text-text-primary mb-4">Sequência Atual</h3>
             <div className="flex gap-3">
               <div className="flex-1 bg-emerald/5 border border-emerald/10 rounded-lg p-3 text-center">
                 <span className="text-[10px] text-slate-muted uppercase">Wins</span>
@@ -176,14 +182,14 @@ export default function DashboardPage() {
             <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
               <BarChart3 size={16} className="text-violet" />
             </div>
-            <h2 className="text-base font-bold text-white">Por Ativo</h2>
+            <h2 className="text-base font-bold text-text-primary">Por Ativo</h2>
           </div>
           <div className="space-y-3">
             {byAsset.length === 0 && <EmptyRow />}
             {byAsset.map((item) => (
               <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
                 <div>
-                  <p className="text-sm font-bold text-white">{item.key}</p>
+                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
                   <p className="text-[10px] text-slate-muted">{item.trades} operações</p>
                 </div>
                 <div className="text-right">
@@ -201,14 +207,14 @@ export default function DashboardPage() {
             <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
               <Target size={16} className="text-violet" />
             </div>
-            <h2 className="text-base font-bold text-white">Por Setup</h2>
+            <h2 className="text-base font-bold text-text-primary">Por Setup</h2>
           </div>
           <div className="space-y-3">
             {bySetup.length === 0 && <EmptyRow />}
             {bySetup.map((item) => (
               <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
                 <div>
-                  <p className="text-sm font-bold text-white">{item.key}</p>
+                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
                   <p className="text-[10px] text-slate-muted">{item.trades} ops · PF: {item.profitFactor === Infinity ? "∞" : formatNumber(item.profitFactor)}</p>
                 </div>
                 <div className="text-right">
@@ -226,14 +232,14 @@ export default function DashboardPage() {
             <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
               <Clock size={16} className="text-violet" />
             </div>
-            <h2 className="text-base font-bold text-white">Por Sessão</h2>
+            <h2 className="text-base font-bold text-text-primary">Por Sessão</h2>
           </div>
           <div className="space-y-3">
             {bySession.length === 0 && <EmptyRow />}
             {bySession.map((item) => (
               <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
                 <div>
-                  <p className="text-sm font-bold text-white">{item.key}</p>
+                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
                   <p className="text-[10px] text-slate-muted">{item.trades} operações</p>
                 </div>
                 <div className="text-right">
@@ -252,7 +258,7 @@ export default function DashboardPage() {
           <div className="w-8 h-8 rounded-lg bg-rose/10 border border-rose/10 flex items-center justify-center">
             <ShieldCheck size={16} className="text-rose" />
           </div>
-          <h2 className="text-base font-bold text-white">Disciplina</h2>
+          <h2 className="text-base font-bold text-text-primary">Disciplina</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricTile label="Dentro do Plano" value={filteredTrades.length > 0 ? `${formatNumber(discipline.followedPercent, 0)}%` : "—"} sub={`${discipline.followedPlan} / ${filteredTrades.length} operações`} color="emerald" />
@@ -263,7 +269,7 @@ export default function DashboardPage() {
         <div className="mt-5 pt-4 border-t border-white/5">
           <div className="flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-white">Status da Estratégia</h4>
+              <h4 className="text-sm font-bold text-text-primary">Status da Estratégia</h4>
               <p className="text-xs text-slate-muted">Considerando as operações filtradas</p>
             </div>
             <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
@@ -281,7 +287,7 @@ export default function DashboardPage() {
       <section className="glass-card-strong p-5 md:p-6">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h2 className="text-base font-bold text-white">Calendário de Trading</h2>
+            <h2 className="text-base font-bold text-text-primary">Calendário de Trading</h2>
             <p className="text-[11px] text-slate-muted mt-0.5">Últimos 14 dias com registro</p>
           </div>
           <Link href="/calendario" className="text-xs text-emerald font-medium hover:underline flex items-center gap-1">Ver completo <ChevronRight size={14} /></Link>

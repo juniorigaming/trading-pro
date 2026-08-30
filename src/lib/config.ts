@@ -18,11 +18,39 @@ export const DEFAULT_CONFIG: Config = {
   sessionLondonEnd: "06:00",
   sessionNYStart: "08:00",
   sessionNYEnd: "13:00",
+  totalDeposits: 0,
+  totalWithdrawals: 0,
+  weeklyRiskLimit: 5,
+  monthlyDrawdownLimit: 10,
+  maxOpenRisk: 2,
+  maxCorrelatedExposure: 3,
+  maxTradesPerDay: 5,
+  sampleSizeWarning: 30,
+  sampleSizeLow: 10,
+  theme: "system",
+  accentColor: "green",
+  density: "comfortable",
 };
 
 const CONFIG_KEY = "settings";
 
-const NUMERIC_KEYS = ["initialCapital", "riskPerTrade", "riskPercent", "dailyGoal", "dailyLossLimit", "maxDrawdown"] as const;
+const NUMERIC_KEYS = [
+  "initialCapital",
+  "riskPerTrade",
+  "riskPercent",
+  "dailyGoal",
+  "dailyLossLimit",
+  "maxDrawdown",
+  "totalDeposits",
+  "totalWithdrawals",
+  "weeklyRiskLimit",
+  "monthlyDrawdownLimit",
+  "maxOpenRisk",
+  "maxCorrelatedExposure",
+  "maxTradesPerDay",
+  "sampleSizeWarning",
+  "sampleSizeLow",
+] as const;
 
 // Coerce numeric fields: values may have been saved as strings from form inputs.
 export function normalizeConfig(raw: Partial<Config>): Config {

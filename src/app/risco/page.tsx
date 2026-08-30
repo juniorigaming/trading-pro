@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import { ShieldCheck, AlertTriangle, Save } from "lucide-react";
+import { ShieldCheck, AlertTriangle, Save, PauseCircle } from "lucide-react";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics, buildCalendarData } from "@/lib/calculations";
+import { computeAccount } from "@/lib/account";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import NumberInput from "@/components/NumberInput";
+import PositionSizeCalculator from "@/components/PositionSizeCalculator";
 
 export default function RiscoPage() {
   const { trades } = useTrades();
@@ -28,6 +30,7 @@ export default function RiscoPage() {
 
   const initialCapital = config?.initialCapital ?? 10000;
   const metrics = useMemo(() => calculateMetrics(trades, initialCapital), [trades, initialCapital]);
+  const account = useMemo(() => computeAccount(trades, config), [trades, config]);
   const calendarMap = useMemo(() => buildCalendarData(trades), [trades]);
 
   const todayKey = new Date().toISOString().split("T")[0];
@@ -55,13 +58,13 @@ export default function RiscoPage() {
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
       <header className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">Gestão de Risco</h1>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Gestão de Risco</h1>
           <p className="text-sm text-slate-muted mt-1">Controle de risco e limites da conta</p>
         </div>
         {!editing ? (
           <button onClick={() => setEditing(true)} className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald/10 border border-emerald/30 text-emerald text-xs font-bold rounded-xl hover:bg-emerald/20 transition">Editar limites</button>
         ) : (
-          <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-emerald to-emerald-bright text-white text-xs font-bold rounded-xl transition disabled:opacity-60">
+          <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 px-4 py-2 bg-accent text-white text-xs font-bold rounded-xl transition disabled:opacity-60">
             <Save size={14} /> {saving ? "Salvando..." : "Salvar"}
           </button>
         )}
@@ -70,7 +73,7 @@ export default function RiscoPage() {
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="glass-card p-5">
           <h3 className="text-xs font-bold text-slate-muted uppercase tracking-wider mb-1">Capital Inicial</h3>
-          <p className="text-2xl font-extrabold text-white">{formatCurrency(initialCapital)}</p>
+          <p className="text-2xl font-extrabold text-text-primary">{formatCurrency(initialCapital)}</p>
         </div>
         <div className="glass-card p-5">
           <h3 className="text-xs font-bold text-slate-muted uppercase tracking-wider mb-1">Risco por Operação</h3>
@@ -108,7 +111,7 @@ export default function RiscoPage() {
       </section>
 
       <section className="glass-card-strong p-5 md:p-6 mb-6">
-        <h2 className="text-base font-bold text-white mb-4">Limites Configurados</h2>
+        <h2 className="text-base font-bold text-text-primary mb-4">Limites Configurados</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="glass-card p-4 rounded-xl">
             <h4 className="text-xs font-bold text-slate-muted uppercase mb-2">Limite de Drawdown</h4>
@@ -141,8 +144,26 @@ export default function RiscoPage() {
         </div>
       </section>
 
+      {/* Risk Engine Status */}
+      <section className="glass-card-strong p-5 md:p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-bold text-text-primary">Risk Engine</h2>
+          {account.riskUsedToday >= (config?.riskPercent || 2.5) * (account.equity / 100) * (config?.maxTradesPerDay || 5) ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose/10 text-rose border border-rose/20 text-[11px] font-bold"><PauseCircle size={12} /> TRADING PAUSED</span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald/10 text-emerald border border-emerald/20 text-[11px] font-bold">Trading ativo</span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <RiskCard label="Risk Used Today" value={`${formatNumber(account.riskUsedTodayPercent)}%`} sub={`${formatCurrency(account.riskUsedToday)}`} />
+          <RiskCard label="Risk Remaining" value={formatCurrency(account.riskRemaining)} sub="hoje" />
+          <RiskCard label="Weekly Risk" value={`${formatNumber(Math.min(100, account.weeklyRiskUsedPercent))}%`} sub={`de ${formatNumber(config?.weeklyRiskLimit || 5)}%`} />
+          <RiskCard label="Open Risk" value={`${formatNumber((account.openRisk / (account.equity || 1)) * 100)}%`} sub={`max ${formatNumber(config?.maxOpenRisk || 2)}%`} />
+        </div>
+      </section>
+
       <section className="glass-card-strong p-5 md:p-6">
-        <h2 className="text-base font-bold text-white mb-4">Alertas Ativos</h2>
+        <h2 className="text-base font-bold text-text-primary mb-4">Alertas Ativos</h2>
         <div className="space-y-3">
           {ddProgress >= 50 && (
             <div className="flex items-start gap-3 p-3 rounded-xl bg-amber/5 border border-amber/10">
@@ -163,10 +184,25 @@ export default function RiscoPage() {
             </div>
           )}
           {ddProgress < 50 && metrics.currentLossSequence < 3 && (
-            <p className="text-xs text-slate-muted text-center py-4">Nenhum alerta de risco no momento.</p>
+            <p className="text-xs text-text-muted text-center py-4">Nenhum alerta de risco no momento.</p>
           )}
         </div>
       </section>
+
+      {/* Position Size Calculator */}
+      <section className="glass-card-strong p-5 md:p-6">
+        <PositionSizeCalculator />
+      </section>
+    </div>
+  );
+}
+
+function RiskCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="glass-card p-3 rounded-xl">
+      <p className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">{label}</p>
+      <p className="text-sm font-extrabold text-text-primary mt-0.5">{value}</p>
+      <p className="text-[10px] text-text-muted">{sub}</p>
     </div>
   );
 }

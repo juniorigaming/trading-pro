@@ -71,6 +71,8 @@ export interface DayResult {
   breakEven: number;
   resultR: number;
   assets: string[];
+  avgExecutionScore: number | null;
+  planAdherence: number | null;
 }
 
 export function buildCalendarData(trades: Trade[]): Map<string, DayResult> {
@@ -78,7 +80,7 @@ export function buildCalendarData(trades: Trade[]): Map<string, DayResult> {
   trades.forEach((t) => {
     const key = new Date(t.date).toISOString().split("T")[0];
     if (!map.has(key)) {
-      map.set(key, { date: key, result: 0, trades: 0, wins: 0, losses: 0, breakEven: 0, resultR: 0, assets: [] });
+      map.set(key, { date: key, result: 0, trades: 0, wins: 0, losses: 0, breakEven: 0, resultR: 0, assets: [], avgExecutionScore: null, planAdherence: null });
     }
     const entry = map.get(key)!;
     entry.result += t.resultAmount || 0;
@@ -88,6 +90,12 @@ export function buildCalendarData(trades: Trade[]): Map<string, DayResult> {
     else if (t.resultType === "LOSS") entry.losses += 1;
     else entry.breakEven += 1;
     if (!entry.assets.includes(t.asset)) entry.assets.push(t.asset);
+    if (t.executionScore != null) {
+      entry.avgExecutionScore = entry.avgExecutionScore == null ? t.executionScore : Math.round((entry.avgExecutionScore + t.executionScore) / 2);
+    }
+    if (t.followedPlan !== undefined) {
+      entry.planAdherence = entry.planAdherence == null ? (t.followedPlan ? 100 : 0) : Math.round((entry.planAdherence + (t.followedPlan ? 100 : 0)) / 2);
+    }
   });
   return map;
 }

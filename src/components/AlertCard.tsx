@@ -76,7 +76,7 @@ export default function AlertCard({ metrics, config, discipline }: Props) {
           <style.Icon size={18} className={style.icon} />
         </div>
         <div>
-          <h4 className="text-sm font-bold text-white">Alertas Automáticos</h4>
+          <h4 className="text-sm font-bold text-text-primary">Alertas Automáticos</h4>
           <p className="text-xs text-slate-muted mt-1">{alert.message}</p>
           {alerts.length > 1 && (
             <div className="mt-2 flex flex-wrap gap-1.5">

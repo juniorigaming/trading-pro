@@ -54,6 +54,47 @@ export interface Trade {
   lesson?: string;
   notes?: string;
   screenshotUrl?: string;
+  preTradeScreenshotUrl?: string;
+  postEntryScreenshotUrl?: string;
+  postExitScreenshotUrl?: string;
+  dxyScreenshotUrl?: string;
+  status?: "WATCHLIST" | "PLANNED" | "WAITING_TRIGGER" | "READY" | "OPEN" | "CLOSED" | "CANCELLED";
+  playbook?: string;
+  dxyBias?: string;
+  drawOnLiquidity?: string;
+  poi?: string;
+  entryZone?: string;
+  invalidation?: string;
+  timeStop?: string;
+  expectedSession?: string;
+  exitReason?: string;
+  dxyHtfBias?: string;
+  dxyH1Bias?: string;
+  dxyLocation?: string;
+  dxyLiquidityTarget?: string;
+  dxyConfirmation?: string;
+  us02y?: string;
+  us10y?: string;
+  realYield?: string;
+  intermarketConfirm?: string;
+  maeAmount?: number;
+  mfeAmount?: number;
+  maePrice?: number;
+  mfePrice?: number;
+  setupScore?: number;
+  executionScore?: number;
+  movedStopWithoutRule?: boolean;
+  movedBeEarly?: boolean;
+  increasedRisk?: boolean;
+  tradedDuringNews?: boolean;
+  chasedPrice?: boolean;
+  didNotWaitMss?: boolean;
+  ignoredHtf?: boolean;
+  ignoredMacro?: boolean;
+  ignoredDxy?: boolean;
+  tradedOutOfSession?: boolean;
+  tradedOutsidePlan?: boolean;
+  unrealizedPnl?: number;
   isDemo?: boolean;
 }
 
@@ -72,4 +113,20 @@ export interface Config {
   sessionLondonEnd: string;
   sessionNYStart: string;
   sessionNYEnd: string;
+  // Account source of truth
+  totalDeposits: number;
+  totalWithdrawals: number;
+  // Risk engine limits
+  weeklyRiskLimit: number;
+  monthlyDrawdownLimit: number;
+  maxOpenRisk: number;
+  maxCorrelatedExposure: number;
+  maxTradesPerDay: number;
+  // Statistics thresholds
+  sampleSizeWarning: number;
+  sampleSizeLow: number;
+  // Appearance (synced with localStorage)
+  theme: "dark" | "light" | "system";
+  accentColor: "green" | "blue" | "purple" | "cyan";
+  density: "compact" | "comfortable";
 }

@@ -29,7 +29,23 @@ export function useTrades() {
   return { trades, loading, error, refetch };
 }
 
-const CONFIG_NUMERIC_KEYS = ["initialCapital", "riskPerTrade", "riskPercent", "dailyGoal", "dailyLossLimit", "maxDrawdown"] as const;
+const CONFIG_NUMERIC_KEYS = [
+  "initialCapital",
+  "riskPerTrade",
+  "riskPercent",
+  "dailyGoal",
+  "dailyLossLimit",
+  "maxDrawdown",
+  "totalDeposits",
+  "totalWithdrawals",
+  "weeklyRiskLimit",
+  "monthlyDrawdownLimit",
+  "maxOpenRisk",
+  "maxCorrelatedExposure",
+  "maxTradesPerDay",
+  "sampleSizeWarning",
+  "sampleSizeLow",
+] as const;
 
 const CONFIG_DEFAULTS: Record<(typeof CONFIG_NUMERIC_KEYS)[number], number> = {
   initialCapital: 10000,
@@ -38,6 +54,15 @@ const CONFIG_DEFAULTS: Record<(typeof CONFIG_NUMERIC_KEYS)[number], number> = {
   dailyGoal: 500,
   dailyLossLimit: 350,
   maxDrawdown: 15,
+  totalDeposits: 0,
+  totalWithdrawals: 0,
+  weeklyRiskLimit: 5,
+  monthlyDrawdownLimit: 10,
+  maxOpenRisk: 2,
+  maxCorrelatedExposure: 3,
+  maxTradesPerDay: 5,
+  sampleSizeWarning: 30,
+  sampleSizeLow: 10,
 };
 
 function coerceConfig(data: Config): Config {
