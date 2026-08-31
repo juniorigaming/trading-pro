@@ -361,7 +361,23 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(e) => {
+          // Impede que pressionar Enter em um campo envie o formulário
+          // automaticamente (comportamento padrão do HTML), o que salvava a
+          // operação antes de o usuário terminar de preencher os campos.
+          if (
+            e.key === "Enter" &&
+            e.target instanceof HTMLElement &&
+            e.target.tagName !== "TEXTAREA" &&
+            !(e.target instanceof HTMLButtonElement)
+          ) {
+            e.preventDefault();
+          }
+        }}
+        className="space-y-6"
+      >
         {/* Step 1 */}
         {step === 1 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
