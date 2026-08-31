@@ -31,6 +31,13 @@ export async function POST(request: Request) {
 
     const [inserted] = await db.insert(trades).values(values).returning();
 
+    // Quando o usuário registra uma operação real (não demo), remove os dados
+    // de demonstração para que eles não continuem aparecendo no jornal junto
+    // com as operações reais.
+    if (!body.isDemo) {
+      await db.delete(trades).where(eq(trades.isDemo, true));
+    }
+
     return Response.json(serializeTrade(inserted), { status: 201 });
   } catch (error) {
     console.error(error);
