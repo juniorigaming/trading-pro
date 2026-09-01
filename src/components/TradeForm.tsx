@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save, ImagePlus, X, AlertCircle } from "lucide-react";
 import { Trade, Config } from "@/lib/types";
@@ -141,6 +141,9 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Guarda síncrona contra envio duplicado (duplo clique / Enter repetido),
+  // que criava duas operações idênticas quando o usuário salvava uma única vez.
+  const submittingRef = useRef(false);
 
   const suggestedBalance = useMemo(() => {
     if (!config) return 10000;
@@ -224,96 +227,100 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const err = validate();
-    if (err) {
-      setFormError(err);
-      return;
-    }
-    setFormError(null);
+    // Se já há um envio em andamento, ignora (evita operação duplicada quando o
+    // usuário clica no Salvar ou pressiona Enter mais de uma vez).
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
-
-    const plannedRR = preview.plannedRR;
-    const scoreTrade = {
-      macroBias: form.macroBias,
-      dxyBias: form.dxyBias,
-      htfBias: form.htfBias,
-      drawOnLiquidity: form.liquidityType,
-      poi: form.liquidityType,
-      premiumDiscount: form.premiumDiscount,
-      displacement: form.displacement,
-      choch: form.choch,
-      fvg: form.fvg,
-      orderBlock: form.orderBlock,
-      trendConfirmation: form.trendConfirmation,
-      plannedRR,
-      riskPercent: parseFloat(form.riskPercent) || null,
-      liquiditySwept: form.liquiditySwept,
-    } as never;
-    const sScore = setupScore(scoreTrade)?.score ?? null;
-    const eScore = executionScore({
-      followedPlan: !!form.followedPlan,
-      earlyEntry: !!form.earlyEntry,
-      earlyExit: !!form.earlyExit,
-      revengeTrade: !!form.revengeTrade,
-      fomo: !!form.fomo,
-      overtrading: !!form.overtrading,
-    } as never)?.score ?? null;
-
-    const payload = {
-      date: form.date,
-      time: form.time,
-      asset: form.asset,
-      direction: form.direction,
-      session: form.session,
-      timeframeEntry: form.timeframeEntry,
-      timeframeContext: form.timeframeContext,
-      setup: form.setup,
-      entryPrice: form.entryPrice ? parseFloat(form.entryPrice) : null,
-      stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : null,
-      takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : null,
-      positionSize: form.positionSize ? parseFloat(form.positionSize) : null,
-      accountBalanceAtTrade: form.accountBalanceAtTrade ? parseFloat(form.accountBalanceAtTrade) : null,
-      riskPercent: form.riskPercent ? parseFloat(form.riskPercent) : null,
-      riskAmount: form.riskAmount ? parseFloat(form.riskAmount) : preview.riskAmount,
-      resultAmount: parseFloat(form.resultAmount) || 0,
-      resultType: form.resultType,
-      htfBias: form.htfBias,
-      ltfBias: form.ltfBias,
-      liquidityType: form.liquidityType,
-      liquiditySwept: form.liquiditySwept,
-      bos: !!form.bos,
-      choch: !!form.choch,
-      fvg: !!form.fvg,
-      orderBlock: !!form.orderBlock,
-      breaker: !!form.breaker,
-      sweepLiquidity: !!form.sweepLiquidity,
-      displacement: !!form.displacement,
-      trendConfirmation: !!form.trendConfirmation,
-      amd: !!form.amd,
-      premiumDiscount: form.premiumDiscount,
-      macroEvent: form.macroEvent,
-      macroCurrency: form.macroCurrency,
-      macroImpact: form.macroImpact,
-      macroBias: form.macroBias,
-      followedPlan: !!form.followedPlan,
-      earlyEntry: !!form.earlyEntry,
-      earlyExit: !!form.earlyExit,
-      revengeTrade: !!form.revengeTrade,
-      fomo: !!form.fomo,
-      overtrading: !!form.overtrading,
-      emotionalBefore: form.emotionalBefore,
-      emotionalAfter: form.emotionalAfter,
-      mistakes: form.mistakes,
-      whatWentRight: form.whatWentRight,
-      whatWentWrong: form.whatWentWrong,
-      lesson: form.lesson,
-      notes: form.notes,
-      screenshotUrl: form.screenshotUrl || null,
-      setupScore: sScore,
-      executionScore: eScore,
-    };
-
     try {
+      const err = validate();
+      if (err) {
+        setFormError(err);
+        return;
+      }
+      setFormError(null);
+
+      const plannedRR = preview.plannedRR;
+      const scoreTrade = {
+        macroBias: form.macroBias,
+        dxyBias: form.dxyBias,
+        htfBias: form.htfBias,
+        drawOnLiquidity: form.liquidityType,
+        poi: form.liquidityType,
+        premiumDiscount: form.premiumDiscount,
+        displacement: form.displacement,
+        choch: form.choch,
+        fvg: form.fvg,
+        orderBlock: form.orderBlock,
+        trendConfirmation: form.trendConfirmation,
+        plannedRR,
+        riskPercent: parseFloat(form.riskPercent) || null,
+        liquiditySwept: form.liquiditySwept,
+      } as never;
+      const sScore = setupScore(scoreTrade)?.score ?? null;
+      const eScore = executionScore({
+        followedPlan: !!form.followedPlan,
+        earlyEntry: !!form.earlyEntry,
+        earlyExit: !!form.earlyExit,
+        revengeTrade: !!form.revengeTrade,
+        fomo: !!form.fomo,
+        overtrading: !!form.overtrading,
+      } as never)?.score ?? null;
+
+      const payload = {
+        date: form.date,
+        time: form.time,
+        asset: form.asset,
+        direction: form.direction,
+        session: form.session,
+        timeframeEntry: form.timeframeEntry,
+        timeframeContext: form.timeframeContext,
+        setup: form.setup,
+        entryPrice: form.entryPrice ? parseFloat(form.entryPrice) : null,
+        stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : null,
+        takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : null,
+        positionSize: form.positionSize ? parseFloat(form.positionSize) : null,
+        accountBalanceAtTrade: form.accountBalanceAtTrade ? parseFloat(form.accountBalanceAtTrade) : null,
+        riskPercent: form.riskPercent ? parseFloat(form.riskPercent) : null,
+        riskAmount: form.riskAmount ? parseFloat(form.riskAmount) : preview.riskAmount,
+        resultAmount: parseFloat(form.resultAmount) || 0,
+        resultType: form.resultType,
+        htfBias: form.htfBias,
+        ltfBias: form.ltfBias,
+        liquidityType: form.liquidityType,
+        liquiditySwept: form.liquiditySwept,
+        bos: !!form.bos,
+        choch: !!form.choch,
+        fvg: !!form.fvg,
+        orderBlock: !!form.orderBlock,
+        breaker: !!form.breaker,
+        sweepLiquidity: !!form.sweepLiquidity,
+        displacement: !!form.displacement,
+        trendConfirmation: !!form.trendConfirmation,
+        amd: !!form.amd,
+        premiumDiscount: form.premiumDiscount,
+        macroEvent: form.macroEvent,
+        macroCurrency: form.macroCurrency,
+        macroImpact: form.macroImpact,
+        macroBias: form.macroBias,
+        followedPlan: !!form.followedPlan,
+        earlyEntry: !!form.earlyEntry,
+        earlyExit: !!form.earlyExit,
+        revengeTrade: !!form.revengeTrade,
+        fomo: !!form.fomo,
+        overtrading: !!form.overtrading,
+        emotionalBefore: form.emotionalBefore,
+        emotionalAfter: form.emotionalAfter,
+        mistakes: form.mistakes,
+        whatWentRight: form.whatWentRight,
+        whatWentWrong: form.whatWentWrong,
+        lesson: form.lesson,
+        notes: form.notes,
+        screenshotUrl: form.screenshotUrl || null,
+        setupScore: sScore,
+        executionScore: eScore,
+      };
+
       const url = trade ? `/api/trades/${trade.id}` : "/api/trades";
       const method = trade ? "PUT" : "POST";
       const res = await fetch(url, {
@@ -330,6 +337,8 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Erro ao salvar operação");
     } finally {
+      // Libera a guarda para permitir uma nova tentativa.
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

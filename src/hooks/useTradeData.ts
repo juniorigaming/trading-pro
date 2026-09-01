@@ -10,7 +10,7 @@ export function useTrades() {
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/trades", { cache: "no-store" });
+      const res = await fetch(`/api/trades?t=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Falha ao carregar operações");
       const data = await res.json();
       setTrades(data);
@@ -22,11 +22,17 @@ export function useTrades() {
     }
   }, []);
 
+  // Remove uma operação da lista em memória imediatamente, sem depender do
+  // servidor/cache — faz a tela refletir a exclusão na hora (sem F5).
+  const removeTrade = useCallback((id: number) => {
+    setTrades((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   useEffect(() => {
     refetch();
   }, [refetch]);
 
-  return { trades, loading, error, refetch };
+  return { trades, loading, error, refetch, removeTrade };
 }
 
 const CONFIG_NUMERIC_KEYS = [

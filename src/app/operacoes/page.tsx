@@ -8,7 +8,7 @@ import { formatCurrency, formatR } from "@/lib/utils";
 import { Trade } from "@/lib/types";
 
 export default function OperacoesPage() {
-  const { trades, loading, refetch } = useTrades();
+  const { trades, loading, refetch, removeTrade } = useTrades();
   const [search, setSearch] = useState("");
   const [resultFilter, setResultFilter] = useState("Todos");
   const [assetFilter, setAssetFilter] = useState("all");
@@ -36,7 +36,9 @@ export default function OperacoesPage() {
     try {
       const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Não foi possível excluir a operação.");
-      // Atualiza a lista imediatamente (sem precisar de F5).
+      // Remove da lista local imediatamente, sem esperar refetch nem F5.
+      removeTrade(id);
+      // Atualiza em segundo plano para manter consistência com o servidor.
       await refetch();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Erro ao excluir a operação.");

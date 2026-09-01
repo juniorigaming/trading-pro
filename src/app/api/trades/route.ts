@@ -14,7 +14,11 @@ export async function GET() {
       .from(trades)
       .where(eq(trades.isDemo, false))
       .orderBy(desc(trades.date), desc(trades.time));
-    return Response.json(rows.map(serializeTrade));
+    // Garante que nem o navegador, nem o CDN/edge da Cloudflare, guardem esta
+    // resposta — assim a listagem reflete exclusões/criações na hora (sem F5).
+    return Response.json(rows.map(serializeTrade), {
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+    });
   } catch (error) {
     console.error(error);
     return Response.json({ error: "Failed to load trades" }, { status: 500 });
@@ -43,7 +47,10 @@ export async function POST(request: Request) {
       await getDb().delete(trades).where(eq(trades.isDemo, true));
     }
 
-    return Response.json(serializeTrade(inserted), { status: 201 });
+    return Response.json(serializeTrade(inserted), {
+      status: 201,
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+    });
   } catch (error) {
     console.error(error);
     return Response.json({ error: "Failed to create trade" }, { status: 500 });

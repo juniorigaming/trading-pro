@@ -6,13 +6,15 @@ import { mapTradeValues } from "@/lib/trade-mapper";
 
 export const dynamic = "force-dynamic";
 
+const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } as const;
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const rows = await getDb().select().from(trades).where(eq(trades.id, Number(id))).limit(1);
   if (rows.length === 0) {
-    return Response.json({ error: "Trade not found" }, { status: 404 });
+    return Response.json({ error: "Trade not found" }, { status: 404, headers: NO_STORE });
   }
-  return Response.json(serializeTrade(rows[0]));
+  return Response.json(serializeTrade(rows[0]), { headers: NO_STORE });
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -36,10 +38,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       .returning();
 
     if (!updated) {
-      return Response.json({ error: "Trade not found" }, { status: 404 });
+      return Response.json({ error: "Trade not found" }, { status: 404, headers: NO_STORE });
     }
 
-    return Response.json(serializeTrade(updated));
+    return Response.json(serializeTrade(updated), { headers: NO_STORE });
   } catch (error) {
     console.error(error);
     return Response.json({ error: "Failed to update trade" }, { status: 500 });
@@ -50,7 +52,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   try {
     const { id } = await params;
     await getDb().delete(trades).where(eq(trades.id, Number(id)));
-    return Response.json({ ok: true });
+    return Response.json({ ok: true }, { headers: NO_STORE });
   } catch (error) {
     console.error(error);
     return Response.json({ error: "Failed to delete trade" }, { status: 500 });
