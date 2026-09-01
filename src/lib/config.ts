@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { config } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { Config } from "./types";
@@ -63,7 +63,7 @@ export function normalizeConfig(raw: Partial<Config>): Config {
 }
 
 export async function getConfig(): Promise<Config> {
-  const rows = await db.select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
+  const rows = await getDb().select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
   if (rows.length === 0) {
     return DEFAULT_CONFIG;
   }
@@ -78,11 +78,11 @@ export async function getConfig(): Promise<Config> {
 export async function saveConfig(newConfig: Partial<Config>): Promise<Config> {
   const current = await getConfig();
   const merged = normalizeConfig({ ...current, ...newConfig });
-  const rows = await db.select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
+  const rows = await getDb().select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
   if (rows.length === 0) {
-    await db.insert(config).values({ key: CONFIG_KEY, value: JSON.stringify(merged) });
+    await getDb().insert(config).values({ key: CONFIG_KEY, value: JSON.stringify(merged) });
   } else {
-    await db.update(config).set({ value: JSON.stringify(merged), updatedAt: new Date() }).where(eq(config.key, CONFIG_KEY));
+    await getDb().update(config).set({ value: JSON.stringify(merged), updatedAt: new Date() }).where(eq(config.key, CONFIG_KEY));
   }
   return merged;
 }

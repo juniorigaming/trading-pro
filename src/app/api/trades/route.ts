@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { trades } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { serializeTrade, TradeInput } from "@/lib/trade-utils";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     // Exclui os dados de demonstração (isDemo) da listagem principal.
-    const rows = await db
+    const rows = await getDb()
       .select()
       .from(trades)
       .where(eq(trades.isDemo, false))
@@ -34,13 +34,13 @@ export async function POST(request: Request) {
 
     const { db: values } = mapTradeValues(body);
 
-    const [inserted] = await db.insert(trades).values(values).returning();
+    const [inserted] = await getDb().insert(trades).values(values).returning();
 
     // Quando o usuário registra uma operação real (não demo), remove os dados
     // de demonstração para que eles não continuem aparecendo no jornal junto
     // com as operações reais.
     if (!body.isDemo) {
-      await db.delete(trades).where(eq(trades.isDemo, true));
+      await getDb().delete(trades).where(eq(trades.isDemo, true));
     }
 
     return Response.json(serializeTrade(inserted), { status: 201 });

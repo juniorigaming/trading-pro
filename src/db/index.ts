@@ -1,24 +1,28 @@
-import { drizzle } from "drizzle-orm/node-postgres";
+import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-const databaseUrl = process.env.DATABASE_URL;
+// A conexão (Pool) e o cliente Drizzle são criados apenas na primeira consulta
+// real, ficando em cache a nível de módulo (um singleton por isolate).
+// Assim o módulo pode ser importado durante o "next build" (coleta de dados de
+// página) sem exigir DATABASE_URL — que, no Cloudflare Workers, só é injetada
+// em runtime como binding/secreto, não em tempo de build.
+let cachedPool: Pool | undefined;
+let cachedDrizzle: NodePgDatabase<Record<string, never>> | undefined;
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is required");
+function getDb(): NodePgDatabase<Record<string, never>> {
+  if (cachedDrizzle) {
+    return cachedDrizzle;
+  }
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required");
+  }
+
+  cachedPool = new Pool({ connectionString: databaseUrl });
+  cachedDrizzle = drizzle(cachedPool);
+
+  return cachedDrizzle;
 }
 
-const globalForDb = globalThis as typeof globalThis & {
-  __arenaNextJsPostgresqlPool?: Pool;
-};
-
-export const pool =
-  globalForDb.__arenaNextJsPostgresqlPool ??
-  new Pool({
-    connectionString: databaseUrl,
-  });
-
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__arenaNextJsPostgresqlPool = pool;
-}
-
-export const db = drizzle(pool);
+export { getDb };

@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { getDb } from "@/db";
 import { trades } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { serializeTrade, TradeInput } from "@/lib/trade-utils";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const rows = await db.select().from(trades).where(eq(trades.id, Number(id))).limit(1);
+  const rows = await getDb().select().from(trades).where(eq(trades.id, Number(id))).limit(1);
   if (rows.length === 0) {
     return Response.json({ error: "Trade not found" }, { status: 404 });
   }
@@ -29,7 +29,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const { db: values } = mapTradeValues(body);
 
-    const [updated] = await db
+    const [updated] = await getDb()
       .update(trades)
       .set(values)
       .where(eq(trades.id, Number(id)))
@@ -49,7 +49,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    await db.delete(trades).where(eq(trades.id, Number(id)));
+    await getDb().delete(trades).where(eq(trades.id, Number(id)));
     return Response.json({ ok: true });
   } catch (error) {
     console.error(error);
