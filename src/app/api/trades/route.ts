@@ -8,7 +8,12 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const rows = await db.select().from(trades).orderBy(desc(trades.date), desc(trades.time));
+    // Exclui os dados de demonstração (isDemo) da listagem principal.
+    const rows = await db
+      .select()
+      .from(trades)
+      .where(eq(trades.isDemo, false))
+      .orderBy(desc(trades.date), desc(trades.time));
     return Response.json(rows.map(serializeTrade));
   } catch (error) {
     console.error(error);
@@ -42,20 +47,5 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error(error);
     return Response.json({ error: "Failed to create trade" }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const demoOnly = searchParams.get("demo") === "true";
-    if (demoOnly) {
-      await db.delete(trades).where(eq(trades.isDemo, true));
-      return Response.json({ ok: true });
-    }
-    return Response.json({ error: "Missing filter" }, { status: 400 });
-  } catch (error) {
-    console.error(error);
-    return Response.json({ error: "Failed to delete trades" }, { status: 500 });
   }
 }

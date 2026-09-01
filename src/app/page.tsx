@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, BarChart3, Target, Clock, ShieldCheck, ChevronRight, Trash2, Info } from "lucide-react";
+import { Plus, BarChart3, Target, Clock, ShieldCheck, ChevronRight } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import CapitalChart from "@/components/CapitalChart";
 import GlobalFilters, { FilterState, defaultFilters, applyFilters } from "@/components/GlobalFilters";
@@ -14,7 +14,7 @@ import { computeAccount } from "@/lib/account";
 import { formatCurrency, formatPercent, formatR, formatNumber } from "@/lib/utils";
 
 export default function DashboardPage() {
-  const { trades, loading, refetch } = useTrades();
+  const { trades, loading } = useTrades();
   const { config } = useConfig();
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
 
@@ -27,18 +27,6 @@ export default function DashboardPage() {
   const bySession = useMemo(() => groupBySession(filteredTrades), [filteredTrades]);
   const discipline = useMemo(() => disciplineStats(filteredTrades), [filteredTrades]);
   const calendarMap = useMemo(() => buildCalendarData(filteredTrades), [filteredTrades]);
-  const hasDemo = trades.some((t) => t.isDemo);
-
-  const removeDemoData = async () => {
-    if (!confirm("Remover todos os dados de demonstração? Essa ação não pode ser desfeita.")) return;
-    await fetch("/api/trades/demo", { method: "DELETE" });
-    refetch();
-  };
-
-  const loadDemoData = async () => {
-    await fetch("/api/trades/demo", { method: "POST" });
-    refetch();
-  };
 
   // Last 14 days for calendar preview (based on the most recent trade date, or today)
   const previewDays = useMemo(() => {
@@ -84,24 +72,11 @@ export default function DashboardPage() {
       {/* Command Center */}
       <CommandCenter />
 
-      {hasDemo && (
-        <div className="glass-card p-3.5 mb-6 flex flex-wrap items-center justify-between gap-3 border border-sky/20">
-          <div className="flex items-center gap-2.5">
-            <Info size={16} className="text-sky shrink-0" />
-            <p className="text-xs text-slate-300"><span className="font-bold text-sky">DADOS DE DEMONSTRAÇÃO</span> incluídos para você testar o sistema. Eles não representam operações reais.</p>
-          </div>
-          <button onClick={removeDemoData} className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose hover:text-rose-bright transition px-3 py-1.5 rounded-lg border border-rose/20 hover:bg-rose/10">
-            <Trash2 size={13} /> Remover dados demo
-          </button>
-        </div>
-      )}
-
-      {!hasDemo && trades.length === 0 && (
+      {trades.length === 0 && (
         <div className="glass-card p-5 mb-6 text-center">
           <p className="text-sm text-slate-300 mb-3">Você ainda não tem operações registradas. Saldo inicial: <span className="font-bold text-text-primary">{formatCurrency(initialCapital)}</span></p>
           <div className="flex justify-center gap-3">
             <Link href="/operacoes/novo" className="text-xs font-bold text-emerald hover:underline">+ Registrar primeira operação</Link>
-            <button onClick={loadDemoData} className="text-xs font-bold text-sky hover:underline">Carregar dados de demonstração</button>
           </div>
         </div>
       )}

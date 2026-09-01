@@ -10,7 +10,7 @@ export function useTrades() {
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/trades");
+      const res = await fetch("/api/trades", { cache: "no-store" });
       if (!res.ok) throw new Error("Falha ao carregar operações");
       const data = await res.json();
       setTrades(data);

@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, Trash2, Database, CheckCircle2, Palette, Wallet, ShieldAlert, Beaker } from "lucide-react";
-import { useConfig, useTrades } from "@/hooks/useTradeData";
+import { Save, CheckCircle2, Palette, Wallet, ShieldAlert, Beaker } from "lucide-react";
+import { useConfig } from "@/hooks/useTradeData";
 import { useTheme } from "@/components/ThemeProvider";
 import AppearanceControls from "@/components/AppearanceControls";
 import NumberInput from "@/components/NumberInput";
 
 export default function ConfiguracoesPage() {
   const { config, save } = useConfig();
-  const { trades, refetch } = useTrades();
   const { prefs } = useTheme();
   const [form, setForm] = useState({
     accountName: "Minha Conta",
@@ -57,19 +56,6 @@ export default function ConfiguracoesPage() {
       setSaving(false);
     }
   };
-
-  const removeDemoData = async () => {
-    if (!confirm("Remover todos os dados de demonstração?")) return;
-    await fetch("/api/trades/demo", { method: "DELETE" });
-    refetch();
-  };
-
-  const loadDemoData = async () => {
-    await fetch("/api/trades/demo", { method: "POST" });
-    refetch();
-  };
-
-  const hasDemo = trades.some((t) => t.isDemo);
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1200px] mx-auto">
@@ -168,20 +154,6 @@ export default function ConfiguracoesPage() {
           {saved ? <CheckCircle2 size={16} /> : <Save size={16} />} {saving ? "Salvando..." : saved ? "Salvo!" : "Salvar Configurações"}
         </button>
       </div>
-
-      <section className="glass-card-strong p-5 md:p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Database size={16} className="text-sky" />
-          <h2 className="text-base font-bold text-text-primary">Dados de Demonstração</h2>
-        </div>
-        <p className="text-xs text-text-muted mb-4">Use dados fictícios para testar o dashboard, gráficos e métricas. Eles são claramente identificados e podem ser removidos a qualquer momento.</p>
-        <div className="flex gap-3">
-          <button onClick={loadDemoData} disabled={hasDemo} className="text-xs font-bold text-sky hover:underline disabled:opacity-40 disabled:no-underline">Carregar dados de demonstração</button>
-          <button onClick={removeDemoData} disabled={!hasDemo} className="inline-flex items-center gap-1.5 text-xs font-bold text-rose hover:underline disabled:opacity-40 disabled:no-underline">
-            <Trash2 size={13} /> Remover dados de demonstração
-          </button>
-        </div>
-      </section>
     </div>
   );
 }

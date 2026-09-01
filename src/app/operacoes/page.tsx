@@ -34,8 +34,12 @@ export default function OperacoesPage() {
     if (!confirm("Tem certeza que deseja excluir esta operação?")) return;
     setDeletingId(id);
     try {
-      await fetch(`/api/trades/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Não foi possível excluir a operação.");
+      // Atualiza a lista imediatamente (sem precisar de F5).
       await refetch();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao excluir a operação.");
     } finally {
       setDeletingId(null);
     }
