@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Pencil, Gauge, Target } from "lucide-react";
+import { ArrowLeft, Pencil, Gauge, Target, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Trade } from "@/lib/types";
 import { formatCurrency, formatR } from "@/lib/utils";
 import { captureEfficiency } from "@/lib/scores";
+import { fetchTrade, TradeNotFoundError } from "@/lib/trade-fetch";
 
 const SMC_TAGS: { key: keyof Trade; label: string }[] = [
   { key: "trendConfirmation", label: "Estrutura HTF definida" },
@@ -26,20 +27,40 @@ export default function OperacaoDetalhePage() {
   const [trade, setTrade] = useState<Trade | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    fetch(`/api/trades/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Operação não encontrada");
-        return res.json();
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchTrade(id)
+      .then((t) => {
+        if (!cancelled) setTrade(t);
       })
-      .then(setTrade)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof TradeNotFoundError ? "Operação não encontrada." : e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, reloadKey]);
 
   if (loading) return <div className="p-8 text-center text-slate-muted text-sm">Carregando...</div>;
-  if (error || !trade) return <div className="p-8 text-center text-rose text-sm">{error || "Operação não encontrada"}</div>;
+  if (error || !trade)
+    return (
+      <div className="p-8 text-center">
+        <p className="text-sm text-rose mb-4">{error || "Operação não encontrada."}</p>
+        <button
+          onClick={() => setReloadKey((k) => k + 1)}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-white/5 text-text-primary text-xs font-semibold rounded-xl transition"
+        >
+          <RefreshCw size={13} /> Tentar novamente
+        </button>
+      </div>
+    );
 
   const activeTags = SMC_TAGS.filter((tag) => trade[tag.key]);
 

@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import TradeForm from "@/components/TradeForm";
 import { Trade } from "@/lib/types";
+import { fetchTrade, TradeNotFoundError } from "@/lib/trade-fetch";
 
 export default function EditarOperacaoPage() {
   const params = useParams();
@@ -13,17 +14,26 @@ export default function EditarOperacaoPage() {
   const [trade, setTrade] = useState<Trade | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    fetch(`/api/trades/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Operação não encontrada");
-        return res.json();
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchTrade(id)
+      .then((t) => {
+        if (!cancelled) setTrade(t);
       })
-      .then(setTrade)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof TradeNotFoundError ? "Operação não encontrada." : e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, reloadKey]);
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1400px] mx-auto">
@@ -38,7 +48,15 @@ export default function EditarOperacaoPage() {
       {loading ? (
         <div className="glass-card-strong p-12 text-center text-slate-muted text-sm">Carregando...</div>
       ) : error ? (
-        <div className="glass-card-strong p-12 text-center text-rose text-sm">{error}</div>
+        <div className="glass-card-strong p-12 text-center">
+          <p className="text-sm text-rose mb-4">{error}</p>
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-white/5 text-text-primary text-xs font-semibold rounded-xl transition"
+          >
+            <RefreshCw size={13} /> Tentar novamente
+          </button>
+        </div>
       ) : (
         trade && <TradeForm trade={trade} />
       )}
