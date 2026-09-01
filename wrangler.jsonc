@@ -20,6 +20,13 @@
       "service": "trading-pro"
     }
   ],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "4554e21f2958480ba76d1f38ffb617ed",
+      "localConnectionString": "postgresql://neondb_owner:SUA_SENHA@ep-rapid-mouse-axn748xt-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require"
+    }
+  ],
   "observability": {
     "enabled": true
   }
