@@ -8,7 +8,7 @@ import { formatCurrency, formatR } from "@/lib/utils";
 import { Trade } from "@/lib/types";
 
 export default function OperacoesPage() {
-  const { trades, loading, refetch, removeTrade } = useTrades();
+  const { trades, loading, refetch, removeTrade, error } = useTrades();
   const [search, setSearch] = useState("");
   const [resultFilter, setResultFilter] = useState("Todos");
   const [assetFilter, setAssetFilter] = useState("all");
@@ -31,17 +31,36 @@ export default function OperacoesPage() {
   }, [trades, search, resultFilter, assetFilter, sessionFilter, directionFilter]);
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Tem certeza que deseja excluir esta operação?")) return;
+    if (!confirm("Tem certeza que deseja excluir esta operação? Essa ação não pode ser desfeita.")) return;
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Não foi possível excluir a operação.");
-      // Remove da lista local imediatamente, sem esperar refetch nem F5.
+      // FIX: Adiciona timestamp e no-store para evitar cache que causava "erro ao excluir"
+      const res = await fetch(`/api/trades/${id}?t=${Date.now()}`, { 
+        method: "DELETE",
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      });
+      
+      const data = await res.json().catch(() => ({}));
+      
+      if (!res.ok) {
+        console.error("[DELETE] Erro:", res.status, data);
+        throw new Error(data.error || `Erro ${res.status}: Não foi possível excluir`);
+      }
+      
+      console.log(`[DELETE] Operação ${id} excluída:`, data);
+      
+      // Remove da lista local imediatamente - FIX para não precisar F5
       removeTrade(id);
-      // Atualiza em segundo plano para manter consistência com o servidor.
-      await refetch();
+      
+      // Não precisa refetch imediato, já removemos local. Refetch em background para consistência
+      setTimeout(() => refetch(), 500);
+      
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Erro ao excluir a operação.");
+      console.error("[DELETE] Falha:", err);
+      alert(err instanceof Error ? err.message : "Erro ao excluir a operação. Verifique os logs.");
+      // Se falhou, recarrega para garantir consistência
+      await refetch();
     } finally {
       setDeletingId(null);
     }
@@ -69,6 +88,7 @@ export default function OperacoesPage() {
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Operações</h1>
           <p className="text-sm text-slate-muted mt-1">Histórico completo das suas operações registradas ({trades.length})</p>
+          {error && <p className="text-xs text-rose mt-1">Erro: {error} - <button onClick={() => refetch()} className="underline">Tentar novamente</button></p>}
         </div>
       </header>
 
@@ -181,8 +201,8 @@ export default function OperacoesPage() {
                       <Link href={`/operacoes/${t.id}/editar`} className="p-1.5 rounded-md hover:bg-white/5 text-slate-400 hover:text-amber transition" title="Editar">
                         <Pencil size={14} />
                       </Link>
-                      <button onClick={() => handleDelete(t.id)} disabled={deletingId === t.id} className="p-1.5 rounded-md hover:bg-white/5 text-slate-400 hover:text-rose transition disabled:opacity-40" title="Excluir">
-                        <Trash2 size={14} />
+                      <button onClick={() => handleDelete(t.id)} disabled={deletingId === t.id} className="p-1.5 rounded-md hover:bg-white/5 text-slate-400 hover:text-rose transition disabled:opacity-40 disabled:cursor-not-allowed" title="Excluir">
+                        {deletingId === t.id ? <span className="w-3 h-3 border border-rose/30 border-t-rose rounded-full animate-spin block" /> : <Trash2 size={14} />}
                       </button>
                     </div>
                   </td>

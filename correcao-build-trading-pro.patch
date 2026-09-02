@@ -1,0 +1,1205 @@
+From f1237f12ac6920e19a0e9b900f185ff4879ee416 Mon Sep 17 00:00:00 2001
+From: Arena Agent <dev@arena.ai>
+Date: Mon, 31 Aug 2026 22:42:06 +0000
+Subject: [PATCH] fix(trades): remove demo on real trade + prevent Enter
+ auto-submit
+
+Two bugs after the DB was set up:
+1. Registering a real trade still showed the seeded demo trades next to
+   it. Now POST /api/trades deletes demo trades when a non-demo trade is
+   created, so the journal only shows real operations.
+2. The trade form auto-submitted when pressing Enter in any field (default
+   HTML form behavior), saving the operation before the user finished
+   filling in the Result & Journal step. Added onKeyDown to the form to
+   block Enter submission (except on textareas / buttons).
+
+Also include the initial Drizzle migration (creates trades, config,
+macro_cards, daily_bias) + db scripts and a cleaned .gitignore so the
+database tables are versioned.
+---
+ .gitignore                       | Bin 554 -> 561 bytes
+ drizzle/0000_friendly_komodo.sql | 144 +++++
+ drizzle/meta/0000_snapshot.json  | 920 +++++++++++++++++++++++++++++++
+ drizzle/meta/_journal.json       |  13 +
+ package.json                     |   3 +
+ src/app/api/trades/route.ts      |   7 +
+ src/components/TradeForm.tsx     |  18 +-
+ 7 files changed, 1104 insertions(+), 1 deletion(-)
+ create mode 100644 drizzle/0000_friendly_komodo.sql
+ create mode 100644 drizzle/meta/0000_snapshot.json
+ create mode 100644 drizzle/meta/_journal.json
+
+diff --git a/.gitignore b/.gitignore
+index 3e9d306f1eb131f52611d59faa80da22af2a55f8..de0f1c4597e3558f301c5a7f99d06ca4572176fa 100644
+GIT binary patch
+delta 143
+zcmZ3*vXNzjI3ur?UP*CMX=YAJW?owUWHCl_QNPrR61}Wqt~?;Eo0?aqmjYBW`8cD0
+zIG3_Qcu`_rdQNJQg1&-tPJU@hT25k7szP{vQFdxku|iIMa$=4`aY<rHs)CwAacXi=
+gYDqDdUO7~gK9^ofYMEYHVi8af#?sT8yp~ZK0Hwn)(EtDd
+
+delta 164
+zcmdnUvWjJcIOAkhMzi{m%7WD3<f6=i5-u&hlH#P&%$$_WytI6-ywr*k-PF7?y%eA@
+z7nibvOHpQ3RZc2b3WV0rO)W{(kI%|4Ey_#G(aS2%&qI~cf`|ci`eqg<b0z1Or4}Wo
+qr|NU*0U61uIUqCrCzmpMi6k+UGUPGnG2}4hGbA%)Gw?ESF#rG(PcyOr
+
+diff --git a/drizzle/0000_friendly_komodo.sql b/drizzle/0000_friendly_komodo.sql
+new file mode 100644
+index 0000000..e4352bf
+--- /dev/null
++++ b/drizzle/0000_friendly_komodo.sql
+@@ -0,0 +1,144 @@
++CREATE TABLE "config" (
++	"id" serial PRIMARY KEY NOT NULL,
++	"key" text NOT NULL,
++	"value" text NOT NULL,
++	"updated_at" timestamp DEFAULT now(),
++	CONSTRAINT "config_key_unique" UNIQUE("key")
++);
++--> statement-breakpoint
++CREATE TABLE "daily_bias" (
++	"id" serial PRIMARY KEY NOT NULL,
++	"date" text NOT NULL,
++	"currency" text NOT NULL,
++	"session" text,
++	"inflation" text DEFAULT 'Neutral',
++	"employment" text DEFAULT 'Neutral',
++	"activity" text DEFAULT 'Neutral',
++	"central_bank" text DEFAULT 'Neutral',
++	"yields" text DEFAULT 'Neutral',
++	"dxy" text DEFAULT 'Neutral',
++	"bias_final" text DEFAULT 'Neutro',
++	"conviction" integer DEFAULT 5,
++	"thesis" text,
++	"invalidation" text,
++	"dxy_actual" text,
++	"thesis_result" text,
++	"created_at" timestamp DEFAULT now()
++);
++--> statement-breakpoint
++CREATE TABLE "macro_cards" (
++	"id" serial PRIMARY KEY NOT NULL,
++	"currency" text NOT NULL,
++	"bias" text DEFAULT 'Neutro' NOT NULL,
++	"score" integer DEFAULT 0 NOT NULL,
++	"inflation" text DEFAULT 'Neutral',
++	"employment" text DEFAULT 'Neutral',
++	"activity" text DEFAULT 'Neutral',
++	"central_bank" text DEFAULT 'Neutral',
++	"yield_direction" text DEFAULT 'Neutral',
++	"dxy" text DEFAULT 'Neutral',
++	"updated_at" timestamp DEFAULT now(),
++	CONSTRAINT "macro_cards_currency_unique" UNIQUE("currency")
++);
++--> statement-breakpoint
++CREATE TABLE "trades" (
++	"id" serial PRIMARY KEY NOT NULL,
++	"created_at" timestamp DEFAULT now() NOT NULL,
++	"date" timestamp NOT NULL,
++	"time" text NOT NULL,
++	"asset" text NOT NULL,
++	"direction" text NOT NULL,
++	"session" text NOT NULL,
++	"session_time_start" text,
++	"session_time_end" text,
++	"timeframe_entry" text,
++	"timeframe_context" text,
++	"setup" text,
++	"entry_price" numeric(18, 8),
++	"stop_loss" numeric(18, 8),
++	"take_profit" numeric(18, 8),
++	"position_size" numeric(18, 8),
++	"account_balance_at_trade" numeric(18, 8),
++	"risk_percent" real,
++	"risk_amount" numeric(18, 8),
++	"planned_rr" real,
++	"realized_rr" real,
++	"result_amount" numeric(18, 8),
++	"result_r" real,
++	"result_percent" real,
++	"result_type" text,
++	"htf_bias" text,
++	"ltf_bias" text,
++	"liquidity_type" text,
++	"liquidity_swept" text,
++	"bos" boolean DEFAULT false,
++	"choch" boolean DEFAULT false,
++	"fvg" boolean DEFAULT false,
++	"order_block" boolean DEFAULT false,
++	"breaker" boolean DEFAULT false,
++	"sweep_liquidity" boolean DEFAULT false,
++	"displacement" boolean DEFAULT false,
++	"trend_confirmation" boolean DEFAULT false,
++	"amd" boolean DEFAULT false,
++	"premium_discount" text,
++	"macro_event" text,
++	"macro_currency" text,
++	"macro_impact" text,
++	"macro_bias" text,
++	"followed_plan" boolean,
++	"early_entry" boolean DEFAULT false,
++	"early_exit" boolean DEFAULT false,
++	"revenge_trade" boolean DEFAULT false,
++	"fomo" boolean DEFAULT false,
++	"overtrading" boolean DEFAULT false,
++	"emotional_before" text,
++	"emotional_after" text,
++	"mistakes" text,
++	"what_went_right" text,
++	"what_went_wrong" text,
++	"lesson" text,
++	"notes" text,
++	"screenshot_url" text,
++	"pre_trade_screenshot_url" text,
++	"post_entry_screenshot_url" text,
++	"post_exit_screenshot_url" text,
++	"dxy_screenshot_url" text,
++	"status" text DEFAULT 'CLOSED' NOT NULL,
++	"playbook" text,
++	"dxy_bias" text,
++	"draw_on_liquidity" text,
++	"poi" text,
++	"entry_zone" text,
++	"invalidation" text,
++	"time_stop" text,
++	"expected_session" text,
++	"exit_reason" text,
++	"dxy_htf_bias" text,
++	"dxy_h1_bias" text,
++	"dxy_location" text,
++	"dxy_liquidity_target" text,
++	"dxy_confirmation" text,
++	"us02y" text,
++	"us10y" text,
++	"real_yield" text,
++	"intermarket_confirm" text,
++	"mae_amount" numeric(18, 8),
++	"mfe_amount" numeric(18, 8),
++	"mae_price" numeric(18, 8),
++	"mfe_price" numeric(18, 8),
++	"setup_score" integer,
++	"execution_score" integer,
++	"moved_stop_without_rule" boolean DEFAULT false,
++	"moved_be_early" boolean DEFAULT false,
++	"increased_risk" boolean DEFAULT false,
++	"traded_during_news" boolean DEFAULT false,
++	"chased_price" boolean DEFAULT false,
++	"did_not_wait_mss" boolean DEFAULT false,
++	"ignored_htf" boolean DEFAULT false,
++	"ignored_macro" boolean DEFAULT false,
++	"ignored_dxy" boolean DEFAULT false,
++	"traded_out_of_session" boolean DEFAULT false,
++	"traded_outside_plan" boolean DEFAULT false,
++	"unrealized_pnl" numeric(18, 8),
++	"is_demo" boolean DEFAULT false
++);
+diff --git a/drizzle/meta/0000_snapshot.json b/drizzle/meta/0000_snapshot.json
+new file mode 100644
+index 0000000..c6e1021
+--- /dev/null
++++ b/drizzle/meta/0000_snapshot.json
+@@ -0,0 +1,920 @@
++{
++  "id": "6a7d4cc4-2aed-4c18-941b-c2d072469e48",
++  "prevId": "00000000-0000-0000-0000-000000000000",
++  "version": "7",
++  "dialect": "postgresql",
++  "tables": {
++    "public.config": {
++      "name": "config",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "serial",
++          "primaryKey": true,
++          "notNull": true
++        },
++        "key": {
++          "name": "key",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "value": {
++          "name": "value",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "config_key_unique": {
++          "name": "config_key_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "key"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.daily_bias": {
++      "name": "daily_bias",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "serial",
++          "primaryKey": true,
++          "notNull": true
++        },
++        "date": {
++          "name": "date",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "currency": {
++          "name": "currency",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "session": {
++          "name": "session",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "inflation": {
++          "name": "inflation",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "employment": {
++          "name": "employment",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "activity": {
++          "name": "activity",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "central_bank": {
++          "name": "central_bank",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "yields": {
++          "name": "yields",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "dxy": {
++          "name": "dxy",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "bias_final": {
++          "name": "bias_final",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutro'"
++        },
++        "conviction": {
++          "name": "conviction",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": false,
++          "default": 5
++        },
++        "thesis": {
++          "name": "thesis",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "invalidation": {
++          "name": "invalidation",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_actual": {
++          "name": "dxy_actual",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "thesis_result": {
++          "name": "thesis_result",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.macro_cards": {
++      "name": "macro_cards",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "serial",
++          "primaryKey": true,
++          "notNull": true
++        },
++        "currency": {
++          "name": "currency",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "bias": {
++          "name": "bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'Neutro'"
++        },
++        "score": {
++          "name": "score",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": true,
++          "default": 0
++        },
++        "inflation": {
++          "name": "inflation",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "employment": {
++          "name": "employment",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "activity": {
++          "name": "activity",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "central_bank": {
++          "name": "central_bank",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "yield_direction": {
++          "name": "yield_direction",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "dxy": {
++          "name": "dxy",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "'Neutral'"
++        },
++        "updated_at": {
++          "name": "updated_at",
++          "type": "timestamp",
++          "primaryKey": false,
++          "notNull": false,
++          "default": "now()"
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {
++        "macro_cards_currency_unique": {
++          "name": "macro_cards_currency_unique",
++          "nullsNotDistinct": false,
++          "columns": [
++            "currency"
++          ]
++        }
++      },
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    },
++    "public.trades": {
++      "name": "trades",
++      "schema": "",
++      "columns": {
++        "id": {
++          "name": "id",
++          "type": "serial",
++          "primaryKey": true,
++          "notNull": true
++        },
++        "created_at": {
++          "name": "created_at",
++          "type": "timestamp",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "now()"
++        },
++        "date": {
++          "name": "date",
++          "type": "timestamp",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "time": {
++          "name": "time",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "asset": {
++          "name": "asset",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "direction": {
++          "name": "direction",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "session": {
++          "name": "session",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true
++        },
++        "session_time_start": {
++          "name": "session_time_start",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "session_time_end": {
++          "name": "session_time_end",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "timeframe_entry": {
++          "name": "timeframe_entry",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "timeframe_context": {
++          "name": "timeframe_context",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "setup": {
++          "name": "setup",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "entry_price": {
++          "name": "entry_price",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "stop_loss": {
++          "name": "stop_loss",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "take_profit": {
++          "name": "take_profit",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "position_size": {
++          "name": "position_size",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "account_balance_at_trade": {
++          "name": "account_balance_at_trade",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "risk_percent": {
++          "name": "risk_percent",
++          "type": "real",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "risk_amount": {
++          "name": "risk_amount",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "planned_rr": {
++          "name": "planned_rr",
++          "type": "real",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "realized_rr": {
++          "name": "realized_rr",
++          "type": "real",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "result_amount": {
++          "name": "result_amount",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "result_r": {
++          "name": "result_r",
++          "type": "real",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "result_percent": {
++          "name": "result_percent",
++          "type": "real",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "result_type": {
++          "name": "result_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "htf_bias": {
++          "name": "htf_bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "ltf_bias": {
++          "name": "ltf_bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "liquidity_type": {
++          "name": "liquidity_type",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "liquidity_swept": {
++          "name": "liquidity_swept",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "bos": {
++          "name": "bos",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "choch": {
++          "name": "choch",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "fvg": {
++          "name": "fvg",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "order_block": {
++          "name": "order_block",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "breaker": {
++          "name": "breaker",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "sweep_liquidity": {
++          "name": "sweep_liquidity",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "displacement": {
++          "name": "displacement",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "trend_confirmation": {
++          "name": "trend_confirmation",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "amd": {
++          "name": "amd",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "premium_discount": {
++          "name": "premium_discount",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "macro_event": {
++          "name": "macro_event",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "macro_currency": {
++          "name": "macro_currency",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "macro_impact": {
++          "name": "macro_impact",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "macro_bias": {
++          "name": "macro_bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "followed_plan": {
++          "name": "followed_plan",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "early_entry": {
++          "name": "early_entry",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "early_exit": {
++          "name": "early_exit",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "revenge_trade": {
++          "name": "revenge_trade",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "fomo": {
++          "name": "fomo",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "overtrading": {
++          "name": "overtrading",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "emotional_before": {
++          "name": "emotional_before",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "emotional_after": {
++          "name": "emotional_after",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "mistakes": {
++          "name": "mistakes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "what_went_right": {
++          "name": "what_went_right",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "what_went_wrong": {
++          "name": "what_went_wrong",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "lesson": {
++          "name": "lesson",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "notes": {
++          "name": "notes",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "screenshot_url": {
++          "name": "screenshot_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "pre_trade_screenshot_url": {
++          "name": "pre_trade_screenshot_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "post_entry_screenshot_url": {
++          "name": "post_entry_screenshot_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "post_exit_screenshot_url": {
++          "name": "post_exit_screenshot_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_screenshot_url": {
++          "name": "dxy_screenshot_url",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "status": {
++          "name": "status",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": true,
++          "default": "'CLOSED'"
++        },
++        "playbook": {
++          "name": "playbook",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_bias": {
++          "name": "dxy_bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "draw_on_liquidity": {
++          "name": "draw_on_liquidity",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "poi": {
++          "name": "poi",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "entry_zone": {
++          "name": "entry_zone",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "invalidation": {
++          "name": "invalidation",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "time_stop": {
++          "name": "time_stop",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "expected_session": {
++          "name": "expected_session",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "exit_reason": {
++          "name": "exit_reason",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_htf_bias": {
++          "name": "dxy_htf_bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_h1_bias": {
++          "name": "dxy_h1_bias",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_location": {
++          "name": "dxy_location",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_liquidity_target": {
++          "name": "dxy_liquidity_target",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "dxy_confirmation": {
++          "name": "dxy_confirmation",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "us02y": {
++          "name": "us02y",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "us10y": {
++          "name": "us10y",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "real_yield": {
++          "name": "real_yield",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "intermarket_confirm": {
++          "name": "intermarket_confirm",
++          "type": "text",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "mae_amount": {
++          "name": "mae_amount",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "mfe_amount": {
++          "name": "mfe_amount",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "mae_price": {
++          "name": "mae_price",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "mfe_price": {
++          "name": "mfe_price",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "setup_score": {
++          "name": "setup_score",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "execution_score": {
++          "name": "execution_score",
++          "type": "integer",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "moved_stop_without_rule": {
++          "name": "moved_stop_without_rule",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "moved_be_early": {
++          "name": "moved_be_early",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "increased_risk": {
++          "name": "increased_risk",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "traded_during_news": {
++          "name": "traded_during_news",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "chased_price": {
++          "name": "chased_price",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "did_not_wait_mss": {
++          "name": "did_not_wait_mss",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "ignored_htf": {
++          "name": "ignored_htf",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "ignored_macro": {
++          "name": "ignored_macro",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "ignored_dxy": {
++          "name": "ignored_dxy",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "traded_out_of_session": {
++          "name": "traded_out_of_session",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "traded_outside_plan": {
++          "name": "traded_outside_plan",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        },
++        "unrealized_pnl": {
++          "name": "unrealized_pnl",
++          "type": "numeric(18, 8)",
++          "primaryKey": false,
++          "notNull": false
++        },
++        "is_demo": {
++          "name": "is_demo",
++          "type": "boolean",
++          "primaryKey": false,
++          "notNull": false,
++          "default": false
++        }
++      },
++      "indexes": {},
++      "foreignKeys": {},
++      "compositePrimaryKeys": {},
++      "uniqueConstraints": {},
++      "policies": {},
++      "checkConstraints": {},
++      "isRLSEnabled": false
++    }
++  },
++  "enums": {},
++  "schemas": {},
++  "sequences": {},
++  "roles": {},
++  "policies": {},
++  "views": {},
++  "_meta": {
++    "columns": {},
++    "schemas": {},
++    "tables": {}
++  }
++}
+\ No newline at end of file
+diff --git a/drizzle/meta/_journal.json b/drizzle/meta/_journal.json
+new file mode 100644
+index 0000000..82a8139
+--- /dev/null
++++ b/drizzle/meta/_journal.json
+@@ -0,0 +1,13 @@
++{
++  "version": "7",
++  "dialect": "postgresql",
++  "entries": [
++    {
++      "idx": 0,
++      "version": "7",
++      "when": 1788191217280,
++      "tag": "0000_friendly_komodo",
++      "breakpoints": true
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/package.json b/package.json
+index 10f480f..66ad4ad 100644
+--- a/package.json
++++ b/package.json
+@@ -5,6 +5,9 @@
+   "scripts": {
+     "dev": "next dev",
+     "build": "next build --webpack",
++    "db:generate": "drizzle-kit generate",
++    "db:push": "drizzle-kit push",
++    "db:migrate": "drizzle-kit migrate",
+     "start": "next start",
+     "lint": "eslint .",
+     "typecheck": "tsc --noEmit"
+diff --git a/src/app/api/trades/route.ts b/src/app/api/trades/route.ts
+index 9f0f967..ed18404 100644
+--- a/src/app/api/trades/route.ts
++++ b/src/app/api/trades/route.ts
+@@ -31,6 +31,13 @@ export async function POST(request: Request) {
+ 
+     const [inserted] = await db.insert(trades).values(values).returning();
+ 
++    // Quando o usuário registra uma operação real (não demo), remove os dados
++    // de demonstração para que eles não continuem aparecendo no jornal junto
++    // com as operações reais.
++    if (!body.isDemo) {
++      await db.delete(trades).where(eq(trades.isDemo, true));
++    }
++
+     return Response.json(serializeTrade(inserted), { status: 201 });
+   } catch (error) {
+     console.error(error);
+diff --git a/src/components/TradeForm.tsx b/src/components/TradeForm.tsx
+index 42d8c9c..402870a 100644
+--- a/src/components/TradeForm.tsx
++++ b/src/components/TradeForm.tsx
+@@ -361,7 +361,23 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
+         </div>
+       )}
+ 
+-      <form onSubmit={handleSubmit} className="space-y-6">
++      <form
++        onSubmit={handleSubmit}
++        onKeyDown={(e) => {
++          // Impede que pressionar Enter em um campo envie o formulário
++          // automaticamente (comportamento padrão do HTML), o que salvava a
++          // operação antes de o usuário terminar de preencher os campos.
++          if (
++            e.key === "Enter" &&
++            e.target instanceof HTMLElement &&
++            e.target.tagName !== "TEXTAREA" &&
++            !(e.target instanceof HTMLButtonElement)
++          ) {
++            e.preventDefault();
++          }
++        }}
++        className="space-y-6"
++      >
+         {/* Step 1 */}
+         {step === 1 && (
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+-- 
+2.47.3
+

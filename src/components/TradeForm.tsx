@@ -141,8 +141,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  // Guarda síncrona contra envio duplicado (duplo clique / Enter repetido),
-  // que criava duas operações idênticas quando o usuário salvava uma única vez.
   const submittingRef = useRef(false);
 
   const suggestedBalance = useMemo(() => {
@@ -157,7 +155,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     if (!trade && config) {
       setForm((prev) => ({ ...prev, accountBalanceAtTrade: String(suggestedBalance), riskPercent: String(config.riskPercent) }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, suggestedBalance]);
 
   const steps = ["Dados Básicos", "Gestão de Risco", "Contexto SMC", "Macro & Checklist", "Resultado & Diário"];
@@ -166,7 +163,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  // Live computed preview
   const preview = useMemo(() => {
     const entry = parseFloat(form.entryPrice);
     const sl = parseFloat(form.stopLoss);
@@ -191,16 +187,38 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     return { riskAmount, plannedRR, resultR };
   }, [form]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // FIX 1102: Compressão de imagem para evitar base64 de 4MB que estoura Worker
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 4 * 1024 * 1024) {
-      setFormError("A imagem deve ter no máximo 4MB.");
+    
+    if (file.size > 8 * 1024 * 1024) {
+      setFormError("Imagem muito grande. Máximo 8MB original, será comprimida para ~800KB.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => update("screenshotUrl", reader.result as string);
-    reader.readAsDataURL(file);
+
+    try {
+      // Comprime via canvas para max 1200px e qualidade 0.7
+      const compressedBase64 = await compressImage(file, 1200, 0.7);
+      
+      if (compressedBase64.length > 1_200_000) {
+        setFormError("Imagem ainda muito grande após compressão. Tente uma imagem menor ou recorte.");
+        return;
+      }
+
+      setFormError(null);
+      update("screenshotUrl", compressedBase64);
+    } catch (err) {
+      console.error("Erro ao comprimir imagem:", err);
+      // Fallback: tenta ler direto se compressão falhar, mas com limite
+      if (file.size > 1_000_000) {
+        setFormError("Imagem muito grande (max 1MB sem compressão). Tente outra imagem.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => update("screenshotUrl", reader.result as string);
+      reader.readAsDataURL(file);
+    }
   };
 
   const validate = (): string | null => {
@@ -227,8 +245,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Se já há um envio em andamento, ignora (evita operação duplicada quando o
-    // usuário clica no Salvar ou pressiona Enter mais de uma vez).
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
@@ -236,6 +252,8 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       const err = validate();
       if (err) {
         setFormError(err);
+        submittingRef.current = false;
+        setSubmitting(false);
         return;
       }
       setFormError(null);
@@ -321,23 +339,28 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         executionScore: eScore,
       };
 
-      const url = trade ? `/api/trades/${trade.id}` : "/api/trades";
+      const url = trade ? `/api/trades/${trade.id}?t=${Date.now()}` : `/api/trades?t=${Date.now()}`;
       const method = trade ? "PUT" : "POST";
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        cache: "no-store",
       });
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({ error: "Erro desconhecido" }));
         throw new Error(data.error || "Erro ao salvar operação");
       }
+      // FIX: Força recarregamento sem cache para garantir que nova operação apareça
       router.push("/operacoes");
       router.refresh();
+      // Fallback extra: hard reload se router.refresh não atualizar
+      setTimeout(() => {
+        window.location.href = "/operacoes";
+      }, 300);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Erro ao salvar operação");
     } finally {
-      // Libera a guarda para permitir uma nova tentativa.
       submittingRef.current = false;
       setSubmitting(false);
     }
@@ -345,7 +368,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
   return (
     <div className="glass-card-strong p-5 md:p-6">
-      {/* Stepper */}
       <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2">
         {steps.map((label, idx) => (
           <button
@@ -373,9 +395,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       <form
         onSubmit={handleSubmit}
         onKeyDown={(e) => {
-          // Impede que pressionar Enter em um campo envie o formulário
-          // automaticamente (comportamento padrão do HTML), o que salvava a
-          // operação antes de o usuário terminar de preencher os campos.
           if (
             e.key === "Enter" &&
             e.target instanceof HTMLElement &&
@@ -387,7 +406,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         }}
         className="space-y-6"
       >
-        {/* Step 1 */}
         {step === 1 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <FormField label="Data *" type="date" value={form.date} onChange={(v) => update("date", v)} />
@@ -401,7 +419,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           </div>
         )}
 
-        {/* Step 2 */}
         {step === 2 && (
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
@@ -421,7 +438,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           </div>
         )}
 
-        {/* Step 3 - SMC */}
         {step === 3 && (
           <div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -455,7 +471,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           </div>
         )}
 
-        {/* Step 4 - Macro & Discipline */}
         {step === 4 && (
           <div>
             <h3 className="text-sm font-bold text-text-primary mb-3">Macroeconomia</h3>
@@ -482,7 +497,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           </div>
         )}
 
-        {/* Step 5 - Result & Journal */}
         {step === 5 && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -497,17 +511,17 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold block mb-1.5">Screenshot da Operação</label>
+              <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold block mb-1.5">Screenshot da Operação (será comprimido automaticamente)</label>
               {form.screenshotUrl ? (
                 <div className="relative inline-block">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={form.screenshotUrl} alt="Screenshot" className="max-h-48 rounded-xl border border-white/10" />
                   <button type="button" onClick={() => update("screenshotUrl", "")} className="absolute -top-2 -right-2 bg-rose text-text-primary rounded-full p-1"><X size={14} /></button>
+                  <p className="text-[10px] text-slate-muted mt-1">{Math.round(form.screenshotUrl.length / 1024)}KB</p>
                 </div>
               ) : (
                 <label className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-white/10 text-slate-muted text-xs cursor-pointer hover:border-emerald/30 hover:text-emerald transition w-fit">
-                  <ImagePlus size={16} /> Adicionar imagem
-                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleImageUpload} />
+                  <ImagePlus size={16} /> Adicionar imagem (max 8MB, comprimido para ~500KB)
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleImageUpload} />
                 </label>
               )}
             </div>
@@ -522,7 +536,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           </div>
         )}
 
-        {/* Navigation */}
         <div className="flex items-center justify-between pt-6 border-t border-white/5">
           <button
             type="button"
@@ -553,6 +566,43 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       </form>
     </div>
   );
+}
+
+// Helper: comprime imagem via canvas - ESSENCIAL para evitar 1102
+function compressImage(file: File, maxWidth: number, quality: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > maxWidth) {
+          height = (maxWidth / width) * height;
+          width = maxWidth;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas não suportado"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Converte para JPEG com qualidade reduzida
+        const compressed = canvas.toDataURL("image/jpeg", quality);
+        resolve(compressed);
+      };
+      img.onerror = () => reject(new Error("Erro ao carregar imagem"));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
+    reader.readAsDataURL(file);
+  });
 }
 
 function FormField({ label, type = "text", value, onChange, step, placeholder }: { label: string; type?: string; value: string | number; onChange: (v: string) => void; step?: string; placeholder?: string }) {

@@ -10,29 +10,42 @@ export function useTrades() {
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/trades?t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error("Falha ao carregar operações");
+      // FIX: Adiciona limit e timestamp para evitar cache e 1102
+      // Antes sem limit, retornava tudo com base64 gigante
+      const res = await fetch(`/api/trades?limit=200&t=${Date.now()}`, { 
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Falha ao carregar operações (${res.status})`);
+      }
       const data = await res.json();
       setTrades(data);
       setError(null);
     } catch (e) {
+      console.error("[useTrades] refetch error:", e);
       setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Remove uma operação da lista em memória imediatamente, sem depender do
-  // servidor/cache — faz a tela refletir a exclusão na hora (sem F5).
+  // Remove da lista em memória imediatamente - FIX bug de exclusão
   const removeTrade = useCallback((id: number) => {
     setTrades((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Adiciona trade na lista imediatamente - FIX bug de cadastro não aparecendo
+  const addTrade = useCallback((newTrade: Trade) => {
+    setTrades((prev) => [newTrade, ...prev]);
   }, []);
 
   useEffect(() => {
     refetch();
   }, [refetch]);
 
-  return { trades, loading, error, refetch, removeTrade };
+  return { trades, loading, error, refetch, removeTrade, addTrade };
 }
 
 const CONFIG_NUMERIC_KEYS = [
@@ -87,7 +100,7 @@ export function useConfig() {
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/config");
+      const res = await fetch(`/api/config?t=${Date.now()}`, { cache: "no-store" });
       const data = await res.json();
       setConfig(coerceConfig(data));
     } finally {

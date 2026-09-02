@@ -1,0 +1,216 @@
+diff --git a/src/app/api/health/route.ts b/src/app/api/health/route.ts
+index dce49f0..a7907d0 100644
+--- a/src/app/api/health/route.ts
++++ b/src/app/api/health/route.ts
+@@ -1,11 +1,11 @@
+-import { db } from "@/db";
++import { getDb } from "@/db";
+ import { sql } from "drizzle-orm";
+ 
+ export const dynamic = "force-dynamic";
+ 
+ export async function GET() {
+   try {
+-    await db.execute(sql`select 1`);
++    await getDb().execute(sql`select 1`);
+     return Response.json({ ok: true });
+   } catch {
+     return Response.json({ ok: false }, { status: 500 });
+diff --git a/src/app/api/macro/route.ts b/src/app/api/macro/route.ts
+index f6e72c3..76d3f0f 100644
+--- a/src/app/api/macro/route.ts
++++ b/src/app/api/macro/route.ts
+@@ -1,4 +1,4 @@
+-import { db } from "@/db";
++import { getDb } from "@/db";
+ import { macroCards, dailyBias } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ 
+@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
+ 
+ export async function GET() {
+   try {
+-    const cards = await db.select().from(macroCards);
+-    const biases = await db.select().from(dailyBias).orderBy(dailyBias.date);
++    const cards = await getDb().select().from(macroCards);
++    const biases = await getDb().select().from(dailyBias).orderBy(dailyBias.date);
+     return Response.json({ cards, biases });
+   } catch (error) {
+     console.error(error);
+@@ -20,17 +20,17 @@ export async function PUT(request: Request) {
+     const body = await request.json();
+     if (body.type === "card") {
+       const c = body.data;
+-      const existing = await db.select().from(macroCards).where(eq(macroCards.currency, c.currency)).limit(1);
++      const existing = await getDb().select().from(macroCards).where(eq(macroCards.currency, c.currency)).limit(1);
+       if (existing.length === 0) {
+-        await db.insert(macroCards).values({ ...c, updatedAt: new Date() });
++        await getDb().insert(macroCards).values({ ...c, updatedAt: new Date() });
+       } else {
+-        await db.update(macroCards).set({ ...c, updatedAt: new Date() }).where(eq(macroCards.currency, c.currency));
++        await getDb().update(macroCards).set({ ...c, updatedAt: new Date() }).where(eq(macroCards.currency, c.currency));
+       }
+       return Response.json({ ok: true });
+     }
+     if (body.type === "daily") {
+       const d = body.data;
+-      await db.insert(dailyBias).values({ ...d });
++      await getDb().insert(dailyBias).values({ ...d });
+       return Response.json({ ok: true }, { status: 201 });
+     }
+     return Response.json({ error: "Unknown type" }, { status: 400 });
+diff --git a/src/app/api/trades/[id]/route.ts b/src/app/api/trades/[id]/route.ts
+index b6d7200..81b16f7 100644
+--- a/src/app/api/trades/[id]/route.ts
++++ b/src/app/api/trades/[id]/route.ts
+@@ -1,4 +1,4 @@
+-import { db } from "@/db";
++import { getDb } from "@/db";
+ import { trades } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { serializeTrade, TradeInput } from "@/lib/trade-utils";
+@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
+ 
+ export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+   const { id } = await params;
+-  const rows = await db.select().from(trades).where(eq(trades.id, Number(id))).limit(1);
++  const rows = await getDb().select().from(trades).where(eq(trades.id, Number(id))).limit(1);
+   if (rows.length === 0) {
+     return Response.json({ error: "Trade not found" }, { status: 404 });
+   }
+@@ -29,7 +29,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id:
+ 
+     const { db: values } = mapTradeValues(body);
+ 
+-    const [updated] = await db
++    const [updated] = await getDb()
+       .update(trades)
+       .set(values)
+       .where(eq(trades.id, Number(id)))
+@@ -49,7 +49,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id:
+ export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+   try {
+     const { id } = await params;
+-    await db.delete(trades).where(eq(trades.id, Number(id)));
++    await getDb().delete(trades).where(eq(trades.id, Number(id)));
+     return Response.json({ ok: true });
+   } catch (error) {
+     console.error(error);
+diff --git a/src/app/api/trades/route.ts b/src/app/api/trades/route.ts
+index 2951979..c6b6300 100644
+--- a/src/app/api/trades/route.ts
++++ b/src/app/api/trades/route.ts
+@@ -1,4 +1,4 @@
+-import { db } from "@/db";
++import { getDb } from "@/db";
+ import { trades } from "@/db/schema";
+ import { desc, eq } from "drizzle-orm";
+ import { serializeTrade, TradeInput } from "@/lib/trade-utils";
+@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
+ export async function GET() {
+   try {
+     // Exclui os dados de demonstração (isDemo) da listagem principal.
+-    const rows = await db
++    const rows = await getDb()
+       .select()
+       .from(trades)
+       .where(eq(trades.isDemo, false))
+@@ -34,13 +34,13 @@ export async function POST(request: Request) {
+ 
+     const { db: values } = mapTradeValues(body);
+ 
+-    const [inserted] = await db.insert(trades).values(values).returning();
++    const [inserted] = await getDb().insert(trades).values(values).returning();
+ 
+     // Quando o usuário registra uma operação real (não demo), remove os dados
+     // de demonstração para que eles não continuem aparecendo no jornal junto
+     // com as operações reais.
+     if (!body.isDemo) {
+-      await db.delete(trades).where(eq(trades.isDemo, true));
++      await getDb().delete(trades).where(eq(trades.isDemo, true));
+     }
+ 
+     return Response.json(serializeTrade(inserted), { status: 201 });
+diff --git a/src/db/index.ts b/src/db/index.ts
+index acf9185..ac1766e 100644
+--- a/src/db/index.ts
++++ b/src/db/index.ts
+@@ -1,24 +1,28 @@
+-import { drizzle } from "drizzle-orm/node-postgres";
++import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
+ import { Pool } from "pg";
+ 
+-const databaseUrl = process.env.DATABASE_URL;
++// A conexão (Pool) e o cliente Drizzle são criados apenas na primeira consulta
++// real, ficando em cache a nível de módulo (um singleton por isolate).
++// Assim o módulo pode ser importado durante o "next build" (coleta de dados de
++// página) sem exigir DATABASE_URL — que, no Cloudflare Workers, só é injetada
++// em runtime como binding/secreto, não em tempo de build.
++let cachedPool: Pool | undefined;
++let cachedDrizzle: NodePgDatabase<Record<string, never>> | undefined;
+ 
+-if (!databaseUrl) {
+-  throw new Error("DATABASE_URL is required");
+-}
++function getDb(): NodePgDatabase<Record<string, never>> {
++  if (cachedDrizzle) {
++    return cachedDrizzle;
++  }
+ 
+-const globalForDb = globalThis as typeof globalThis & {
+-  __arenaNextJsPostgresqlPool?: Pool;
+-};
++  const databaseUrl = process.env.DATABASE_URL;
++  if (!databaseUrl) {
++    throw new Error("DATABASE_URL is required");
++  }
+ 
+-export const pool =
+-  globalForDb.__arenaNextJsPostgresqlPool ??
+-  new Pool({
+-    connectionString: databaseUrl,
+-  });
++  cachedPool = new Pool({ connectionString: databaseUrl });
++  cachedDrizzle = drizzle(cachedPool);
+ 
+-if (process.env.NODE_ENV !== "production") {
+-  globalForDb.__arenaNextJsPostgresqlPool = pool;
++  return cachedDrizzle;
+ }
+ 
+-export const db = drizzle(pool);
++export { getDb };
+diff --git a/src/lib/config.ts b/src/lib/config.ts
+index 60c7d9c..6d7986f 100644
+--- a/src/lib/config.ts
++++ b/src/lib/config.ts
+@@ -1,4 +1,4 @@
+-import { db } from "@/db";
++import { getDb } from "@/db";
+ import { config } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { Config } from "./types";
+@@ -63,7 +63,7 @@ export function normalizeConfig(raw: Partial<Config>): Config {
+ }
+ 
+ export async function getConfig(): Promise<Config> {
+-  const rows = await db.select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
++  const rows = await getDb().select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
+   if (rows.length === 0) {
+     return DEFAULT_CONFIG;
+   }
+@@ -78,11 +78,11 @@ export async function getConfig(): Promise<Config> {
+ export async function saveConfig(newConfig: Partial<Config>): Promise<Config> {
+   const current = await getConfig();
+   const merged = normalizeConfig({ ...current, ...newConfig });
+-  const rows = await db.select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
++  const rows = await getDb().select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
+   if (rows.length === 0) {
+-    await db.insert(config).values({ key: CONFIG_KEY, value: JSON.stringify(merged) });
++    await getDb().insert(config).values({ key: CONFIG_KEY, value: JSON.stringify(merged) });
+   } else {
+-    await db.update(config).set({ value: JSON.stringify(merged), updatedAt: new Date() }).where(eq(config.key, CONFIG_KEY));
++    await getDb().update(config).set({ value: JSON.stringify(merged), updatedAt: new Date() }).where(eq(config.key, CONFIG_KEY));
+   }
+   return merged;
+ }

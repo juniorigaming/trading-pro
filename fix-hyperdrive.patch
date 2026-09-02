@@ -1,0 +1,72 @@
+diff --git a/src/db/index.ts b/src/db/index.ts
+index ac1766e..7de2e3b 100644
+--- a/src/db/index.ts
++++ b/src/db/index.ts
+@@ -1,20 +1,45 @@
+ import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
+ import { Pool } from "pg";
++import { getCloudflareContext } from "@opennextjs/cloudflare";
+ 
+ // A conexão (Pool) e o cliente Drizzle são criados apenas na primeira consulta
+ // real, ficando em cache a nível de módulo (um singleton por isolate).
+-// Assim o módulo pode ser importado durante o "next build" (coleta de dados de
+-// página) sem exigir DATABASE_URL — que, no Cloudflare Workers, só é injetada
+-// em runtime como binding/secreto, não em tempo de build.
++//
++// Prioridade de conexão:
++//   1. Hyperdrive (env.HYPERDRIVE.connectionString) — recomendado para Cloudflare
++//      Workers + Postgres/Neon. Mantém um pool quente no edge, eliminando o
++//      "cold start" do Neon free tier (que causava o erro 1101).
++//   2. process.env.DATABASE_URL — fallback (build local / quando Hyperdrive
++//      ainda não foi configurado).
++// A leitura do binding é tolerante: se o Hyperdrive não existir, usamos a
++// DATABASE_URL e o app continua funcionando normalmente.
+ let cachedPool: Pool | undefined;
+ let cachedDrizzle: NodePgDatabase<Record<string, never>> | undefined;
+ 
++interface HyperdriveBinding {
++  connectionString?: string;
++}
++
++function resolveConnectionString(): string | null {
++  try {
++    // getCloudflareContext() existe apenas no runtime do Worker/OpenNext.
++    const cf = getCloudflareContext();
++    const hyperdrive = (cf.env as { HYPERDRIVE?: HyperdriveBinding }).HYPERDRIVE;
++    if (hyperdrive?.connectionString) {
++      return hyperdrive.connectionString;
++    }
++  } catch {
++    // Sem contexto Cloudflare (build local / next build): usa o fallback.
++  }
++  return process.env.DATABASE_URL ?? null;
++}
++
+ function getDb(): NodePgDatabase<Record<string, never>> {
+   if (cachedDrizzle) {
+     return cachedDrizzle;
+   }
+ 
+-  const databaseUrl = process.env.DATABASE_URL;
++  const databaseUrl = resolveConnectionString();
+   if (!databaseUrl) {
+     throw new Error("DATABASE_URL is required");
+   }
+diff --git a/wrangler.jsonc b/wrangler.jsonc
+index a00cefe..3965388 100644
+--- a/wrangler.jsonc
++++ b/wrangler.jsonc
+@@ -20,6 +20,13 @@
+       "service": "trading-pro"
+     }
+   ],
++  "hyperdrive": [
++    {
++      "binding": "HYPERDRIVE",
++      "id": "4554e21f2958480ba76d1f38ffb617ed",
++      "localConnectionString": "postgresql://neondb_owner:SUA_SENHA@ep-rapid-mouse-axn748xt-pooler.c-4.us-east-2.aws.neon.tech/neondb?sslmode=require"
++    }
++  ],
+   "observability": {
+     "enabled": true
+   }

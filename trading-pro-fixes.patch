@@ -1,0 +1,295 @@
+diff --git a/src/app/api/trades/demo/route.ts b/src/app/api/trades/demo/route.ts
+deleted file mode 100644
+index e9bf7c3..0000000
+--- a/src/app/api/trades/demo/route.ts
++++ /dev/null
+@@ -1,91 +0,0 @@
+-import { db } from "@/db";
+-import { trades } from "@/db/schema";
+-import { eq } from "drizzle-orm";
+-
+-export const dynamic = "force-dynamic";
+-
+-const demoTrades = [
+-  {
+-    date: "2026-07-01", time: "10:15", asset: "EURUSD", direction: "BUY", session: "Nova York",
+-    timeframeEntry: "15m", timeframeContext: "1H", setup: "FVG + OB",
+-    entryPrice: "1.08500", stopLoss: "1.08300", takeProfit: "1.08900", positionSize: "1.0",
+-    accountBalanceAtTrade: "10000", riskPercent: 2.5, riskAmount: "250", plannedRR: 2.0, realizedRR: 2.1,
+-    resultAmount: "420", resultR: 2.1, resultPercent: 4.2, resultType: "WIN",
+-    htfBias: "Bullish", ltfBias: "Bullish", liquidityType: "Fundo do dia anterior", liquiditySwept: "Sim",
+-    fvg: true, orderBlock: true, sweepLiquidity: true, displacement: true, trendConfirmation: true, amd: true,
+-    premiumDiscount: "Discount", macroEvent: "NFP", macroCurrency: "USD", macroImpact: "Alto", macroBias: "Bullish",
+-    followedPlan: true, emotionalBefore: "Confiante", emotionalAfter: "Satisfeito",
+-    whatWentRight: "Seguiu o plano perfeitamente.", notes: "Operação de alta qualidade.", isDemo: true,
+-  },
+-  {
+-    date: "2026-07-01", time: "11:30", asset: "GBPUSD", direction: "SELL", session: "Nova York",
+-    timeframeEntry: "15m", timeframeContext: "1H", setup: "OB",
+-    entryPrice: "1.26500", stopLoss: "1.26750", takeProfit: "1.26000", positionSize: "1.0",
+-    accountBalanceAtTrade: "10420", riskPercent: 2.5, riskAmount: "260", plannedRR: 2.0, realizedRR: -1.0,
+-    resultAmount: "-210", resultR: -1.0, resultPercent: -2.1, resultType: "LOSS",
+-    htfBias: "Bearish", ltfBias: "Bearish", liquidityType: "Topo de Londres", liquiditySwept: "Não",
+-    choch: true, orderBlock: true, breaker: true, premiumDiscount: "Premium",
+-    macroEvent: "CPI", macroCurrency: "USD", macroImpact: "Alto", macroBias: "Bearish",
+-    followedPlan: false, earlyEntry: true, emotionalBefore: "Ansioso", emotionalAfter: "Frustrado",
+-    whatWentWrong: "Não respeitou o stop.", notes: "Erro de disciplina.", isDemo: true,
+-  },
+-  {
+-    date: "2026-07-02", time: "09:45", asset: "XAUUSD", direction: "BUY", session: "Londres",
+-    timeframeEntry: "15m", timeframeContext: "4H", setup: "FVG + OB",
+-    entryPrice: "2330.50", stopLoss: "2325.00", takeProfit: "2345.00", positionSize: "0.5",
+-    accountBalanceAtTrade: "10210", riskPercent: 2.5, riskAmount: "255", plannedRR: 3.0, realizedRR: 3.2,
+-    resultAmount: "680", resultR: 3.2, resultPercent: 5.3, resultType: "WIN",
+-    htfBias: "Bullish", ltfBias: "Bullish", liquidityType: "Fundo da Ásia", liquiditySwept: "Sim",
+-    bos: true, fvg: true, orderBlock: true, sweepLiquidity: true, displacement: true, trendConfirmation: true, amd: true,
+-    premiumDiscount: "Discount", macroEvent: "GDP", macroCurrency: "USD", macroImpact: "Médio", macroBias: "Bullish",
+-    followedPlan: true, emotionalBefore: "Confiante", emotionalAfter: "Satisfeito",
+-    whatWentRight: "Liquidez confirmada.", notes: "Excelente operação.", isDemo: true,
+-  },
+-  {
+-    date: "2026-07-03", time: "10:00", asset: "EURUSD", direction: "BUY", session: "Nova York",
+-    timeframeEntry: "15m", timeframeContext: "1H", setup: "FVG + OB",
+-    entryPrice: "1.08600", stopLoss: "1.08400", takeProfit: "1.09000", positionSize: "1.0",
+-    accountBalanceAtTrade: "10850", riskPercent: 2.5, riskAmount: "271", plannedRR: 3.0, realizedRR: 0,
+-    resultAmount: "0", resultR: 0, resultPercent: 0, resultType: "BREAK EVEN",
+-    htfBias: "Bullish", ltfBias: "Bullish", liquidityType: "Fundo de Londres", liquiditySwept: "Sim",
+-    fvg: true, orderBlock: true, trendConfirmation: true, amd: true, premiumDiscount: "Premium",
+-    macroImpact: "Baixo", macroBias: "Neutro", followedPlan: true,
+-    emotionalBefore: "Neutro", emotionalAfter: "Neutro", notes: "Break even.", isDemo: true,
+-  },
+-  {
+-    date: "2026-07-05", time: "14:00", asset: "BTCUSD", direction: "SELL", session: "Nova York",
+-    timeframeEntry: "5m", timeframeContext: "15m", setup: "FVG",
+-    entryPrice: "67200", stopLoss: "67900", takeProfit: "65500", positionSize: "0.02",
+-    accountBalanceAtTrade: "10980", riskPercent: 2.5, riskAmount: "275", plannedRR: 2.8, realizedRR: -1.5,
+-    resultAmount: "-150", resultR: -0.75, resultPercent: -1.5, resultType: "LOSS",
+-    htfBias: "Bearish", ltfBias: "Neutro", liquidityType: "Topo do dia anterior", liquiditySwept: "Parcial",
+-    choch: true, overtrading: true, premiumDiscount: "Premium",
+-    macroEvent: "Interest Rate", macroCurrency: "USD", macroImpact: "Alto", macroBias: "Bearish",
+-    followedPlan: false, earlyExit: true, fomo: true, emotionalBefore: "Eufórico", emotionalAfter: "Ansioso",
+-    whatWentWrong: "Não respeitou o stop.", lesson: "Evitar euforia antes de operar.", notes: "Operação emocional.", isDemo: true,
+-  },
+-] as const;
+-
+-export async function POST() {
+-  try {
+-    const values = demoTrades.map((t) => ({
+-      ...t,
+-      date: new Date(t.date),
+-    }));
+-    await db.insert(trades).values(values as never);
+-    return Response.json({ ok: true, inserted: values.length });
+-  } catch (error) {
+-    console.error(error);
+-    return Response.json({ error: "Failed to seed demo trades" }, { status: 500 });
+-  }
+-}
+-
+-export async function DELETE() {
+-  try {
+-    await db.delete(trades).where(eq(trades.isDemo, true));
+-    return Response.json({ ok: true });
+-  } catch (error) {
+-    console.error(error);
+-    return Response.json({ error: "Failed to remove demo trades" }, { status: 500 });
+-  }
+-}
+diff --git a/src/app/api/trades/route.ts b/src/app/api/trades/route.ts
+index ed18404..2951979 100644
+--- a/src/app/api/trades/route.ts
++++ b/src/app/api/trades/route.ts
+@@ -8,7 +8,12 @@ export const dynamic = "force-dynamic";
+ 
+ export async function GET() {
+   try {
+-    const rows = await db.select().from(trades).orderBy(desc(trades.date), desc(trades.time));
++    // Exclui os dados de demonstração (isDemo) da listagem principal.
++    const rows = await db
++      .select()
++      .from(trades)
++      .where(eq(trades.isDemo, false))
++      .orderBy(desc(trades.date), desc(trades.time));
+     return Response.json(rows.map(serializeTrade));
+   } catch (error) {
+     console.error(error);
+@@ -44,18 +49,3 @@ export async function POST(request: Request) {
+     return Response.json({ error: "Failed to create trade" }, { status: 500 });
+   }
+ }
+-
+-export async function DELETE(request: Request) {
+-  try {
+-    const { searchParams } = new URL(request.url);
+-    const demoOnly = searchParams.get("demo") === "true";
+-    if (demoOnly) {
+-      await db.delete(trades).where(eq(trades.isDemo, true));
+-      return Response.json({ ok: true });
+-    }
+-    return Response.json({ error: "Missing filter" }, { status: 400 });
+-  } catch (error) {
+-    console.error(error);
+-    return Response.json({ error: "Failed to delete trades" }, { status: 500 });
+-  }
+-}
+diff --git a/src/app/configuracoes/page.tsx b/src/app/configuracoes/page.tsx
+index 22aedd2..3a16d34 100644
+--- a/src/app/configuracoes/page.tsx
++++ b/src/app/configuracoes/page.tsx
+@@ -1,15 +1,14 @@
+ "use client";
+ 
+ import { useEffect, useState } from "react";
+-import { Save, Trash2, Database, CheckCircle2, Palette, Wallet, ShieldAlert, Beaker } from "lucide-react";
+-import { useConfig, useTrades } from "@/hooks/useTradeData";
++import { Save, CheckCircle2, Palette, Wallet, ShieldAlert, Beaker } from "lucide-react";
++import { useConfig } from "@/hooks/useTradeData";
+ import { useTheme } from "@/components/ThemeProvider";
+ import AppearanceControls from "@/components/AppearanceControls";
+ import NumberInput from "@/components/NumberInput";
+ 
+ export default function ConfiguracoesPage() {
+   const { config, save } = useConfig();
+-  const { trades, refetch } = useTrades();
+   const { prefs } = useTheme();
+   const [form, setForm] = useState({
+     accountName: "Minha Conta",
+@@ -58,19 +57,6 @@ export default function ConfiguracoesPage() {
+     }
+   };
+ 
+-  const removeDemoData = async () => {
+-    if (!confirm("Remover todos os dados de demonstração?")) return;
+-    await fetch("/api/trades/demo", { method: "DELETE" });
+-    refetch();
+-  };
+-
+-  const loadDemoData = async () => {
+-    await fetch("/api/trades/demo", { method: "POST" });
+-    refetch();
+-  };
+-
+-  const hasDemo = trades.some((t) => t.isDemo);
+-
+   return (
+     <div className="p-4 md:p-6 lg:p-8 max-w-[1200px] mx-auto">
+       <header className="mb-6 md:mb-8">
+@@ -168,20 +154,6 @@ export default function ConfiguracoesPage() {
+           {saved ? <CheckCircle2 size={16} /> : <Save size={16} />} {saving ? "Salvando..." : saved ? "Salvo!" : "Salvar Configurações"}
+         </button>
+       </div>
+-
+-      <section className="glass-card-strong p-5 md:p-6">
+-        <div className="flex items-center gap-2 mb-4">
+-          <Database size={16} className="text-sky" />
+-          <h2 className="text-base font-bold text-text-primary">Dados de Demonstração</h2>
+-        </div>
+-        <p className="text-xs text-text-muted mb-4">Use dados fictícios para testar o dashboard, gráficos e métricas. Eles são claramente identificados e podem ser removidos a qualquer momento.</p>
+-        <div className="flex gap-3">
+-          <button onClick={loadDemoData} disabled={hasDemo} className="text-xs font-bold text-sky hover:underline disabled:opacity-40 disabled:no-underline">Carregar dados de demonstração</button>
+-          <button onClick={removeDemoData} disabled={!hasDemo} className="inline-flex items-center gap-1.5 text-xs font-bold text-rose hover:underline disabled:opacity-40 disabled:no-underline">
+-            <Trash2 size={13} /> Remover dados de demonstração
+-          </button>
+-        </div>
+-      </section>
+     </div>
+   );
+ }
+diff --git a/src/app/operacoes/page.tsx b/src/app/operacoes/page.tsx
+index 2f0aa24..ad901d3 100644
+--- a/src/app/operacoes/page.tsx
++++ b/src/app/operacoes/page.tsx
+@@ -34,8 +34,12 @@ export default function OperacoesPage() {
+     if (!confirm("Tem certeza que deseja excluir esta operação?")) return;
+     setDeletingId(id);
+     try {
+-      await fetch(`/api/trades/${id}`, { method: "DELETE" });
++      const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
++      if (!res.ok) throw new Error("Não foi possível excluir a operação.");
++      // Atualiza a lista imediatamente (sem precisar de F5).
+       await refetch();
++    } catch (err) {
++      alert(err instanceof Error ? err.message : "Erro ao excluir a operação.");
+     } finally {
+       setDeletingId(null);
+     }
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index a2290a2..dd342e3 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ import { useMemo, useState } from "react";
+ import Link from "next/link";
+-import { Plus, BarChart3, Target, Clock, ShieldCheck, ChevronRight, Trash2, Info } from "lucide-react";
++import { Plus, BarChart3, Target, Clock, ShieldCheck, ChevronRight } from "lucide-react";
+ import StatCard from "@/components/StatCard";
+ import CapitalChart from "@/components/CapitalChart";
+ import GlobalFilters, { FilterState, defaultFilters, applyFilters } from "@/components/GlobalFilters";
+@@ -14,7 +14,7 @@ import { computeAccount } from "@/lib/account";
+ import { formatCurrency, formatPercent, formatR, formatNumber } from "@/lib/utils";
+ 
+ export default function DashboardPage() {
+-  const { trades, loading, refetch } = useTrades();
++  const { trades, loading } = useTrades();
+   const { config } = useConfig();
+   const [filters, setFilters] = useState<FilterState>(defaultFilters);
+ 
+@@ -27,18 +27,6 @@ export default function DashboardPage() {
+   const bySession = useMemo(() => groupBySession(filteredTrades), [filteredTrades]);
+   const discipline = useMemo(() => disciplineStats(filteredTrades), [filteredTrades]);
+   const calendarMap = useMemo(() => buildCalendarData(filteredTrades), [filteredTrades]);
+-  const hasDemo = trades.some((t) => t.isDemo);
+-
+-  const removeDemoData = async () => {
+-    if (!confirm("Remover todos os dados de demonstração? Essa ação não pode ser desfeita.")) return;
+-    await fetch("/api/trades/demo", { method: "DELETE" });
+-    refetch();
+-  };
+-
+-  const loadDemoData = async () => {
+-    await fetch("/api/trades/demo", { method: "POST" });
+-    refetch();
+-  };
+ 
+   // Last 14 days for calendar preview (based on the most recent trade date, or today)
+   const previewDays = useMemo(() => {
+@@ -84,24 +72,11 @@ export default function DashboardPage() {
+       {/* Command Center */}
+       <CommandCenter />
+ 
+-      {hasDemo && (
+-        <div className="glass-card p-3.5 mb-6 flex flex-wrap items-center justify-between gap-3 border border-sky/20">
+-          <div className="flex items-center gap-2.5">
+-            <Info size={16} className="text-sky shrink-0" />
+-            <p className="text-xs text-slate-300"><span className="font-bold text-sky">DADOS DE DEMONSTRAÇÃO</span> incluídos para você testar o sistema. Eles não representam operações reais.</p>
+-          </div>
+-          <button onClick={removeDemoData} className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose hover:text-rose-bright transition px-3 py-1.5 rounded-lg border border-rose/20 hover:bg-rose/10">
+-            <Trash2 size={13} /> Remover dados demo
+-          </button>
+-        </div>
+-      )}
+-
+-      {!hasDemo && trades.length === 0 && (
++      {trades.length === 0 && (
+         <div className="glass-card p-5 mb-6 text-center">
+           <p className="text-sm text-slate-300 mb-3">Você ainda não tem operações registradas. Saldo inicial: <span className="font-bold text-text-primary">{formatCurrency(initialCapital)}</span></p>
+           <div className="flex justify-center gap-3">
+             <Link href="/operacoes/novo" className="text-xs font-bold text-emerald hover:underline">+ Registrar primeira operação</Link>
+-            <button onClick={loadDemoData} className="text-xs font-bold text-sky hover:underline">Carregar dados de demonstração</button>
+           </div>
+         </div>
+       )}
+diff --git a/src/hooks/useTradeData.ts b/src/hooks/useTradeData.ts
+index eb96bc1..7e5f411 100644
+--- a/src/hooks/useTradeData.ts
++++ b/src/hooks/useTradeData.ts
+@@ -10,7 +10,7 @@ export function useTrades() {
+   const refetch = useCallback(async () => {
+     setLoading(true);
+     try {
+-      const res = await fetch("/api/trades");
++      const res = await fetch("/api/trades", { cache: "no-store" });
+       if (!res.ok) throw new Error("Falha ao carregar operações");
+       const data = await res.json();
+       setTrades(data);

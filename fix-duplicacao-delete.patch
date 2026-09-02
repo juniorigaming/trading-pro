@@ -1,0 +1,349 @@
+diff --git a/src/app/api/trades/[id]/route.ts b/src/app/api/trades/[id]/route.ts
+index 81b16f7..db64e94 100644
+--- a/src/app/api/trades/[id]/route.ts
++++ b/src/app/api/trades/[id]/route.ts
+@@ -6,13 +6,15 @@ import { mapTradeValues } from "@/lib/trade-mapper";
+ 
+ export const dynamic = "force-dynamic";
+ 
++const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } as const;
++
+ export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+   const { id } = await params;
+   const rows = await getDb().select().from(trades).where(eq(trades.id, Number(id))).limit(1);
+   if (rows.length === 0) {
+-    return Response.json({ error: "Trade not found" }, { status: 404 });
++    return Response.json({ error: "Trade not found" }, { status: 404, headers: NO_STORE });
+   }
+-  return Response.json(serializeTrade(rows[0]));
++  return Response.json(serializeTrade(rows[0]), { headers: NO_STORE });
+ }
+ 
+ export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+@@ -36,10 +38,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id:
+       .returning();
+ 
+     if (!updated) {
+-      return Response.json({ error: "Trade not found" }, { status: 404 });
++      return Response.json({ error: "Trade not found" }, { status: 404, headers: NO_STORE });
+     }
+ 
+-    return Response.json(serializeTrade(updated));
++    return Response.json(serializeTrade(updated), { headers: NO_STORE });
+   } catch (error) {
+     console.error(error);
+     return Response.json({ error: "Failed to update trade" }, { status: 500 });
+@@ -50,7 +52,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
+   try {
+     const { id } = await params;
+     await getDb().delete(trades).where(eq(trades.id, Number(id)));
+-    return Response.json({ ok: true });
++    return Response.json({ ok: true }, { headers: NO_STORE });
+   } catch (error) {
+     console.error(error);
+     return Response.json({ error: "Failed to delete trade" }, { status: 500 });
+diff --git a/src/app/api/trades/route.ts b/src/app/api/trades/route.ts
+index c6b6300..35f9854 100644
+--- a/src/app/api/trades/route.ts
++++ b/src/app/api/trades/route.ts
+@@ -14,7 +14,11 @@ export async function GET() {
+       .from(trades)
+       .where(eq(trades.isDemo, false))
+       .orderBy(desc(trades.date), desc(trades.time));
+-    return Response.json(rows.map(serializeTrade));
++    // Garante que nem o navegador, nem o CDN/edge da Cloudflare, guardem esta
++    // resposta — assim a listagem reflete exclusões/criações na hora (sem F5).
++    return Response.json(rows.map(serializeTrade), {
++      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
++    });
+   } catch (error) {
+     console.error(error);
+     return Response.json({ error: "Failed to load trades" }, { status: 500 });
+@@ -43,7 +47,10 @@ export async function POST(request: Request) {
+       await getDb().delete(trades).where(eq(trades.isDemo, true));
+     }
+ 
+-    return Response.json(serializeTrade(inserted), { status: 201 });
++    return Response.json(serializeTrade(inserted), {
++      status: 201,
++      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
++    });
+   } catch (error) {
+     console.error(error);
+     return Response.json({ error: "Failed to create trade" }, { status: 500 });
+diff --git a/src/app/operacoes/page.tsx b/src/app/operacoes/page.tsx
+index ad901d3..c35bbc9 100644
+--- a/src/app/operacoes/page.tsx
++++ b/src/app/operacoes/page.tsx
+@@ -8,7 +8,7 @@ import { formatCurrency, formatR } from "@/lib/utils";
+ import { Trade } from "@/lib/types";
+ 
+ export default function OperacoesPage() {
+-  const { trades, loading, refetch } = useTrades();
++  const { trades, loading, refetch, removeTrade } = useTrades();
+   const [search, setSearch] = useState("");
+   const [resultFilter, setResultFilter] = useState("Todos");
+   const [assetFilter, setAssetFilter] = useState("all");
+@@ -36,7 +36,9 @@ export default function OperacoesPage() {
+     try {
+       const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
+       if (!res.ok) throw new Error("Não foi possível excluir a operação.");
+-      // Atualiza a lista imediatamente (sem precisar de F5).
++      // Remove da lista local imediatamente, sem esperar refetch nem F5.
++      removeTrade(id);
++      // Atualiza em segundo plano para manter consistência com o servidor.
+       await refetch();
+     } catch (err) {
+       alert(err instanceof Error ? err.message : "Erro ao excluir a operação.");
+diff --git a/src/components/TradeForm.tsx b/src/components/TradeForm.tsx
+index 402870a..7badb66 100644
+--- a/src/components/TradeForm.tsx
++++ b/src/components/TradeForm.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useEffect, useMemo, useState } from "react";
++import { useEffect, useMemo, useRef, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import { Save, ImagePlus, X, AlertCircle } from "lucide-react";
+ import { Trade, Config } from "@/lib/types";
+@@ -141,6 +141,9 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
+   const [step, setStep] = useState(1);
+   const [submitting, setSubmitting] = useState(false);
+   const [formError, setFormError] = useState<string | null>(null);
++  // Guarda síncrona contra envio duplicado (duplo clique / Enter repetido),
++  // que criava duas operações idênticas quando o usuário salvava uma única vez.
++  const submittingRef = useRef(false);
+ 
+   const suggestedBalance = useMemo(() => {
+     if (!config) return 10000;
+@@ -224,96 +227,100 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
+ 
+   const handleSubmit = async (e: React.FormEvent) => {
+     e.preventDefault();
+-    const err = validate();
+-    if (err) {
+-      setFormError(err);
+-      return;
+-    }
+-    setFormError(null);
++    // Se já há um envio em andamento, ignora (evita operação duplicada quando o
++    // usuário clica no Salvar ou pressiona Enter mais de uma vez).
++    if (submittingRef.current) return;
++    submittingRef.current = true;
+     setSubmitting(true);
+-
+-    const plannedRR = preview.plannedRR;
+-    const scoreTrade = {
+-      macroBias: form.macroBias,
+-      dxyBias: form.dxyBias,
+-      htfBias: form.htfBias,
+-      drawOnLiquidity: form.liquidityType,
+-      poi: form.liquidityType,
+-      premiumDiscount: form.premiumDiscount,
+-      displacement: form.displacement,
+-      choch: form.choch,
+-      fvg: form.fvg,
+-      orderBlock: form.orderBlock,
+-      trendConfirmation: form.trendConfirmation,
+-      plannedRR,
+-      riskPercent: parseFloat(form.riskPercent) || null,
+-      liquiditySwept: form.liquiditySwept,
+-    } as never;
+-    const sScore = setupScore(scoreTrade)?.score ?? null;
+-    const eScore = executionScore({
+-      followedPlan: !!form.followedPlan,
+-      earlyEntry: !!form.earlyEntry,
+-      earlyExit: !!form.earlyExit,
+-      revengeTrade: !!form.revengeTrade,
+-      fomo: !!form.fomo,
+-      overtrading: !!form.overtrading,
+-    } as never)?.score ?? null;
+-
+-    const payload = {
+-      date: form.date,
+-      time: form.time,
+-      asset: form.asset,
+-      direction: form.direction,
+-      session: form.session,
+-      timeframeEntry: form.timeframeEntry,
+-      timeframeContext: form.timeframeContext,
+-      setup: form.setup,
+-      entryPrice: form.entryPrice ? parseFloat(form.entryPrice) : null,
+-      stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : null,
+-      takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : null,
+-      positionSize: form.positionSize ? parseFloat(form.positionSize) : null,
+-      accountBalanceAtTrade: form.accountBalanceAtTrade ? parseFloat(form.accountBalanceAtTrade) : null,
+-      riskPercent: form.riskPercent ? parseFloat(form.riskPercent) : null,
+-      riskAmount: form.riskAmount ? parseFloat(form.riskAmount) : preview.riskAmount,
+-      resultAmount: parseFloat(form.resultAmount) || 0,
+-      resultType: form.resultType,
+-      htfBias: form.htfBias,
+-      ltfBias: form.ltfBias,
+-      liquidityType: form.liquidityType,
+-      liquiditySwept: form.liquiditySwept,
+-      bos: !!form.bos,
+-      choch: !!form.choch,
+-      fvg: !!form.fvg,
+-      orderBlock: !!form.orderBlock,
+-      breaker: !!form.breaker,
+-      sweepLiquidity: !!form.sweepLiquidity,
+-      displacement: !!form.displacement,
+-      trendConfirmation: !!form.trendConfirmation,
+-      amd: !!form.amd,
+-      premiumDiscount: form.premiumDiscount,
+-      macroEvent: form.macroEvent,
+-      macroCurrency: form.macroCurrency,
+-      macroImpact: form.macroImpact,
+-      macroBias: form.macroBias,
+-      followedPlan: !!form.followedPlan,
+-      earlyEntry: !!form.earlyEntry,
+-      earlyExit: !!form.earlyExit,
+-      revengeTrade: !!form.revengeTrade,
+-      fomo: !!form.fomo,
+-      overtrading: !!form.overtrading,
+-      emotionalBefore: form.emotionalBefore,
+-      emotionalAfter: form.emotionalAfter,
+-      mistakes: form.mistakes,
+-      whatWentRight: form.whatWentRight,
+-      whatWentWrong: form.whatWentWrong,
+-      lesson: form.lesson,
+-      notes: form.notes,
+-      screenshotUrl: form.screenshotUrl || null,
+-      setupScore: sScore,
+-      executionScore: eScore,
+-    };
+-
+     try {
++      const err = validate();
++      if (err) {
++        setFormError(err);
++        return;
++      }
++      setFormError(null);
++
++      const plannedRR = preview.plannedRR;
++      const scoreTrade = {
++        macroBias: form.macroBias,
++        dxyBias: form.dxyBias,
++        htfBias: form.htfBias,
++        drawOnLiquidity: form.liquidityType,
++        poi: form.liquidityType,
++        premiumDiscount: form.premiumDiscount,
++        displacement: form.displacement,
++        choch: form.choch,
++        fvg: form.fvg,
++        orderBlock: form.orderBlock,
++        trendConfirmation: form.trendConfirmation,
++        plannedRR,
++        riskPercent: parseFloat(form.riskPercent) || null,
++        liquiditySwept: form.liquiditySwept,
++      } as never;
++      const sScore = setupScore(scoreTrade)?.score ?? null;
++      const eScore = executionScore({
++        followedPlan: !!form.followedPlan,
++        earlyEntry: !!form.earlyEntry,
++        earlyExit: !!form.earlyExit,
++        revengeTrade: !!form.revengeTrade,
++        fomo: !!form.fomo,
++        overtrading: !!form.overtrading,
++      } as never)?.score ?? null;
++
++      const payload = {
++        date: form.date,
++        time: form.time,
++        asset: form.asset,
++        direction: form.direction,
++        session: form.session,
++        timeframeEntry: form.timeframeEntry,
++        timeframeContext: form.timeframeContext,
++        setup: form.setup,
++        entryPrice: form.entryPrice ? parseFloat(form.entryPrice) : null,
++        stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : null,
++        takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : null,
++        positionSize: form.positionSize ? parseFloat(form.positionSize) : null,
++        accountBalanceAtTrade: form.accountBalanceAtTrade ? parseFloat(form.accountBalanceAtTrade) : null,
++        riskPercent: form.riskPercent ? parseFloat(form.riskPercent) : null,
++        riskAmount: form.riskAmount ? parseFloat(form.riskAmount) : preview.riskAmount,
++        resultAmount: parseFloat(form.resultAmount) || 0,
++        resultType: form.resultType,
++        htfBias: form.htfBias,
++        ltfBias: form.ltfBias,
++        liquidityType: form.liquidityType,
++        liquiditySwept: form.liquiditySwept,
++        bos: !!form.bos,
++        choch: !!form.choch,
++        fvg: !!form.fvg,
++        orderBlock: !!form.orderBlock,
++        breaker: !!form.breaker,
++        sweepLiquidity: !!form.sweepLiquidity,
++        displacement: !!form.displacement,
++        trendConfirmation: !!form.trendConfirmation,
++        amd: !!form.amd,
++        premiumDiscount: form.premiumDiscount,
++        macroEvent: form.macroEvent,
++        macroCurrency: form.macroCurrency,
++        macroImpact: form.macroImpact,
++        macroBias: form.macroBias,
++        followedPlan: !!form.followedPlan,
++        earlyEntry: !!form.earlyEntry,
++        earlyExit: !!form.earlyExit,
++        revengeTrade: !!form.revengeTrade,
++        fomo: !!form.fomo,
++        overtrading: !!form.overtrading,
++        emotionalBefore: form.emotionalBefore,
++        emotionalAfter: form.emotionalAfter,
++        mistakes: form.mistakes,
++        whatWentRight: form.whatWentRight,
++        whatWentWrong: form.whatWentWrong,
++        lesson: form.lesson,
++        notes: form.notes,
++        screenshotUrl: form.screenshotUrl || null,
++        setupScore: sScore,
++        executionScore: eScore,
++      };
++
+       const url = trade ? `/api/trades/${trade.id}` : "/api/trades";
+       const method = trade ? "PUT" : "POST";
+       const res = await fetch(url, {
+@@ -330,6 +337,8 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
+     } catch (err) {
+       setFormError(err instanceof Error ? err.message : "Erro ao salvar operação");
+     } finally {
++      // Libera a guarda para permitir uma nova tentativa.
++      submittingRef.current = false;
+       setSubmitting(false);
+     }
+   };
+diff --git a/src/hooks/useTradeData.ts b/src/hooks/useTradeData.ts
+index 7e5f411..01319c3 100644
+--- a/src/hooks/useTradeData.ts
++++ b/src/hooks/useTradeData.ts
+@@ -10,7 +10,7 @@ export function useTrades() {
+   const refetch = useCallback(async () => {
+     setLoading(true);
+     try {
+-      const res = await fetch("/api/trades", { cache: "no-store" });
++      const res = await fetch(`/api/trades?t=${Date.now()}`, { cache: "no-store" });
+       if (!res.ok) throw new Error("Falha ao carregar operações");
+       const data = await res.json();
+       setTrades(data);
+@@ -22,11 +22,17 @@ export function useTrades() {
+     }
+   }, []);
+ 
++  // Remove uma operação da lista em memória imediatamente, sem depender do
++  // servidor/cache — faz a tela refletir a exclusão na hora (sem F5).
++  const removeTrade = useCallback((id: number) => {
++    setTrades((prev) => prev.filter((t) => t.id !== id));
++  }, []);
++
+   useEffect(() => {
+     refetch();
+   }, [refetch]);
+ 
+-  return { trades, loading, error, refetch };
++  return { trades, loading, error, refetch, removeTrade };
+ }
+ 
+ const CONFIG_NUMERIC_KEYS = [
