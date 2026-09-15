@@ -1,11 +1,52 @@
 import { getDb } from "@/db";
 import { trades } from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { serializeTrade, TradeInput } from "@/lib/trade-utils";
 import { mapTradeValues } from "@/lib/trade-mapper";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// Função que tenta inserir e se falhar por coluna inexistente, remove a coluna e tenta de novo
+async function resilientInsert(values: any) {
+  let attemptValues = { ...values };
+  const maxRetries = 10;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const [inserted] = await getDb().insert(trades).values(attemptValues).returning();
+      return inserted;
+    } catch (e: any) {
+      const msg = e.message || "";
+      // Tenta extrair nome da coluna do erro: column "xxx" of relation "trades" does not exist
+      const match = msg.match(/column "([^"]+)" of relation "trades" does not exist/);
+      const match2 = msg.match(/column "([^"]+)" does not exist/);
+      const colName = match?.[1] || match2?.[1];
+      
+      if (colName) {
+        console.warn(`[resilientInsert] Coluna ${colName} não existe, removendo e tentando de novo (tentativa ${i+1})`);
+        // Converte snake_case para camelCase para achar no objeto
+        // Ex: setup_score -> setupScore
+        const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+        // Tenta remover tanto snake quanto camel
+        delete attemptValues[colName];
+        delete attemptValues[camel];
+        // Também tenta remover do objeto original mapeado
+        // Lista de possíveis chaves
+        const keys = Object.keys(attemptValues);
+        for (const k of keys) {
+          if (k.toLowerCase() === colName || k.toLowerCase() === colName.replace(/_/g, "")) {
+            delete attemptValues[k];
+          }
+        }
+        continue;
+      }
+      // Se não é erro de coluna, lança
+      throw e;
+    }
+  }
+  throw new Error("Falha após múltiplas tentativas de inserir - verifique schema");
+}
 
 export async function GET(request: Request) {
   const start = Date.now();
@@ -14,13 +55,10 @@ export async function GET(request: Request) {
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 100);
     const offset = parseInt(url.searchParams.get("offset") || "0");
 
-    console.log(`[GET /api/trades] Starting - limit=${limit}`);
-
     let db;
     try {
       db = getDb();
     } catch (dbError: any) {
-      console.error("[GET /api/trades] getDb() failed:", dbError.message);
       return Response.json([], {
         headers: { "Cache-Control": "no-store", "X-DB-Error": dbError.message },
       });
@@ -28,7 +66,6 @@ export async function GET(request: Request) {
 
     let rows: any[] = [];
     
-    // TENTATIVA 1: Query mínima garantida (só colunas que sempre existem)
     try {
       rows = await db
         .select({
@@ -47,68 +84,30 @@ export async function GET(request: Request) {
         .orderBy(desc(trades.date))
         .limit(limit)
         .offset(offset);
-      
-      console.log(`[GET /api/trades] Minimal query OK - ${rows.length} rows in ${Date.now() - start}ms`);
     } catch (e1: any) {
-      console.warn(`[GET /api/trades] Minimal query failed: ${e1.message}, trying SELECT *`);
-      
-      // TENTATIVA 2: SELECT * completo (fallback)
+      console.warn(`[GET] Minimal query failed: ${e1.message}, fallback SELECT *`);
       try {
-        const allRows = await db
-          .select()
-          .from(trades)
-          .where(eq(trades.isDemo, false))
-          .orderBy(desc(trades.date))
-          .limit(limit)
-          .offset(offset);
-        
-        // Remove campos gigantes antes de retornar
+        const allRows = await db.select().from(trades).where(eq(trades.isDemo, false)).orderBy(desc(trades.date)).limit(limit).offset(offset);
         rows = allRows.map((r: any) => {
           const { screenshotUrl, preTradeScreenshotUrl, postEntryScreenshotUrl, postExitScreenshotUrl, dxyScreenshotUrl, ...rest } = r;
           return rest;
         });
-        console.log(`[GET /api/trades] Fallback SELECT * OK - ${rows.length} rows`);
       } catch (e2: any) {
-        console.error(`[GET /api/trades] Both queries failed. E1: ${e1.message} | E2: ${e2.message}`);
-        
-        // TENTATIVA 3: Query sem filtro isDemo (caso coluna is_demo não exista)
-        try {
-          const allRows = await db
-            .select()
-            .from(trades)
-            .orderBy(desc(trades.date))
-            .limit(limit);
-          
-          rows = allRows.map((r: any) => {
-            const { screenshotUrl, ...rest } = r;
-            return rest;
-          });
-          console.log(`[GET /api/trades] No-filter fallback OK - ${rows.length} rows`);
-        } catch (e3: any) {
-          console.error(`[GET /api/trades] All 3 attempts failed. Returning empty array. Last error: ${e3.message}`);
-          // NUNCA retorna 500 - retorna array vazio pra não quebrar frontend
-          rows = [];
-        }
+        console.error(`[GET] All queries failed: ${e2.message}, returning empty`);
+        rows = [];
       }
     }
 
     return Response.json(rows.map(serializeTrade), {
       headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Cache-Control": "no-store",
         "X-Query-Time": `${Date.now() - start}ms`,
       },
     });
   } catch (error: any) {
-    const duration = Date.now() - start;
-    console.error(`[GET /api/trades] FATAL - Returning empty array to avoid 500. Error in ${duration}ms:`, error.message, error.stack);
-    // CRÍTICO: Nunca retorna 500, sempre 200 com array vazio + header de erro
-    // Isso evita "Erro 500 - Tentar novamente" no frontend
+    console.error(`[GET] FATAL:`, error.message);
     return Response.json([], {
-      headers: {
-        "Cache-Control": "no-store",
-        "X-Error": error.message,
-        "X-Duration": `${duration}ms`,
-      },
+      headers: { "Cache-Control": "no-store", "X-Error": error.message },
     });
   }
 }
@@ -126,14 +125,36 @@ export async function POST(request: Request) {
     }
 
     const { db: values } = mapTradeValues(body);
-    const [inserted] = await getDb().insert(trades).values(values).returning();
+    
+    console.log("[POST] Tentando inserir:", body.asset, body.resultType);
+    
+    let inserted;
+    try {
+      inserted = await resilientInsert(values);
+    } catch (e: any) {
+      console.error("[POST] resilientInsert falhou, tentando insert mínimo:", e.message);
+      // Fallback extremo: só campos obrigatórios
+      const minimal = {
+        date: values.date,
+        time: values.time,
+        asset: values.asset,
+        direction: values.direction,
+        session: values.session,
+        resultAmount: values.resultAmount,
+        resultType: values.resultType,
+      };
+      const [minInserted] = await getDb().insert(trades).values(minimal as any).returning();
+      inserted = minInserted;
+    }
+
+    console.log("[POST] Inserido id:", inserted.id);
 
     return Response.json(serializeTrade(inserted), {
       status: 201,
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error: any) {
-    console.error("[POST /api/trades] Error:", error.message, error.stack);
+    console.error("[POST] Error:", error.message, error.stack);
     return Response.json({ error: "Failed to create trade", details: error.message }, { status: 500 });
   }
 }
