@@ -1,115 +1,123 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Trade, Config } from "@/lib/types";
 
-export function useTrades() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+// Cache em memória para navegação instantânea entre abas
+let tradesCache: Trade[] | null = null;
+let tradesCacheTime = 0;
+const CACHE_TTL = 30 * 1000; // 30 segundos - navegação entre abas fica instantânea
 
-  const refetch = useCallback(async () => {
+export function useTrades() {
+  const [trades, setTrades] = useState<Trade[]>(() => {
+    // Se tem cache recente, usa imediatamente - fica rápido
+    if (tradesCache && Date.now() - tradesCacheTime < CACHE_TTL) {
+      return tradesCache;
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(!tradesCache);
+  const [error, setError] = useState<string | null>(null);
+  const fetchingRef = useRef(false);
+
+  const refetch = useCallback(async (force = false) => {
+    // Evita fetch duplicado se já está buscando
+    if (fetchingRef.current && !force) return;
+    
+    // Se tem cache válido e não é force, não busca
+    if (!force && tradesCache && Date.now() - tradesCacheTime < CACHE_TTL) {
+      setTrades(tradesCache);
+      setLoading(false);
+      return;
+    }
+
+    fetchingRef.current = true;
     setLoading(true);
     try {
-      // FIX: Adiciona limit e timestamp para evitar cache e 1102
-      // Antes sem limit, retornava tudo com base64 gigante
-      const res = await fetch(`/api/trades?limit=200&t=${Date.now()}`, { 
+      const start = Date.now();
+      const res = await fetch(`/api/trades?limit=100&t=${Date.now()}`, { 
         cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Falha ao carregar operações (${res.status})`);
+        throw new Error(errData.details || errData.error || `Erro ${res.status}`);
       }
       const data = await res.json();
+      const duration = Date.now() - start;
+      console.log(`[useTrades] Loaded ${data.length} trades in ${duration}ms`);
+      
+      tradesCache = data;
+      tradesCacheTime = Date.now();
       setTrades(data);
       setError(null);
     } catch (e) {
-      console.error("[useTrades] refetch error:", e);
+      console.error("[useTrades] error:", e);
       setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
   }, []);
 
-  // Remove da lista em memória imediatamente - FIX bug de exclusão
   const removeTrade = useCallback((id: number) => {
-    setTrades((prev) => prev.filter((t) => t.id !== id));
+    setTrades((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      tradesCache = next;
+      tradesCacheTime = Date.now();
+      return next;
+    });
   }, []);
 
-  // Adiciona trade na lista imediatamente - FIX bug de cadastro não aparecendo
   const addTrade = useCallback((newTrade: Trade) => {
-    setTrades((prev) => [newTrade, ...prev]);
+    setTrades((prev) => {
+      const next = [newTrade, ...prev];
+      tradesCache = next;
+      tradesCacheTime = Date.now();
+      return next;
+    });
   }, []);
 
   useEffect(() => {
-    refetch();
+    // Só busca se não tem cache
+    if (!tradesCache || Date.now() - tradesCacheTime > CACHE_TTL) {
+      refetch();
+    }
   }, [refetch]);
 
   return { trades, loading, error, refetch, removeTrade, addTrade };
 }
 
-const CONFIG_NUMERIC_KEYS = [
-  "initialCapital",
-  "riskPerTrade",
-  "riskPercent",
-  "dailyGoal",
-  "dailyLossLimit",
-  "maxDrawdown",
-  "totalDeposits",
-  "totalWithdrawals",
-  "weeklyRiskLimit",
-  "monthlyDrawdownLimit",
-  "maxOpenRisk",
-  "maxCorrelatedExposure",
-  "maxTradesPerDay",
-  "sampleSizeWarning",
-  "sampleSizeLow",
-] as const;
-
-const CONFIG_DEFAULTS: Record<(typeof CONFIG_NUMERIC_KEYS)[number], number> = {
-  initialCapital: 10000,
-  riskPerTrade: 250,
-  riskPercent: 2.5,
-  dailyGoal: 500,
-  dailyLossLimit: 350,
-  maxDrawdown: 15,
-  totalDeposits: 0,
-  totalWithdrawals: 0,
-  weeklyRiskLimit: 5,
-  monthlyDrawdownLimit: 10,
-  maxOpenRisk: 2,
-  maxCorrelatedExposure: 3,
-  maxTradesPerDay: 5,
-  sampleSizeWarning: 30,
-  sampleSizeLow: 10,
-};
+// Config com cache também
+let configCache: Config | null = null;
+let configCacheTime = 0;
 
 function coerceConfig(data: Config): Config {
-  const out: Record<string, unknown> = { ...data };
-  for (const key of CONFIG_NUMERIC_KEYS) {
-    const num = Number(out[key]);
-    out[key] = Number.isFinite(num) ? num : CONFIG_DEFAULTS[key];
-  }
-  return out as unknown as Config;
+  return data;
 }
 
 export function useConfig() {
-  const [config, setConfig] = useState<Config | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<Config | null>(() => configCache);
+  const [loading, setLoading] = useState(!configCache);
 
   const refetch = useCallback(async () => {
+    if (configCache && Date.now() - configCacheTime < 60000) {
+      setConfig(configCache);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/config?t=${Date.now()}`, { cache: "no-store" });
       const data = await res.json();
-      setConfig(coerceConfig(data));
+      configCache = data;
+      configCacheTime = Date.now();
+      setConfig(data);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    refetch();
+    if (!configCache) refetch();
   }, [refetch]);
 
   const save = useCallback(async (partial: Partial<Config>) => {
@@ -119,9 +127,10 @@ export function useConfig() {
       body: JSON.stringify(partial),
     });
     const data = await res.json();
-    const coerced = coerceConfig(data);
-    setConfig(coerced);
-    return coerced;
+    configCache = data;
+    configCacheTime = Date.now();
+    setConfig(data);
+    return data;
   }, []);
 
   return { config, loading, refetch, save };

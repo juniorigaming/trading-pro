@@ -4,44 +4,33 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 let cachedPool: Pool | undefined;
 let cachedDrizzle: NodePgDatabase<Record<string, never>> | undefined;
+let cachedConnectionString: string | null = null;
 
 interface HyperdriveBinding {
   connectionString?: string;
 }
 
 function resolveConnectionString(): string | null {
-  // Tenta pegar do Cloudflare context primeiro
+  if (cachedConnectionString) return cachedConnectionString;
+
   try {
     const cf = getCloudflareContext();
     const env = cf.env as any;
-    
-    // Hyperdrive binding
     if (env.HYPERDRIVE?.connectionString) {
-      console.log("[DB] Using HYPERDRIVE connection");
-      return env.HYPERDRIVE.connectionString;
+      cachedConnectionString = env.HYPERDRIVE.connectionString;
+      return cachedConnectionString;
     }
-    
-    // Fallback: DATABASE_URL no env do Cloudflare (Pages/Workers)
     if (env.DATABASE_URL) {
-      console.log("[DB] Using DATABASE_URL from Cloudflare env");
-      return env.DATABASE_URL;
+      cachedConnectionString = env.DATABASE_URL;
+      return cachedConnectionString;
     }
-    
-    // Fallback: DB_URL ou similar
-    if (env.DB_URL) return env.DB_URL;
-    if (env.POSTGRES_URL) return env.POSTGRES_URL;
-  } catch (e) {
-    console.log("[DB] No Cloudflare context, using process.env");
-  }
-  
-  // Fallback local / build
+  } catch {}
+
   if (process.env.DATABASE_URL) {
-    console.log("[DB] Using DATABASE_URL from process.env");
-    return process.env.DATABASE_URL;
+    cachedConnectionString = process.env.DATABASE_URL;
+    return cachedConnectionString;
   }
-  if (process.env.POSTGRES_URL) return process.env.POSTGRES_URL;
-  if (process.env.DATABASE_URL_UNPOOLED) return process.env.DATABASE_URL_UNPOOLED;
-  
+
   return null;
 }
 
@@ -60,24 +49,27 @@ function getDb(): NodePgDatabase<Record<string, never>> {
 
   const databaseUrl = resolveConnectionString();
   if (!databaseUrl) {
-    console.error("[DB] No DATABASE_URL found. Checked HYPERDRIVE, DATABASE_URL, POSTGRES_URL");
-    throw new Error("DATABASE_URL is required - configure HYPERDRIVE ou DATABASE_URL no Cloudflare Dashboard > Settings > Variables");
+    throw new Error("DATABASE_URL missing - configure no Cloudflare Dashboard > Settings > Variables");
   }
 
-  // Pool otimizado para Workers
+  // OTIMIZADO PARA VELOCIDADE: mantém conexão aberta por 60s, não fecha a cada request
   cachedPool = new Pool({
     connectionString: databaseUrl,
-    max: 1,
-    min: 0,
-    idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 10000,
-    allowExitOnIdle: true,
-    // Neon precisa de SSL
-    ssl: databaseUrl.includes("neon.tech") ? { rejectUnauthorized: false } : undefined,
-  } as any);
+    max: 3, // 3 conexões - equilíbrio entre velocidade e limite do Neon Free (10 max)
+    min: 1, // Mantém 1 sempre aberta - evita cold start de 10s
+    idleTimeoutMillis: 60000, // 60s - antes era 10s e fechava toda hora causando lentidão
+    connectionTimeoutMillis: 5000,
+    allowExitOnIdle: false, // NÃO deixa fechar sozinho - mantém quente
+  });
 
   cachedPool.on("error", (err) => {
     console.error("[DB Pool Error]", err.message);
+    // Reseta cache se der erro pra reconectar na próxima
+    cachedPool = undefined;
+    cachedDrizzle = undefined;
+    gCache.__tradingProPool = undefined;
+    gCache.__tradingProDrizzle = undefined;
+    cachedConnectionString = null;
   });
 
   cachedDrizzle = drizzle(cachedPool);
