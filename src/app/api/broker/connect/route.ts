@@ -21,13 +21,11 @@ export async function POST(request: Request) {
 
     console.log(`[Broker Connect] Conectando ${brokerName} ${accountNumber} @ ${server} (${platform})`);
 
-    // Verifica se já existe
     const existing = await getDb().select().from(brokerageAccounts).where(eq(brokerageAccounts.accountNumber, String(accountNumber))).limit(1);
     if (existing.length > 0) {
       return Response.json({ error: "Essa conta já está conectada" }, { status: 409 });
     }
 
-    // Tenta criar no MetaApi
     let metaApiAccountId: string | null = null;
     try {
       const metaAcc = await createMetaApiAccount({
@@ -37,15 +35,15 @@ export async function POST(request: Request) {
         platform: platform.toLowerCase() === "mt4" ? "mt4" : "mt5",
         name: `${brokerName}-${accountNumber}`,
       });
-      metaApiAccountId = metaAcc.id;
+      metaApiAccountId = metaAcc.id as string;
       console.log(`[Broker Connect] MetaApi account created: ${metaApiAccountId}`);
 
-      // Deploia
-      await deployMetaApiAccount(metaApiAccountId);
-      console.log(`[Broker Connect] Deploy iniciado`);
+      if (metaApiAccountId) {
+        await deployMetaApiAccount(metaApiAccountId);
+        console.log(`[Broker Connect] Deploy iniciado`);
+      }
     } catch (e: any) {
-      console.warn(`[Broker Connect] MetaApi falhou (pode ser falta de METAAPI_TOKEN), mas salvando conta local mesmo:`, e.message);
-      // Não falha - salva mesmo sem MetaApi, permite sync manual depois
+      console.warn(`[Broker Connect] MetaApi falhou (pode ser falta de METAAPI_TOKEN), mas salvando conta local:`, e.message);
     }
 
     const [inserted] = await getDb().insert(brokerageAccounts).values({
