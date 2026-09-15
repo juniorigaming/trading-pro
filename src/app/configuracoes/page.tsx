@@ -6,6 +6,7 @@ import { useConfig } from "@/hooks/useTradeData";
 import { useTheme } from "@/components/ThemeProvider";
 import AppearanceControls from "@/components/AppearanceControls";
 import NumberInput from "@/components/NumberInput";
+import BrokerConnect from "@/components/BrokerConnect";
 
 export default function ConfiguracoesPage() {
   const { config, save } = useConfig();
@@ -63,6 +64,11 @@ export default function ConfiguracoesPage() {
         <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Configurações</h1>
         <p className="text-sm text-text-muted mt-1">Personalize sua conta, aparência e preferências</p>
       </header>
+
+      {/* CORRETORAS - NOVO - DooPrime Auto Sync */}
+      <section className="glass-card-strong p-5 md:p-6 mb-6">
+        <BrokerConnect />
+      </section>
 
       {/* APARÊNCIA */}
       <section className="glass-card-strong p-5 md:p-6 mb-6">

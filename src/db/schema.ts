@@ -123,6 +123,22 @@ export const trades = pgTable("trades", {
   isDemo: boolean("is_demo").default(false),
 });
 
+export const brokerageAccounts = pgTable("brokerage_accounts", {
+  id: serial("id").primaryKey(),
+  broker: text("broker").notNull(), // dooprime, binance, etc
+  accountNumber: text("account_number").notNull(),
+  server: text("server").notNull(), // DooPrime-Demo, DooPrime-Live
+  platform: text("platform").notNull(), // MT4, MT5
+  investorPasswordEncrypted: text("investor_password_encrypted"),
+  metaApiAccountId: text("metaapi_account_id"),
+  isActive: boolean("is_active").default(true),
+  lastSyncAt: timestamp("last_sync_at"),
+  balance: decimal("balance", { precision: 18, scale: 2 }),
+  equity: decimal("equity", { precision: 18, scale: 2 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const config = pgTable("config", {
   id: serial("id").primaryKey(),
   key: text("key").notNull().unique(),
