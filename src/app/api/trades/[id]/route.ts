@@ -32,10 +32,9 @@ async function resilientUpdate(id: number, values: any) {
       if (colName) {
         console.warn(`[resilientUpdate] Coluna ${colName} não existe, removendo (tentativa ${i+1})`);
         delete attemptValues[colName];
-        const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+        const camel = colName.replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
         delete attemptValues[camel];
-        // Remove variações
-        Object.keys(attemptValues).forEach(k => {
+        Object.keys(attemptValues).forEach((k: string) => {
           if (k.toLowerCase() === colName.replace(/_/g, "")) delete attemptValues[k];
         });
         continue;

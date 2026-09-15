@@ -7,7 +7,6 @@ import { mapTradeValues } from "@/lib/trade-mapper";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Função que tenta inserir e se falhar por coluna inexistente, remove a coluna e tenta de novo
 async function resilientInsert(values: any) {
   let attemptValues = { ...values };
   const maxRetries = 10;
@@ -18,21 +17,15 @@ async function resilientInsert(values: any) {
       return inserted;
     } catch (e: any) {
       const msg = e.message || "";
-      // Tenta extrair nome da coluna do erro: column "xxx" of relation "trades" does not exist
       const match = msg.match(/column "([^"]+)" of relation "trades" does not exist/);
       const match2 = msg.match(/column "([^"]+)" does not exist/);
       const colName = match?.[1] || match2?.[1];
       
       if (colName) {
         console.warn(`[resilientInsert] Coluna ${colName} não existe, removendo e tentando de novo (tentativa ${i+1})`);
-        // Converte snake_case para camelCase para achar no objeto
-        // Ex: setup_score -> setupScore
-        const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-        // Tenta remover tanto snake quanto camel
+        const camel = colName.replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
         delete attemptValues[colName];
         delete attemptValues[camel];
-        // Também tenta remover do objeto original mapeado
-        // Lista de possíveis chaves
         const keys = Object.keys(attemptValues);
         for (const k of keys) {
           if (k.toLowerCase() === colName || k.toLowerCase() === colName.replace(/_/g, "")) {
@@ -41,7 +34,6 @@ async function resilientInsert(values: any) {
         }
         continue;
       }
-      // Se não é erro de coluna, lança
       throw e;
     }
   }
@@ -126,14 +118,11 @@ export async function POST(request: Request) {
 
     const { db: values } = mapTradeValues(body);
     
-    console.log("[POST] Tentando inserir:", body.asset, body.resultType);
-    
     let inserted;
     try {
       inserted = await resilientInsert(values);
     } catch (e: any) {
       console.error("[POST] resilientInsert falhou, tentando insert mínimo:", e.message);
-      // Fallback extremo: só campos obrigatórios
       const minimal = {
         date: values.date,
         time: values.time,
@@ -146,8 +135,6 @@ export async function POST(request: Request) {
       const [minInserted] = await getDb().insert(trades).values(minimal as any).returning();
       inserted = minInserted;
     }
-
-    console.log("[POST] Inserido id:", inserted.id);
 
     return Response.json(serializeTrade(inserted), {
       status: 201,
