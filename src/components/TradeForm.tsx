@@ -10,9 +10,21 @@ import { setupScore, executionScore } from "@/lib/scores";
 import { formatCurrency } from "@/lib/utils";
 import NumberInput from "@/components/NumberInput";
 
-const ASSETS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "XAUUSD", "NAS100", "US30", "BTCUSD"];
-const SETUPS = ["FVG + OB", "FVG", "Order Block", "Breaker", "Liquidez", "Outro"];
-const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
+// EXPANDIDO: Forex + B3 + Cripto + Futuros US + Ações US - Dashboard Profissional
+const MARKET_GROUPS = {
+  "FOREX - Pares Maiores": ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD"],
+  "FOREX - Cruzados & Metais": ["EURJPY", "GBPJPY", "EURGBP", "EURCHF", "AUDJPY", "XAUUSD", "XAGUSD"],
+  "B3 - Ações": ["PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "ABEV3", "MGLU3", "WEGE3", "B3SA3", "LREN3", "GGBR4", "USIM5", "JBSS3", "RENT3", "RAIL3", "CIEL3", "COGN3", "MRFG3"],
+  "B3 - Índices e Dólar": ["WIN", "WDO", "IND", "DOL", "IBOV", "IBOV Futuro", "Dólar Futuro"],
+  "CRIPTO - Principais": ["BTCUSD", "ETHUSD", "SOLUSD", "BNBUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "AVAXUSD", "LINKUSD", "LTCUSD"],
+  "CRIPTO - BRL": ["BTCBRL", "ETHBRL", "SOLBRL"],
+  "FUTUROS - EUA": ["ES - S&P 500", "NQ - Nasdaq", "YM - Dow Jones", "RTY - Russell", "GC - Ouro Futuro", "SI - Prata Futura", "CL - Petróleo", "NG - Gás Natural"],
+  "AÇÕES & ÍNDICES - EUA": ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "NFLX", "SPY", "QQQ", "NAS100", "US30", "SPX500"],
+};
+
+const ALL_ASSETS = Object.values(MARKET_GROUPS).flat();
+const SETUPS = ["FVG + OB", "FVG", "Order Block", "Breaker", "Liquidez", "ICT - Silver Bullet", "ICT - Killzone", "Break of Structure", "ChoCh + FVG", "Premium/Discount", "Outro"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
 
 const STRUCTURE_FIELDS: { key: keyof Trade; label: string }[] = [
   { key: "trendConfirmation" as keyof Trade, label: "Estrutura HTF definida" },
@@ -134,6 +146,14 @@ function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRis
   };
 }
 
+function detectMarket(asset: string): string {
+  if (MARKET_GROUPS["B3 - Ações"].includes(asset) || MARKET_GROUPS["B3 - Índices e Dólar"].includes(asset)) return "B3";
+  if (MARKET_GROUPS["CRIPTO - Principais"].includes(asset) || MARKET_GROUPS["CRIPTO - BRL"].includes(asset)) return "CRIPTO";
+  if (MARKET_GROUPS["FUTUROS - EUA"].some(a => asset.startsWith(a.split(" - ")[0]))) return "FUTUROS";
+  if (MARKET_GROUPS["AÇÕES & ÍNDICES - EUA"].includes(asset)) return "AÇÕES US";
+  return "FOREX";
+}
+
 export default function TradeForm({ trade }: { trade?: Trade }) {
   const router = useRouter();
   const { config } = useConfig();
@@ -142,6 +162,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const [customAsset, setCustomAsset] = useState(false);
 
   const suggestedBalance = useMemo(() => {
     if (!config) return 10000;
@@ -187,7 +208,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     return { riskAmount, plannedRR, resultR };
   }, [form]);
 
-  // FIX 1102: Compressão de imagem para evitar base64 de 4MB que estoura Worker
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -198,7 +218,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     }
 
     try {
-      // Comprime via canvas para max 1200px e qualidade 0.7
       const compressedBase64 = await compressImage(file, 1200, 0.7);
       
       if (compressedBase64.length > 1_200_000) {
@@ -210,7 +229,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       update("screenshotUrl", compressedBase64);
     } catch (err) {
       console.error("Erro ao comprimir imagem:", err);
-      // Fallback: tenta ler direto se compressão falhar, mas com limite
       if (file.size > 1_000_000) {
         setFormError("Imagem muito grande (max 1MB sem compressão). Tente outra imagem.");
         return;
@@ -229,17 +247,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     if (form.resultAmount === "" || form.resultAmount === undefined) return "Resultado é obrigatório.";
     const riskAmount = parseFloat(form.riskAmount) || preview.riskAmount;
     if (riskAmount != null && riskAmount < 0) return "Risco não pode ser negativo.";
-    const entry = parseFloat(form.entryPrice);
-    const sl = parseFloat(form.stopLoss);
-    const tp = parseFloat(form.takeProfit);
-    if (!isNaN(entry) && !isNaN(sl) && !isNaN(tp)) {
-      if (form.direction === "BUY" && !(sl < entry && tp > entry)) {
-        return "Para operações BUY, o Stop Loss deve ser menor e o Take Profit maior que a entrada.";
-      }
-      if (form.direction === "SELL" && !(sl > entry && tp < entry)) {
-        return "Para operações SELL, o Stop Loss deve ser maior e o Take Profit menor que a entrada.";
-      }
-    }
     return null;
   };
 
@@ -347,24 +354,25 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         body: JSON.stringify(payload),
         cache: "no-store",
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Erro desconhecido" }));
-        throw new Error(data.error || "Erro ao salvar operação");
+        throw new Error(data.error || data.details || `Erro ${res.status}: Falha ao salvar`);
       }
-      // FIX: Força recarregamento sem cache para garantir que nova operação apareça
       router.push("/operacoes");
       router.refresh();
-      // Fallback extra: hard reload se router.refresh não atualizar
       setTimeout(() => {
         window.location.href = "/operacoes";
-      }, 300);
+      }, 500);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Erro ao salvar operação");
+      console.error("Submit error:", err);
+      setFormError(err instanceof Error ? err.message : "Erro ao salvar operação - verifique console");
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
   };
+
+  const marketType = detectMarket(form.asset);
 
   return (
     <div className="glass-card-strong p-5 md:p-6">
@@ -410,9 +418,52 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <FormField label="Data *" type="date" value={form.date} onChange={(v) => update("date", v)} />
             <FormField label="Horário *" type="time" value={form.time} onChange={(v) => update("time", v)} />
-            <FormSelect label="Ativo *" value={form.asset} onChange={(v) => update("asset", v)} options={ASSETS.map((a) => ({ value: a, label: a }))} />
-            <FormSelect label="Direção *" value={form.direction} onChange={(v) => update("direction", v)} options={[{ value: "BUY", label: "BUY" }, { value: "SELL", label: "SELL" }]} />
-            <FormSelect label="Sessão" value={form.session} onChange={(v) => update("session", v)} options={["Ásia", "Londres", "Nova York", "Outro"].map((s) => ({ value: s, label: s }))} />
+            
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold flex items-center gap-2">
+                Ativo * <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet/20 text-violet">{marketType}</span>
+              </label>
+              {!customAsset ? (
+                <div className="flex gap-2">
+                  <select
+                    value={form.asset}
+                    onChange={(e) => {
+                      if (e.target.value === "__custom") {
+                        setCustomAsset(true);
+                      } else {
+                        update("asset", e.target.value);
+                      }
+                    }}
+                    className="flex-1 bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-emerald/30 transition appearance-none cursor-pointer"
+                  >
+                    {Object.entries(MARKET_GROUPS).map(([group, assets]) => (
+                      <optgroup key={group} label={group}>
+                        {assets.map((a) => (
+                          <option key={a} value={a}>{a}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    <optgroup label="Outros">
+                      <option value="__custom">+ Digitar outro ativo...</option>
+                    </optgroup>
+                  </select>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={form.asset}
+                    onChange={(e) => update("asset", e.target.value.toUpperCase())}
+                    placeholder="Ex: PETR4, BTCUSD, ES"
+                    className="flex-1 bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald/30 transition"
+                  />
+                  <button type="button" onClick={() => setCustomAsset(false)} className="px-3 py-2 bg-dark-700 rounded-xl text-xs">Lista</button>
+                </div>
+              )}
+            </div>
+
+            <FormSelect label="Direção *" value={form.direction} onChange={(v) => update("direction", v)} options={[{ value: "BUY", label: "BUY / Compra" }, { value: "SELL", label: "SELL / Venda" }]} />
+            <FormSelect label="Sessão" value={form.session} onChange={(v) => update("session", v)} options={["Ásia", "Londres", "Nova York", "B3 - Pregão", "B3 - After", "Cripto 24h", "Outro"].map((s) => ({ value: s, label: s }))} />
             <FormSelect label="Timeframe Entrada" value={form.timeframeEntry} onChange={(v) => update("timeframeEntry", v)} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
             <FormSelect label="Timeframe Contexto" value={form.timeframeContext} onChange={(v) => update("timeframeContext", v)} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
             <FormSelect label="Setup" value={form.setup} onChange={(v) => update("setup", v)} options={SETUPS.map((s) => ({ value: s, label: s }))} />
@@ -422,7 +473,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         {step === 2 && (
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <FormField label="Saldo da Conta ($)" type="number" step="0.01" value={form.accountBalanceAtTrade} onChange={(v) => update("accountBalanceAtTrade", v)} />
+              <FormField label="Saldo da Conta" type="number" step="0.01" value={form.accountBalanceAtTrade} onChange={(v) => update("accountBalanceAtTrade", v)} />
               <FormField label="Risco (%)" type="number" step="0.1" value={form.riskPercent} onChange={(v) => update("riskPercent", v)} />
               <FormField label="Risco ($) — opcional" type="number" step="0.01" value={form.riskAmount} onChange={(v) => update("riskAmount", v)} placeholder="Calculado automaticamente" />
               <FormField label="Tamanho Posição" type="number" step="0.01" value={form.positionSize} onChange={(v) => update("positionSize", v)} />
@@ -433,7 +484,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05]">
               <PreviewStat label="Risco Calculado" value={preview.riskAmount != null ? formatCurrency(preview.riskAmount) : "—"} />
               <PreviewStat label="R:R Planejado" value={preview.plannedRR != null ? `${preview.plannedRR.toFixed(2)}` : "—"} />
-              <PreviewStat label="R Estimado do Resultado" value={preview.resultR != null ? `${preview.resultR >= 0 ? "+" : ""}${preview.resultR.toFixed(2)}R` : "—"} />
+              <PreviewStat label="R Estimado" value={preview.resultR != null ? `${preview.resultR >= 0 ? "+" : ""}${preview.resultR.toFixed(2)}R` : "—"} />
             </div>
           </div>
         )}
@@ -491,8 +542,8 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
             <h3 className="text-sm font-bold text-text-primary mb-3">Estado Emocional</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormSelect label="Antes da operação" value={form.emotionalBefore} onChange={(v) => update("emotionalBefore", v)} options={["Confiante", "Neutro", "Ansioso", "Com medo", "Eufórico", "Frustrado"].map((s) => ({ value: s, label: s }))} />
-              <FormSelect label="Depois da operação" value={form.emotionalAfter} onChange={(v) => update("emotionalAfter", v)} options={["Satisfeito", "Neutro", "Frustrado", "Ansioso", "Eufórico"].map((s) => ({ value: s, label: s }))} />
+              <FormSelect label="Antes" value={form.emotionalBefore} onChange={(v) => update("emotionalBefore", v)} options={["Confiante", "Neutro", "Ansioso", "Com medo", "Eufórico", "Frustrado"].map((s) => ({ value: s, label: s }))} />
+              <FormSelect label="Depois" value={form.emotionalAfter} onChange={(v) => update("emotionalAfter", v)} options={["Satisfeito", "Neutro", "Frustrado", "Ansioso", "Eufórico"].map((s) => ({ value: s, label: s }))} />
             </div>
           </div>
         )}
@@ -511,16 +562,16 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold block mb-1.5">Screenshot da Operação (será comprimido automaticamente)</label>
+              <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold block mb-1.5">Screenshot (comprimido automaticamente)</label>
               {form.screenshotUrl ? (
                 <div className="relative inline-block">
                   <img src={form.screenshotUrl} alt="Screenshot" className="max-h-48 rounded-xl border border-white/10" />
                   <button type="button" onClick={() => update("screenshotUrl", "")} className="absolute -top-2 -right-2 bg-rose text-text-primary rounded-full p-1"><X size={14} /></button>
-                  <p className="text-[10px] text-slate-muted mt-1">{Math.round(form.screenshotUrl.length / 1024)}KB</p>
+                  <p className="text-[10px] text-slate-muted mt-1">{Math.round(form.screenshotUrl.length / 1024)}KB - {marketType}</p>
                 </div>
               ) : (
                 <label className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-white/10 text-slate-muted text-xs cursor-pointer hover:border-emerald/30 hover:text-emerald transition w-fit">
-                  <ImagePlus size={16} /> Adicionar imagem (max 8MB, comprimido para ~500KB)
+                  <ImagePlus size={16} /> Adicionar imagem (max 8MB → ~500KB)
                   <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleImageUpload} />
                 </label>
               )}
@@ -532,7 +583,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               <textarea placeholder="O que devo repetir?" value={form.lesson} onChange={(e) => update("lesson", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
               <textarea placeholder="Erros cometidos" value={form.mistakes} onChange={(e) => update("mistakes", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
             </div>
-            <textarea placeholder="Observações e notas adicionais" value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={2} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
+            <textarea placeholder="Observações" value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={2} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
           </div>
         )}
 
@@ -559,7 +610,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.25)] transition active:scale-[0.98] disabled:opacity-60"
             >
               <Save size={16} />
-              {submitting ? "Salvando..." : trade ? "Atualizar Operação" : "Salvar Operação"}
+              {submitting ? "Salvando..." : trade ? "Atualizar" : "Salvar Operação"}
             </button>
           )}
         </div>
@@ -568,7 +619,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
   );
 }
 
-// Helper: comprime imagem via canvas - ESSENCIAL para evitar 1102
 function compressImage(file: File, maxWidth: number, quality: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -577,12 +627,10 @@ function compressImage(file: File, maxWidth: number, quality: number): Promise<s
       img.onload = () => {
         let width = img.width;
         let height = img.height;
-        
         if (width > maxWidth) {
           height = (maxWidth / width) * height;
           width = maxWidth;
         }
-
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
@@ -592,8 +640,6 @@ function compressImage(file: File, maxWidth: number, quality: number): Promise<s
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
-        
-        // Converte para JPEG com qualidade reduzida
         const compressed = canvas.toDataURL("image/jpeg", quality);
         resolve(compressed);
       };
@@ -618,14 +664,7 @@ function FormField({ label, type = "text", value, onChange, step, placeholder }:
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold">{label}</label>
-      <input
-        type={type}
-        step={step}
-        value={String(value)}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className={base}
-      />
+      <input type={type} step={step} value={String(value)} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={base} />
     </div>
   );
 }
@@ -634,11 +673,7 @@ function FormSelect({ label, value, onChange, options }: { label: string; value:
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-emerald/30 transition appearance-none cursor-pointer"
-      >
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-emerald/30 transition appearance-none cursor-pointer">
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}

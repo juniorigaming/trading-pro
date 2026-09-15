@@ -2,10 +2,6 @@ import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-// FIX 1102: Pool otimizado para Cloudflare Workers
-// - max: 1 conexão por isolate (Workers tem limite de CPU/memória)
-// - timeouts curtos para não travar o Worker e causar 1102
-// - singleton via globalThis para sobreviver a HMR / reciclagens
 let cachedPool: Pool | undefined;
 let cachedDrizzle: NodePgDatabase<Record<string, never>> | undefined;
 
@@ -14,19 +10,41 @@ interface HyperdriveBinding {
 }
 
 function resolveConnectionString(): string | null {
+  // Tenta pegar do Cloudflare context primeiro
   try {
     const cf = getCloudflareContext();
-    const hyperdrive = (cf.env as { HYPERDRIVE?: HyperdriveBinding }).HYPERDRIVE;
-    if (hyperdrive?.connectionString) {
-      return hyperdrive.connectionString;
+    const env = cf.env as any;
+    
+    // Hyperdrive binding
+    if (env.HYPERDRIVE?.connectionString) {
+      console.log("[DB] Using HYPERDRIVE connection");
+      return env.HYPERDRIVE.connectionString;
     }
-  } catch {
-    // Sem contexto Cloudflare (build local)
+    
+    // Fallback: DATABASE_URL no env do Cloudflare (Pages/Workers)
+    if (env.DATABASE_URL) {
+      console.log("[DB] Using DATABASE_URL from Cloudflare env");
+      return env.DATABASE_URL;
+    }
+    
+    // Fallback: DB_URL ou similar
+    if (env.DB_URL) return env.DB_URL;
+    if (env.POSTGRES_URL) return env.POSTGRES_URL;
+  } catch (e) {
+    console.log("[DB] No Cloudflare context, using process.env");
   }
-  return process.env.DATABASE_URL ?? null;
+  
+  // Fallback local / build
+  if (process.env.DATABASE_URL) {
+    console.log("[DB] Using DATABASE_URL from process.env");
+    return process.env.DATABASE_URL;
+  }
+  if (process.env.POSTGRES_URL) return process.env.POSTGRES_URL;
+  if (process.env.DATABASE_URL_UNPOOLED) return process.env.DATABASE_URL_UNPOOLED;
+  
+  return null;
 }
 
-// Evita criar Pool múltiplas vezes no mesmo isolate (causa leak e 1102)
 function getGlobalCache() {
   const g = globalThis as unknown as {
     __tradingProPool?: Pool;
@@ -42,21 +60,22 @@ function getDb(): NodePgDatabase<Record<string, never>> {
 
   const databaseUrl = resolveConnectionString();
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required - configure HYPERDRIVE ou DATABASE_URL");
+    console.error("[DB] No DATABASE_URL found. Checked HYPERDRIVE, DATABASE_URL, POSTGRES_URL");
+    throw new Error("DATABASE_URL is required - configure HYPERDRIVE ou DATABASE_URL no Cloudflare Dashboard > Settings > Variables");
   }
 
-  // Configuração crítica para Workers: 1 conexão, timeouts agressivos
-  // Sem isso, Pool tenta manter 10 conexões e estoura CPU/memória -> Erro 1102
+  // Pool otimizado para Workers
   cachedPool = new Pool({
     connectionString: databaseUrl,
-    max: 1, // Workers só precisa de 1 conexão por request
+    max: 1,
     min: 0,
-    idleTimeoutMillis: 10000, // fecha rápido
-    connectionTimeoutMillis: 5000, // não trava o Worker
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 10000,
     allowExitOnIdle: true,
-  });
+    // Neon precisa de SSL
+    ssl: databaseUrl.includes("neon.tech") ? { rejectUnauthorized: false } : undefined,
+  } as any);
 
-  // Log de erro para não travar silenciosamente
   cachedPool.on("error", (err) => {
     console.error("[DB Pool Error]", err.message);
   });
