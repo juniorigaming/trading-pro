@@ -22,7 +22,7 @@ async function resilientInsert(values: any) {
       const colName = match?.[1] || match2?.[1];
       
       if (colName) {
-        console.warn(`[resilientInsert] Coluna ${colName} não existe, removendo e tentando de novo (tentativa ${i+1})`);
+        console.warn(`[resilientInsert] Coluna ${colName} não existe, removendo (tentativa ${i+1})`);
         const camel = colName.replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase());
         delete attemptValues[colName];
         delete attemptValues[camel];
@@ -37,7 +37,7 @@ async function resilientInsert(values: any) {
       throw e;
     }
   }
-  throw new Error("Falha após múltiplas tentativas de inserir - verifique schema");
+  throw new Error("Falha após múltiplas tentativas de inserir");
 }
 
 export async function GET(request: Request) {
@@ -77,7 +77,6 @@ export async function GET(request: Request) {
         .limit(limit)
         .offset(offset);
     } catch (e1: any) {
-      console.warn(`[GET] Minimal query failed: ${e1.message}, fallback SELECT *`);
       try {
         const allRows = await db.select().from(trades).where(eq(trades.isDemo, false)).orderBy(desc(trades.date)).limit(limit).offset(offset);
         rows = allRows.map((r: any) => {
@@ -85,7 +84,6 @@ export async function GET(request: Request) {
           return rest;
         });
       } catch (e2: any) {
-        console.error(`[GET] All queries failed: ${e2.message}, returning empty`);
         rows = [];
       }
     }
@@ -97,7 +95,6 @@ export async function GET(request: Request) {
       },
     });
   } catch (error: any) {
-    console.error(`[GET] FATAL:`, error.message);
     return Response.json([], {
       headers: { "Cache-Control": "no-store", "X-Error": error.message },
     });
@@ -116,7 +113,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Screenshot muito grande (max 900KB)" }, { status: 413 });
     }
 
-    const { db: values } = mapTradeValues(body);
+    const mapped = mapTradeValues(body) as any;
+    const values = mapped.db as any;
     
     let inserted;
     try {

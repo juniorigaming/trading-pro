@@ -81,7 +81,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return Response.json({ error: "Screenshot muito grande (max 900KB)" }, { status: 413, headers: NO_STORE });
     }
 
-    const { db: values } = mapTradeValues(body);
+    const mapped = mapTradeValues(body) as any;
+    const values = mapped.db as any;
 
     console.log(`[PUT ${numericId}] Tentando atualizar:`, body.asset, body.resultType);
 
@@ -90,7 +91,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       updated = await resilientUpdate(numericId, values);
     } catch (e: any) {
       console.error(`[PUT ${numericId}] resilientUpdate falhou, tentando mínimo:`, e.message);
-      const minimal = {
+      const minimal: any = {
         date: values.date,
         time: values.time,
         asset: values.asset,
@@ -100,7 +101,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         resultType: values.resultType,
         resultR: values.resultR,
       };
-      const [minUpdated] = await getDb().update(trades).set(minimal as any).where(eq(trades.id, numericId)).returning();
+      const [minUpdated] = await getDb().update(trades).set(minimal).where(eq(trades.id, numericId)).returning();
       updated = minUpdated;
     }
 
