@@ -7,6 +7,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import AppearanceControls from "@/components/AppearanceControls";
 import NumberInput from "@/components/NumberInput";
 import BrokerConnect from "@/components/BrokerConnect";
+import CsvImport from "@/components/CsvImport";
 
 export default function ConfiguracoesPage() {
   const { config, save } = useConfig();
@@ -70,6 +71,11 @@ export default function ConfiguracoesPage() {
         <BrokerConnect />
       </section>
 
+      {/* CSV IMPORT - NOVO - GRÁTIS */}
+      <section className="glass-card-strong p-5 md:p-6 mb-6">
+        <CsvImport />
+      </section>
+
       {/* APARÊNCIA */}
       <section className="glass-card-strong p-5 md:p-6 mb-6">
         <div className="flex items-center gap-2 mb-5">
@@ -84,7 +90,7 @@ export default function ConfiguracoesPage() {
       <section className="glass-card-strong p-5 md:p-6 mb-6">
         <div className="flex items-center gap-2 mb-4">
           <div className="w-8 h-8 rounded-lg bg-accent-soft flex items-center justify-center"><Wallet size={16} className="text-accent" /></div>
-          <h2 className="text-base font-bold text-text-primary">Conta &amp; Capital</h2>
+          <h2 className="text-base font-bold text-text-primary">Conta & Capital</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Nome da Conta" value={form.accountName} onChange={(v) => setForm({ ...form, accountName: String(v) })} />
