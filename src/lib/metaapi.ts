@@ -1,5 +1,6 @@
 // Wrapper para MetaApi Cloud - conecta MT4/MT5 e puxa histórico
 // Docs: https://metaapi.cloud/docs/
+// FIX v11 - melhor logging e tratamento de erro
 
 const METAAPI_BASE = "https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai";
 const METAAPI_CLIENT_BASE = "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai";
@@ -15,7 +16,10 @@ function getMetaApiToken(): string {
 
 async function metaApiFetch(path: string, opts: RequestInit = {}) {
   const token = getMetaApiToken();
-  if (!token) throw new Error("METAAPI_TOKEN não configurado no Cloudflare Dashboard > Settings > Variables");
+  if (!token) throw new Error("METAAPI_TOKEN não configurado no Cloudflare Dashboard > Settings > Variables > Secrets");
+  
+  // Debug seguro: loga tamanho e prefixo
+  console.log(`[MetaApi] Token len=${token.length} prefix=${token.slice(0, 20)}... path=${path}`);
 
   const res = await fetch(`${METAAPI_BASE}${path}`, {
     ...opts,
@@ -28,15 +32,17 @@ async function metaApiFetch(path: string, opts: RequestInit = {}) {
 
   if (!res.ok) {
     const text = await res.text();
+    console.error(`[MetaApi] Error ${res.status} ${path}: ${text}`);
+    // Mensagens mais amigáveis
+    if (res.status === 401) throw new Error(`MetaApi token inválido (401): verifique se copiou o token completo sem quebras. Detalhe: ${text}`);
+    if (res.status === 400) throw new Error(`Dados da conta inválidos (400): verifique servidor, login e senha de investidor. Detalhe: ${text}`);
     throw new Error(`MetaApi error ${res.status}: ${text}`);
   }
 
-  // 204 No Content
   if (res.status === 204) return null;
   return res.json();
 }
 
-// Cria conta no MetaApi
 export async function createMetaApiAccount(account: {
   login: string;
   password: string;
@@ -53,6 +59,7 @@ export async function createMetaApiAccount(account: {
     magic: 0,
   };
 
+  console.log(`[MetaApi] Criando conta ${payload.login} @ ${payload.server} (${payload.platform})`);
   const result = await metaApiFetch("/users/current/accounts", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -61,19 +68,16 @@ export async function createMetaApiAccount(account: {
   return result; // { id: metaApiAccountId }
 }
 
-// Deploia conta (inicia conexão)
 export async function deployMetaApiAccount(metaApiAccountId: string) {
   await metaApiFetch(`/users/current/accounts/${metaApiAccountId}/deploy`, {
     method: "POST",
   });
 }
 
-// Pega status da conexão
 export async function getAccountDeploymentStatus(metaApiAccountId: string) {
   return metaApiFetch(`/users/current/accounts/${metaApiAccountId}`);
 }
 
-// Espera até estar deployada e conectada (polling)
 export async function waitForDeployment(metaApiAccountId: string, maxWaitMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
@@ -81,24 +85,21 @@ export async function waitForDeployment(metaApiAccountId: string, maxWaitMs = 60
     if (acc.state === "DEPLOYED" && acc.connectionStatus === "CONNECTED") {
       return acc;
     }
+    console.log(`[MetaApi] Waiting deploy: state=${acc.state} connection=${acc.connectionStatus}`);
     await new Promise(r => setTimeout(r, 2000));
   }
   throw new Error("Timeout esperando conexão MT5 - verifique login/senha/servidor");
 }
 
-// Busca histórico de trades via Client API
 export async function getHistoryTrades(metaApiAccountId: string, startTime?: Date, endTime?: Date) {
   const token = getMetaApiToken();
   
-  // Primeiro pega o token de acesso da conta
   const account = await getAccountDeploymentStatus(metaApiAccountId);
   if (account.state !== "DEPLOYED") {
-    throw new Error("Conta não está deployada");
+    throw new Error(`Conta não está deployada: state=${account.state}`);
   }
 
-  // Usa Client API para histórico
-  // Formato: https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai/users/current/accounts/{id}/history-deals/time/{start}/{end}
-  const startIso = (startTime || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).toISOString();
+  const startIso = (startTime || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)).toISOString();
   const endIso = (endTime || new Date()).toISOString();
 
   const clientRes = await fetch(
@@ -113,7 +114,7 @@ export async function getHistoryTrades(metaApiAccountId: string, startTime?: Dat
     throw new Error(`MetaApi Client error: ${txt}`);
   }
 
-  return clientRes.json(); // array de deals
+  return clientRes.json();
 }
 
 export async function getAccountInformation(metaApiAccountId: string) {
@@ -123,12 +124,10 @@ export async function getAccountInformation(metaApiAccountId: string) {
     { headers: { "auth-token": token } }
   );
   if (!res.ok) throw new Error(`Failed to get account info: ${await res.text()}`);
-  return res.json(); // { balance, equity, etc }
+  return res.json();
 }
 
-// Mapeia deal do MetaApi para formato do nosso dashboard
 export function mapMetaApiDealToTrade(deal: any) {
-  // Deal MT5: { id, type: DEAL_TYPE_BUY/SELL, symbol, volume, price, profit, time, etc }
   const isBuy = deal.type?.includes("BUY");
   const resultType = deal.profit > 0 ? "WIN" : deal.profit < 0 ? "LOSS" : "BREAK EVEN";
   
@@ -137,12 +136,11 @@ export function mapMetaApiDealToTrade(deal: any) {
     time: new Date(deal.time).toTimeString().slice(0, 5),
     asset: deal.symbol,
     direction: isBuy ? "BUY" : "SELL",
-    session: "Nova York", // pode melhorar com lógica de horário
+    session: "Nova York",
     entryPrice: deal.price,
     resultAmount: deal.profit,
     resultType,
     positionSize: deal.volume,
-    // Campos que vamos deixar vazio pra usuário completar depois
     setup: "Importado - DooPrime",
     notes: `Importado automaticamente de DooPrime - Deal ID ${deal.id} - Ticket ${deal.positionId || deal.id}`,
     isDemo: false,
