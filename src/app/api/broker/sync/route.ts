@@ -1,18 +1,17 @@
 import { getDb } from "@/db";
 import { brokerageAccounts, trades } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { decryptPassword, getEncryptionSecret } from "@/lib/broker-encryption";
-import { getHistoryTrades, getAccountInformation, mapMetaApiDealToTrade, waitForDeployment } from "@/lib/metaapi";
+import { getAccountInformation, getHistoryTrades, mapMetaApiDealToTrade, getAccountDeploymentStatus, deployMetaApiAccount, waitForDeployment } from "@/lib/metaapi";
 import { mapTradeValues } from "@/lib/trade-mapper";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Vercel/Cloudflare max
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const start = Date.now();
   try {
     const body = await request.json().catch(() => ({}));
-    const accountId = body.accountId; // id da tabela brokerage_accounts
+    const accountId = body.accountId;
 
     let brokerAcc;
     if (accountId) {
@@ -20,26 +19,41 @@ export async function POST(request: Request) {
       if (rows.length === 0) return Response.json({ error: "Conta não encontrada" }, { status: 404 });
       brokerAcc = rows[0];
     } else {
-      // Pega a primeira ativa (DooPrime demo 883112)
       const rows = await getDb().select().from(brokerageAccounts).where(eq(brokerageAccounts.isActive, true)).limit(1);
       if (rows.length === 0) return Response.json({ error: "Nenhuma corretora conectada. Conecte primeiro em /configuracoes" }, { status: 404 });
       brokerAcc = rows[0];
     }
 
-    console.log(`[Sync] Iniciando sync para conta ${brokerAcc.accountNumber} (${brokerAcc.broker})`);
+    console.log(`[Sync] Iniciando sync para conta ${brokerAcc.accountNumber} (${brokerAcc.broker}) metaApiId=${brokerAcc.metaApiAccountId}`);
 
     if (!brokerAcc.metaApiAccountId) {
       return Response.json({ 
-        error: "Conta não tem MetaApi ID - configure METAAPI_TOKEN e reconecte",
-        hint: "Vá no Cloudflare Dashboard > Settings > Variables > adicione METAAPI_TOKEN"
+        error: "Conta não tem MetaApi ID - reconecte com token válido",
       }, { status: 400 });
     }
 
-    // Espera deploy se necessário
+    // FIX v13: Se UNDEPLOYED, faz deploy automaticamente
+    let status;
     try {
-      await waitForDeployment(brokerAcc.metaApiAccountId, 30000);
+      status = await getAccountDeploymentStatus(brokerAcc.metaApiAccountId);
+      console.log(`[Sync] Status atual: state=${status.state} connection=${status.connectionStatus}`);
+      
+      if (status.state === "UNDEPLOYED") {
+        console.log(`[Sync] Conta UNDEPLOYED, iniciando deploy...`);
+        await deployMetaApiAccount(brokerAcc.metaApiAccountId);
+        console.log(`[Sync] Deploy solicitado, aguardando...`);
+      }
     } catch (e: any) {
-      console.warn("[Sync] Deploy ainda não pronto, tentando buscar mesmo assim:", e.message);
+      console.warn(`[Sync] Falha ao checar status: ${e.message}`);
+    }
+
+    // Espera deploy ficar pronto (até 45s)
+    try {
+      await waitForDeployment(brokerAcc.metaApiAccountId, 45000);
+      console.log(`[Sync] Deploy OK - conectado`);
+    } catch (e: any) {
+      console.warn(`[Sync] Deploy ainda não pronto: ${e.message}, tentando buscar mesmo assim...`);
+      // Não falha aqui, tenta buscar mesmo assim - pode estar em DEPLOYING mas já responde
     }
 
     // Busca saldo
@@ -48,35 +62,52 @@ export async function POST(request: Request) {
       accountInfo = await getAccountInformation(brokerAcc.metaApiAccountId);
       console.log(`[Sync] Saldo: ${accountInfo.balance} Equity: ${accountInfo.equity}`);
     } catch (e: any) {
-      console.warn("[Sync] Falha ao buscar saldo:", e.message);
+      console.warn(`[Sync] Falha ao buscar saldo: ${e.message}`);
+      // Se falhar por UNDEPLOYED ainda, retorna erro amigável
+      if (e.message.includes("UNDEPLOYED") || e.message.includes("not deployed")) {
+        return Response.json({ 
+          error: "Conta ainda está iniciando. Aguarde 20 segundos e clique em Sincronizar novamente.",
+          details: `State: ${status?.state} - O MetaApi está ligando sua conta ${brokerAcc.accountNumber} no servidor ${brokerAcc.server}. Isso demora 20-40s na primeira vez.`,
+          retryIn: 20
+        }, { status: 400 });
+      }
     }
 
-    // Busca histórico últimos 90 dias
-    const deals = await getHistoryTrades(brokerAcc.metaApiAccountId);
-    console.log(`[Sync] ${deals.length} deals encontrados`);
+    // Busca histórico
+    let deals: any[] = [];
+    try {
+      deals = await getHistoryTrades(brokerAcc.metaApiAccountId);
+      console.log(`[Sync] ${deals.length} deals encontrados`);
+    } catch (e: any) {
+      console.warn(`[Sync] Falha ao buscar histórico: ${e.message}`);
+      if (e.message.includes("UNDEPLOYED") || e.message.includes("not deployed") || e.message.includes("DEPLOYING")) {
+        return Response.json({
+          error: "Conta ainda está conectando. Tente novamente em 20s.",
+          details: e.message,
+          retryIn: 20,
+          balance: accountInfo.balance,
+        }, { status: 400 });
+      }
+      throw e;
+    }
 
-    // Filtra apenas deals fechados com profit (trades reais)
     const closedDeals = deals.filter((d: any) => d.type && d.profit !== undefined && d.symbol);
 
     let imported = 0;
     let skipped = 0;
 
     for (const deal of closedDeals) {
-      // Verifica se já importado (pelo comentário com deal id)
       const existing = await getDb().select({ id: trades.id }).from(trades).where(sql`${trades.notes} LIKE ${'%' + deal.id + '%'}`).limit(1);
       if (existing.length > 0) {
         skipped++;
         continue;
       }
-
       const mappedTrade = mapMetaApiDealToTrade(deal);
       try {
         const { db: values } = mapTradeValues(mappedTrade as any);
         await getDb().insert(trades).values(values as any);
         imported++;
       } catch (e: any) {
-        console.warn(`[Sync] Falha ao inserir deal ${deal.id}:`, e.message);
-        // Tenta mínimo
         try {
           const minimal = {
             date: new Date(deal.time),
@@ -96,7 +127,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Atualiza saldo e último sync
     await getDb().update(brokerageAccounts).set({
       lastSyncAt: new Date(),
       balance: accountInfo.balance ? String(accountInfo.balance) : undefined,
@@ -124,7 +154,6 @@ export async function POST(request: Request) {
   }
 }
 
-// GET para testar conexão
 export async function GET() {
   try {
     const accounts = await getDb().select().from(brokerageAccounts).limit(5);
