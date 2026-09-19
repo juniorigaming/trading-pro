@@ -51,6 +51,7 @@ export async function GET(request: Request) {
     try {
       db = getDb();
     } catch (dbError: any) {
+      console.error("[GET /api/trades] DB error:", dbError.message);
       return Response.json([], {
         headers: { "Cache-Control": "no-store", "X-DB-Error": dbError.message },
       });
@@ -72,19 +73,37 @@ export async function GET(request: Request) {
           isDemo: trades.isDemo,
         })
         .from(trades)
-        .where(eq(trades.isDemo, false))
         .orderBy(desc(trades.date))
         .limit(limit)
         .offset(offset);
     } catch (e1: any) {
+      console.warn("[GET /api/trades] Primary select failed, trying fallback:", e1.message);
       try {
-        const allRows = await db.select().from(trades).where(eq(trades.isDemo, false)).orderBy(desc(trades.date)).limit(limit).offset(offset);
+        // Fallback: select all and filter
+        const allRows = await db.select().from(trades).orderBy(desc(trades.date)).limit(limit).offset(offset);
         rows = allRows.map((r: any) => {
           const { screenshotUrl, preTradeScreenshotUrl, postEntryScreenshotUrl, postExitScreenshotUrl, dxyScreenshotUrl, ...rest } = r;
-          return rest;
+          return {
+            id: r.id,
+            date: r.date,
+            time: r.time,
+            asset: r.asset,
+            direction: r.direction,
+            resultType: r.resultType,
+            resultAmount: r.resultAmount,
+            resultR: r.resultR,
+            isDemo: r.isDemo,
+          };
         });
       } catch (e2: any) {
-        rows = [];
+        console.error("[GET /api/trades] Fallback failed:", e2.message);
+        // Se tabela não existe, retorna vazio
+        if (e2.message.includes("does not exist") || e2.message.includes("relation")) {
+          return Response.json([], { headers: { "Cache-Control": "no-store" } });
+        }
+        return Response.json([], {
+          headers: { "Cache-Control": "no-store", "X-Error": e2.message },
+        });
       }
     }
 
@@ -95,6 +114,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error: any) {
+    console.error("[GET /api/trades] Fatal error:", error.message);
     return Response.json([], {
       headers: { "Cache-Control": "no-store", "X-Error": error.message },
     });
