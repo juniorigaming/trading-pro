@@ -56,7 +56,7 @@ function parseHTMLReport(html: string): { headers: string[], rows: string[][] } 
     if (inPositionsSection && positionsHeader) {
       const firstCell = row[0] || '';
       const hasDate = /\d{4}\.\d{2}\.\d{2}/.test(firstCell);
-      const hasSymbol = row.some(c => /[A-Z]{3,6}\.s/.test(c) || /EURUSD|USDJPY|GBPUSD|XAUUSD|NAS100/.test(c));
+      const hasSymbol = row.some(c => /[A-Z0-9]{3,10}\.s/.test(c) || /EURUSD|USDJPY|GBPUSD|XAUUSD|NAS100|EURNZD|NZDCHF/.test(c));
       if (hasDate && hasSymbol) positionsRows.push(row);
     }
   }
