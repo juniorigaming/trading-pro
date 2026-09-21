@@ -1,5 +1,5 @@
 import { getDb } from "@/db";
-import { sql } from "drizzle-orm";
+import { trades } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     fileText = fileText.replace(/\0/g, '');
     
     const rows = parseHTMLReport(fileText);
-    if (rows.length === 0) return Response.json({ error: 'Nenhuma operação encontrada no HTML. Verifique se é relatório de Posições fechadas.', totalRows: 0 }, { status: 400 });
+    if (rows.length === 0) return Response.json({ error: 'Nenhuma operação encontrada', totalRows: 0 }, { status: 400 });
     
     let imported = 0; let skipped = 0;
     const errors: string[] = [];
@@ -93,69 +93,62 @@ export async function POST(request: Request) {
         let ticket = row[1] || '';
         let symbol = row[2] || '';
         let type = row[3] || '';
-        let volumeStr = row[4] || '';
-        let priceStr = row[5] || '';
         let profitStr = row[row.length - 1] || '';
-        
         if (!/[A-Z0-9]{3,10}\.s/.test(symbol)) { skipped++; continue; }
         if (!/^\d{4}\.\d{2}\.\d{2}/.test(timeStr)) { skipped++; continue; }
-        
         let date: Date;
         try { date = new Date(timeStr.replace(/\./g, '-').trim()); if (isNaN(date.getTime())) date = new Date(); } catch { date = new Date(); }
-        
         const profit = parseFloat(profitStr.replace(',', '.').replace(/[^0-9.-]/g, '')) || 0;
-        const volume = parseFloat(volumeStr.replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
-        const price = parseFloat(priceStr.replace(',', '.').replace(/[^0-9.]/g, '')) || 0;
-        
         let direction = type.toLowerCase().includes('sell') ? 'SELL' : 'BUY';
         const resultType = profit > 0 ? 'WIN' : profit < 0 ? 'LOSS' : 'BREAK EVEN';
         const asset = symbol.toUpperCase().replace('.S', '').replace('.s', '').trim();
         const time = date.toTimeString().slice(0, 5);
-        const notes = `DooPrime Ticket ${ticket} ${symbol} ${direction} ${profit} v24`;
-        
-        // FIX v24 DEFINITIVO: SQL cru com apenas colunas que 100% existem
-        // Evita drizzle que tenta inserir todas colunas
+        const notes = `Ticket ${ticket} ${symbol} ${direction} ${profit} v28`;
         try {
-          await db.execute(sql`
-            INSERT INTO trades (date, time, asset, direction, session, result_amount, result_type, notes, setup, status)
-            VALUES (${date}, ${time}, ${asset}, ${direction}, ${'Nova York'}, ${String(profit)}, ${resultType}, ${notes}, ${'Importado - DooPrime'}, ${'CLOSED'})
-          `);
+          await db.insert(trades).values({
+            date: date,
+            time: time,
+            asset: asset,
+            direction: direction,
+            session: 'Nova York',
+            resultAmount: String(profit),
+            resultType: resultType,
+            notes: notes,
+            setup: 'Importado - DooPrime',
+            status: 'CLOSED',
+          } as any);
           imported++;
         } catch (e1: any) {
-          console.warn(`[v24] First insert failed: ${e1.message}, trying ultra minimal`);
           try {
-            await db.execute(sql`
-              INSERT INTO trades (date, time, asset, direction, session, result_amount, result_type)
-              VALUES (${date}, ${time}, ${asset}, ${direction}, ${'Nova York'}, ${String(profit)}, ${resultType})
-            `);
+            await db.insert(trades).values({
+              date: date,
+              time: time,
+              asset: asset,
+              direction: direction,
+              session: 'Nova York',
+              status: 'CLOSED',
+            } as any);
             imported++;
-          } catch (e2: any) {
-            console.error(`[v24] Ultra minimal failed: ${e2.message}`);
-            errors.push(`Linha ${i+1} ${symbol} ${profit}: ${e2.message.slice(0, 150)}`);
+          } catch (e3: any) {
+            errors.push(`Linha ${i+1} ${asset} ${profit}: ${e3.message.slice(0, 200)}`);
             skipped++;
           }
         }
       } catch (e: any) {
-        errors.push(`Linha ${i+1}: ${e.message.slice(0, 100)}`);
+        errors.push(`Linha ${i+1}: ${e.message.slice(0, 150)}`);
         skipped++;
       }
     }
     
     return Response.json({
       success: true, fileName, totalRows: rows.length, imported, skipped, errors: errors.slice(0, 5),
-      message: imported > 0 ? `${imported} operações importadas com sucesso!` : `Nenhuma importada. Erros: ${errors.slice(0,2).join('; ')}`,
+      message: imported > 0 ? `${imported} operações importadas com sucesso!` : `Nenhuma importada. Detalhes: ${errors.slice(0,2).join(' | ')}`,
     });
   } catch (e: any) {
-    console.error('[v24] Fatal Error:', e.message, e.stack);
-    return Response.json({ error: 'Falha definitiva', details: e.message }, { status: 500 });
+    return Response.json({ error: 'Falha', details: e.message }, { status: 500 });
   }
 }
 
 export async function GET() {
-  return Response.json({ 
-    ok: true, 
-    message: 'POST com file HTML MT5 para importar - FIX v24 definitivo com SQL cru',
-    version: 'v24',
-    test: 'Rota funcionando! Use POST via interface Configurações > Importar'
-  });
+  return Response.json({ ok: true, version: 'v28', message: 'POST com file HTML - FIX v28 definitivo' });
 }
