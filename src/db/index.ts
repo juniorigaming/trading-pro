@@ -2,81 +2,64 @@ import { drizzle, NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-let cachedPool: Pool | undefined;
-let cachedDrizzle: NodePgDatabase<Record<string, never>> | undefined;
-let cachedConnectionString: string | null = null;
+// v31: Cloudflare Workers NÃO permite reaproveitar socket/conexão de um request
+// em outro request ("Cannot perform I/O on behalf of a different request").
+// O pool global antigo (min:1, idle 60s) causava o erro 1101 intermitente.
+// Agora: 1 pool por request (Hyperdrive já faz o pooling de verdade do lado dele).
 
-interface HyperdriveBinding {
-  connectionString?: string;
-}
+type Db = NodePgDatabase<Record<string, never>>;
+
+const perRequestDb = new WeakMap<object, Db>();
 
 function resolveConnectionString(): string | null {
-  if (cachedConnectionString) return cachedConnectionString;
-
   try {
     const cf = getCloudflareContext();
     const env = cf.env as any;
-    if (env.HYPERDRIVE?.connectionString) {
-      cachedConnectionString = env.HYPERDRIVE.connectionString;
-      return cachedConnectionString;
-    }
-    if (env.DATABASE_URL) {
-      cachedConnectionString = env.DATABASE_URL;
-      return cachedConnectionString;
-    }
+    if (env?.HYPERDRIVE?.connectionString) return env.HYPERDRIVE.connectionString;
+    if (env?.DATABASE_URL) return env.DATABASE_URL;
   } catch {}
-
-  if (process.env.DATABASE_URL) {
-    cachedConnectionString = process.env.DATABASE_URL;
-    return cachedConnectionString;
-  }
-
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   return null;
 }
 
-function getGlobalCache() {
-  const g = globalThis as unknown as {
-    __tradingProPool?: Pool;
-    __tradingProDrizzle?: NodePgDatabase<Record<string, never>>;
-  };
-  return g;
+function getRequestKey(): object | null {
+  try {
+    const cf = getCloudflareContext();
+    return (cf.ctx as unknown as object) || null;
+  } catch {
+    return null;
+  }
 }
 
-function getDb(): NodePgDatabase<Record<string, never>> {
-  const gCache = getGlobalCache();
-  if (gCache.__tradingProDrizzle) return gCache.__tradingProDrizzle;
-  if (cachedDrizzle) return cachedDrizzle;
+function getDb(): Db {
+  const key = getRequestKey();
+  if (key) {
+    const cached = perRequestDb.get(key);
+    if (cached) return cached;
+  }
 
   const databaseUrl = resolveConnectionString();
   if (!databaseUrl) {
     throw new Error("DATABASE_URL missing - configure no Cloudflare Dashboard > Settings > Variables");
   }
 
-  // OTIMIZADO PARA VELOCIDADE: mantém conexão aberta por 60s, não fecha a cada request
-  cachedPool = new Pool({
+  const pool = new Pool({
     connectionString: databaseUrl,
-    max: 3, // 3 conexões - equilíbrio entre velocidade e limite do Neon Free (10 max)
-    min: 1, // Mantém 1 sempre aberta - evita cold start de 10s
-    idleTimeoutMillis: 60000, // 60s - antes era 10s e fechava toda hora causando lentidão
-    connectionTimeoutMillis: 5000,
-    allowExitOnIdle: false, // NÃO deixa fechar sozinho - mantém quente
+    max: 2,
+    min: 0,
+    idleTimeoutMillis: 1000,
+    connectionTimeoutMillis: 8000,
+    allowExitOnIdle: true,
   });
 
-  cachedPool.on("error", (err) => {
-    console.error("[DB Pool Error]", err.message);
-    // Reseta cache se der erro pra reconectar na próxima
-    cachedPool = undefined;
-    cachedDrizzle = undefined;
-    gCache.__tradingProPool = undefined;
-    gCache.__tradingProDrizzle = undefined;
-    cachedConnectionString = null;
+  // Nunca deixar erro de socket virar exceção não tratada (isso gera 1101)
+  pool.on("error", (err) => {
+    console.error("[DB Pool Error]", err?.message);
   });
 
-  cachedDrizzle = drizzle(cachedPool);
-  gCache.__tradingProPool = cachedPool;
-  gCache.__tradingProDrizzle = cachedDrizzle;
-
-  return cachedDrizzle;
+  const db = drizzle(pool);
+  if (key) perRequestDb.set(key, db);
+  return db;
 }
 
 export { getDb };

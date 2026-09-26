@@ -22,13 +22,20 @@ export default function CsvImport() {
     if (!file) return;
     setLoading(true); setError(null); setResult(null);
     try {
-      const formData = new FormData(); formData.append('file', file);
-      const res = await fetch('/api/broker/import-csv', { method: 'POST', body: formData });
-      const text = await res.text(); let data: any;
-      try { data = JSON.parse(text); } catch {
-        if (text.includes('<!DOCTYPE') || text.includes('<html')) throw new Error('Rota não encontrada (404). Faça git commit --allow-empty e push para forçar rebuild SEM cache no Cloudflare.');
+      // v31: retry automático — Cloudflare às vezes devolve erro 1101/1102 (página HTML) no 1º request frio
+      let res: Response | null = null; let text = ''; let data: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const formData = new FormData(); formData.append('file', file);
+        res = await fetch('/api/broker/import-csv', { method: 'POST', body: formData, cache: 'no-store' });
+        text = await res.text();
+        try { data = JSON.parse(text); break; } catch { data = null; }
+        const isCfError = res.status >= 500 || /error code: 11\d\d|Worker threw|exceeded/i.test(text);
+        if (isCfError && attempt < 3) { await new Promise(r => setTimeout(r, 1200 * attempt)); continue; }
+        if (res.status === 404) throw new Error('Rota /api/broker/import-csv não encontrada (404). Verifique se o deploy terminou no Cloudflare.');
+        if (isCfError) throw new Error(`Servidor Cloudflare falhou (erro ${res.status}, código 1101/1102) 3 vezes seguidas. Aguarde 30s e tente de novo.`);
         throw new Error(`Resposta inválida: ${text.slice(0, 200)}`);
       }
+      if (!res || !data) throw new Error('Sem resposta do servidor');
       if (!res.ok) throw new Error(data.error || data.details || data.message || 'Falha ao importar');
       setResult(data);
       const info: ImportedFileInfo = { name: file.name, size: file.size, importedAt: new Date().toISOString(), totalRows: data.totalRows || 0, imported: data.imported || 0 };
@@ -51,11 +58,11 @@ export default function CsvImport() {
   return (
     <div className="glass-card p-5 space-y-4">
       <div className="space-y-3">
-        <input ref={fileInputRef} type="file" accept=".csv,.html,.htm,.txt" onChange={handleFileChange} className="hidden" id="csv-file-input-v28" />
+        <input ref={fileInputRef} type="file" accept=".csv,.html,.htm,.txt" onChange={handleFileChange} className="hidden" id="csv-file-input-v31" />
         {!file && !importedFile && (
           <div>
             <label className="text-[10px] uppercase tracking-wider font-semibold text-slate-muted mb-2 block">Arquivo CSV ou HTML do MT5</label>
-            <label htmlFor="csv-file-input-v28" className="flex items-center gap-2 px-4 py-3 bg-violet/10 border border-violet/20 border-dashed rounded-xl cursor-pointer hover:bg-violet/15 transition group">
+            <label htmlFor="csv-file-input-v31" className="flex items-center gap-2 px-4 py-3 bg-violet/10 border border-violet/20 border-dashed rounded-xl cursor-pointer hover:bg-violet/15 transition group">
               <Upload size={16} className="text-violet group-hover:scale-110 transition" />
               <span className="text-xs font-bold text-violet">Escolher arquivo</span>
               <span className="text-[11px] text-slate-muted">HTML ou CSV do MT5</span>

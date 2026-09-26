@@ -1,8 +1,9 @@
 import { getDb } from "@/db";
 import { trades } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
-export const runtime = "edge";
+
 
 function cleanCell(html: string): string {
   return html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
@@ -104,7 +105,7 @@ export async function POST(request: Request) {
         const resultType = profit > 0 ? 'WIN' : profit < 0 ? 'LOSS' : 'BREAK EVEN';
         const asset = symbol.toUpperCase().replace('.S', '').replace('.s', '').trim();
         const time = date.toTimeString().slice(0, 5);
-        const notes = `Ticket ${ticket} ${symbol} ${direction} ${profit} v30`;
+        const notes = `Ticket ${ticket} ${symbol} ${direction} ${profit} v31`;
         
         // v30: INSERT MINIMAL 6 COLUNAS - SEM SQL, SÓ DRIZZLE
         try {
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
                 resultAmount: String(profit),
                 resultType: resultType,
                 notes: notes,
-              } as any).where((trades as any).id ? (await import('drizzle-orm')).eq(trades.id, ins.id) : undefined as any).catch(()=>{});
+              } as any).where(eq(trades.id, ins.id)).catch(()=>{});
             } catch {}
           }
           imported++;
@@ -155,11 +156,11 @@ export async function POST(request: Request) {
       message: imported > 0 ? `${imported} operações importadas com sucesso!` : `Nenhuma importada. Detalhes: ${errors.slice(0,2).join(' | ')}`,
     });
   } catch (e: any) {
-    console.error('[v30] Fatal:', e.message, e.stack);
+    console.error('[v31] Fatal:', e.message, e.stack);
     return Response.json({ error: 'Falha', details: e.message }, { status: 500 });
   }
 }
 
 export async function GET() {
-  return Response.json({ ok: true, version: 'v30 DEFINITIVO EDGE', message: 'POST com file HTML UTF-16LE - FIX v30 edge runtime 6 colunas' });
+  return Response.json({ ok: true, version: 'v31 DEFINITIVO', message: 'POST com file HTML UTF-16LE - FIX v31 pool por request (sem 1101)' });
 }
