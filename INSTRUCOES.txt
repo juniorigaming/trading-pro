@@ -1,16 +1,25 @@
-IA v1.2 - LAYOUT CLEAN DA ANALISE MACRO (inclui tambem a v1.1, caso nao tenha aplicado)
-- Resumo em 1 linha + avisos recolhidos (clique em "N avisos" para abrir)
-- Cartao "Mais forte / Mais fraca / Candidatos / Risco"
-- Ranking sem colunas extras; detalhes so ao clicar na moeda
-- Candidatos em lista (1 linha por par); detalhes so ao expandir
-- Eventos pendentes/Event Risk recolhidos por padrao
-- (v1.1) retry maior, modelo reserva automatico, analise tolerante a falha da IA
+IA v1.3 - CORRIGE A PAGINA DE ERRO "This page couldn't load" (inclui v1.1 e v1.2)
+
+CAUSA: /api/macro/candidates devolvia os campos em camelCase (macroDivergence) e o
+widget do dashboard esperava macro_divergence -> JavaScript quebrava no navegador
+assim que existiam candidatos (ou seja, logo apos a primeira analise bem-sucedida).
+O servidor respondia 200, por isso o problema so aparecia no Chrome.
+
+O QUE MUDA:
+- src/app/api/macro/candidates/route.ts -> devolve no formato da UI (snake_case)
+- src/components/ai/DashboardAiWidgets.tsx -> aceita os dois formatos e ganhou um
+  "error boundary": se os widgets IA falharem, o resto do dashboard continua abrindo
+- (v1.2) layout clean da Analise Macro; (v1.1) retry/fallback de modelo da IA
 
 PowerShell, um por vez:
 cd C:\Users\gonca\Downloads
-Expand-Archive -Path .\ia-v1.2.zip -DestinationPath . -Force
-Copy-Item -Path .\ia-v1.2\* -Destination .\trading-pro-main\trading-pro-main -Recurse -Force
+Expand-Archive -Path .\ia-v1.3.zip -DestinationPath . -Force
+Copy-Item -Path .\ia-v1.3\* -Destination .\trading-pro-main\trading-pro-main -Recurse -Force
 cd C:\Users\gonca\Downloads\trading-pro-main\trading-pro-main
 git add -A
-git commit -m "ui: analise macro mais limpa + resiliencia IA"
+git commit -m "fix: dashboard quebrava com candidatos (formato da API) + ui clean + resiliencia IA"
 git push origin main
+
+Depois do deploy (1-3 min no Cloudflare), abra:
+https://trading-pro.junior-a-b2704.workers.dev
+Se ainda aparecer erro, Ctrl+Shift+R uma vez (limpa o JS antigo em cache).
