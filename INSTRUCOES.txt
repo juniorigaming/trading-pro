@@ -1,14 +1,16 @@
-IA v1.1 - RESILIENCIA A 503/429 DO GEMINI (4 arquivos)
-- Backoff maior (1.5s, 3s, 6s) nas tentativas
-- Modelo reserva automatico (gemini-3.5-flash-lite) quando o principal esta sobrecarregado
-- Se mesmo assim a IA falhar na interpretacao, a analise NAO quebra: devolve o ranking com o que ja
-  foi interpretado + aviso para clicar de novo (so o que faltou e reenviado)
+IA v1.2 - LAYOUT CLEAN DA ANALISE MACRO (inclui tambem a v1.1, caso nao tenha aplicado)
+- Resumo em 1 linha + avisos recolhidos (clique em "N avisos" para abrir)
+- Cartao "Mais forte / Mais fraca / Candidatos / Risco"
+- Ranking sem colunas extras; detalhes so ao clicar na moeda
+- Candidatos em lista (1 linha por par); detalhes so ao expandir
+- Eventos pendentes/Event Risk recolhidos por padrao
+- (v1.1) retry maior, modelo reserva automatico, analise tolerante a falha da IA
 
 PowerShell, um por vez:
 cd C:\Users\gonca\Downloads
-Expand-Archive -Path .\ia-v1.1.zip -DestinationPath . -Force
-Copy-Item -Path .\ia-v1.1\* -Destination .\trading-pro-main\trading-pro-main -Recurse -Force
+Expand-Archive -Path .\ia-v1.2.zip -DestinationPath . -Force
+Copy-Item -Path .\ia-v1.2\* -Destination .\trading-pro-main\trading-pro-main -Recurse -Force
 cd C:\Users\gonca\Downloads\trading-pro-main\trading-pro-main
 git add -A
-git commit -m "fix: retry/fallback de modelo e analise tolerante a falha da IA"
+git commit -m "ui: analise macro mais limpa + resiliencia IA"
 git push origin main

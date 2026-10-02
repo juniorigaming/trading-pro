@@ -1,12 +1,12 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { BrainCircuit, ScanText, Sparkles, History, KeyRound, RefreshCw } from "lucide-react";
+import { BrainCircuit, ScanText, Sparkles, History, KeyRound, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import ImageDropzone from "@/components/ai/ImageDropzone";
 import OcrValidationTable, { type OcrRow } from "@/components/ai/OcrValidationTable";
 import G8Ranking from "@/components/ai/G8Ranking";
-import { TradeCandidates } from "@/components/ai/DivergenceMatrix";
+import { CandidateList } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
-import { Badge, Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
+import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls, riskColor } from "@/components/ai/ui";
 import { apiFetch, getToken, setToken, uid, type LocalImage } from "@/lib/ai/client";
 import { SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
 import { useRouter } from "next/navigation";
@@ -31,6 +31,8 @@ export default function AnaliseMacroPage() {
   const [token, setTok] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [withBrief, setWithBrief] = useState(true);
+  const [showWarnings, setShowWarnings] = useState(false);
+  const [showEvents, setShowEvents] = useState(false);
 
   useEffect(() => { const id = setTimeout(() => setTok(getToken()), 0); return () => clearTimeout(id); }, []);
   const loadHistory = useCallback(() => { apiFetch<AnalysisListItem[]>("/api/macro/analyses?limit=30").then(setHistory).catch((e) => setErr(e.message)); }, []);
@@ -139,23 +141,45 @@ export default function AnaliseMacroPage() {
         </Section>
       )}
 
-      {tab === "nova" && step === "result" && result && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className="border-border text-text-secondary">análise #{result.analysis_id}</Badge>
-            <Badge className="border-border text-text-secondary">{result.date} · {SESSION_LABEL[result.session]}</Badge>
-            <Badge className="border-border text-text-muted">scoring {result.meta.scoring_version} · prompt {result.meta.prompt_version ?? "—"} · {result.meta.model ?? "sem IA"} · {result.meta.events_interpreted} interpretados</Badge>
-            <div className="ml-auto flex gap-2"><Btn variant="ghost" onClick={() => router.push("/ranking-g8")}>Ver Ranking G8 completo</Btn><Btn variant="ghost" onClick={reset}>Nova análise</Btn></div>
+      {tab === "nova" && step === "result" && result && (() => {
+        const otherWarnings = result.warnings.filter((w) => !w.startsWith("Brief: "));
+        const risky = result.event_risk.filter((r) => r.level !== "LOW");
+        const top = [...result.currencies].sort((a, b) => a.rank - b.rank);
+        return (
+          <div className="space-y-4">
+            {/* Resumo em uma linha */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+              <span className="text-text-primary font-bold">{SESSION_LABEL[result.session]} · {result.date}</span>
+              <span>análise #{result.analysis_id}</span>
+              <span>{result.meta.events_interpreted} eventos interpretados</span>
+              {otherWarnings.length > 0 && (
+                <button onClick={() => setShowWarnings((v) => !v)} className="inline-flex items-center gap-1 text-amber font-bold"><AlertTriangle size={12} />{otherWarnings.length} aviso{otherWarnings.length > 1 ? "s" : ""}{showWarnings ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
+              )}
+              <div className="ml-auto flex gap-2"><Btn variant="ghost" onClick={() => router.push("/ranking-g8")}>Ranking completo</Btn><Btn variant="ghost" onClick={reset}>Nova análise</Btn></div>
+            </div>
+            {showWarnings && <div className="space-y-1.5">{otherWarnings.map((w, i) => <Notice key={i} kind="warn">{w}</Notice>)}</div>}
+
+            {/* Leitura: forte vs fraca + brief curto */}
+            <div className="glass-card p-4 flex flex-wrap items-center gap-4">
+              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Mais forte</p><p className="text-xl font-extrabold text-emerald">{top[0].currency} <span className="text-sm">{top[0].score > 0 ? "+" : ""}{top[0].score.toFixed(2)}</span></p></div>
+              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Mais fraca</p><p className="text-xl font-extrabold text-rose">{top[7].currency} <span className="text-sm">{top[7].score > 0 ? "+" : ""}{top[7].score.toFixed(2)}</span></p></div>
+              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Candidatos</p><p className="text-xl font-extrabold text-text-primary">{result.trade_candidates.length}</p></div>
+              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Risco de eventos</p><p className="text-xl font-extrabold text-text-primary">{risky.length === 0 ? <span className="text-emerald">baixo</span> : risky.map((r) => <span key={r.currency} className={`inline-block mr-1 px-1.5 rounded text-xs border ${riskColor(r.level)}`}>{r.currency}</span>)}</p></div>
+              {brief && <p className="basis-full text-xs text-text-secondary leading-snug border-t border-border pt-3 mt-1">{brief.replace("Brief: ", "").split(" — ")[0]}</p>}
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <Section title="Ranking G8" sub="Toque numa moeda para ver o que puxou o score"><G8Ranking scores={result.currencies} clean /></Section>
+              <Section title="Trade Candidates" sub="Direção macro para buscar setup no SMC/ICT — não é entrada"><CandidateList candidates={result.trade_candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /></Section>
+            </div>
+
+            <button onClick={() => setShowEvents((v) => !v)} className="w-full glass-card px-4 py-3 flex items-center justify-between text-sm font-bold text-text-primary">
+              <span>Eventos pendentes e risco por moeda <span className="text-text-muted font-normal">({result.pending_events.length} pendentes)</span></span>{showEvents ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+            {showEvents && <Section title="Event Risk" sub="Calculado por perna do par a partir dos eventos pendentes informados"><EventRiskPanel eventRisk={result.event_risk} pending={result.pending_events} pairsToAvoid={result.pairs_to_avoid} /></Section>}
           </div>
-          {brief && <Notice kind="info"><b>Brief da sessão:</b> {brief.replace("Brief: ", "")}</Notice>}
-          {result.warnings.filter((w) => !w.startsWith("Brief: ")).map((w, i) => <Notice key={i} kind="warn">{w}</Notice>)}
-          <div className="grid gap-4 xl:grid-cols-2">
-            <Section title="Ranking G8" sub="Clique numa moeda para ver os drivers (eventos que compõem o score)"><G8Ranking scores={result.currencies} /></Section>
-            <Section title="Trade Candidates (divergência macro)" sub="Direção macro sugerida para buscar setup no SMC/ICT — não é sinal de entrada."><TradeCandidates candidates={result.trade_candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /></Section>
-          </div>
-          <Section title="Event Risk" sub="Risco calculado por perna do par com base nos eventos pendentes informados"><EventRiskPanel eventRisk={result.event_risk} pending={result.pending_events} pairsToAvoid={result.pairs_to_avoid} /></Section>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

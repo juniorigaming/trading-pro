@@ -7,7 +7,8 @@ import { Badge, DeltaArrow, classColor, fmtScore, scoreBg } from "./ui";
 const MOMENTUM_LABEL: Record<string, string> = { STRENGTHENING: "fortalecendo", WEAKENING: "enfraquecendo", STABLE: "estável", NARRATIVE_SHIFT: "mudança de narrativa" };
 const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Muito forte", STRONG: "Forte", MODERATELY_STRONG: "Mod. forte", NEUTRAL: "Neutro", MODERATELY_WEAK: "Mod. fraca", WEAK: "Fraca", VERY_WEAK: "Muito fraca" };
 
-export default function G8Ranking({ scores, compact = false }: { scores: CurrencyScoreView[]; compact?: boolean }) {
+/** compact = sem expandir drivers (widgets). clean = só rank, moeda, barra, score e seta (página de análise). */
+export default function G8Ranking({ scores, compact = false, clean = false }: { scores: CurrencyScoreView[]; compact?: boolean; clean?: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const sorted = [...scores].sort((a, b) => a.rank - b.rank);
   return (
@@ -22,13 +23,14 @@ export default function G8Ranking({ scores, compact = false }: { scores: Currenc
               <div className={`absolute top-0 bottom-0 ${s.score >= 0 ? "bg-emerald" : "bg-rose"}`} style={{ left: s.score >= 0 ? "50%" : `${50 + (s.score / 2) * 50}%`, width: `${Math.abs(s.score) / 2 * 50}%` }} />
             </div>
             <span className={`px-2 py-0.5 rounded-md text-xs font-extrabold tabular-nums ${scoreBg(s.score)}`}>{fmtScore(s.score)}</span>
-            <span className="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-text-muted w-16"><DeltaArrow delta={s.score_delta} />{s.score_delta == null ? "" : fmtScore(s.score_delta)}</span>
-            {!compact && <>
+            <span className="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-text-muted w-14">{s.score_delta != null && Math.abs(s.score_delta) >= 0.01 && <><DeltaArrow delta={s.score_delta} />{fmtScore(s.score_delta)}</>}</span>
+            {!compact && !clean && <>
               <span className={`hidden md:inline text-[11px] font-bold w-24 ${classColor(s.classification)}`}>{CLASS_LABEL[s.classification] ?? s.classification}</span>
               <span className="hidden lg:inline text-[10px] text-text-muted w-32 truncate">{s.momentum ? MOMENTUM_LABEL[s.momentum] : "—"}</span>
               <Badge className={s.confidence === "HIGH" ? "border-emerald/40 text-emerald" : s.confidence === "MEDIUM" ? "border-amber/40 text-amber" : "border-border text-text-muted"}>{s.confidence}</Badge>
               {open === s.currency ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />}
             </>}
+            {clean && (open === s.currency ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />)}
           </button>
           {open === s.currency && (
             <div className="px-3 pb-3 text-xs">

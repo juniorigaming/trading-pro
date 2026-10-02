@@ -1,6 +1,8 @@
 "use client";
 import type { CurrencyScoreView, TradeCandidateView } from "@/lib/ai/types";
 import { G8 } from "@/lib/ai/types";
+import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Badge, riskColor, scoreBg } from "./ui";
 
 export function DivergenceMatrix({ scores }: { scores: CurrencyScoreView[] }) {
@@ -34,9 +36,9 @@ export function TradeCandidates({ candidates, onPick }: { candidates: TradeCandi
   return (
     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
       {candidates.map((c) => (
-        <div key={c.symbol} className="rounded-xl border border-border bg-surface-2/60 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+        <div key={c.symbol} className="rounded-xl border border-border bg-surface-2/60 p-3 min-w-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <span className="text-[10px] font-extrabold text-text-muted">P{c.priority}</span>
               <span className="text-sm font-extrabold text-text-primary">{c.symbol}</span>
               <Badge className={c.bias === "LONG" ? "bg-emerald/15 text-emerald border-emerald/40" : "bg-rose/15 text-rose border-rose/40"}>{c.bias}</Badge>
@@ -55,6 +57,41 @@ export function TradeCandidates({ candidates, onPick }: { candidates: TradeCandi
           {onPick && <button onClick={() => onPick(c)} className="mt-2 text-[11px] font-bold text-accent hover:underline">Analisar no SMC/ICT →</button>}
         </div>
       ))}
+    </div>
+  );
+}
+
+const riskDot = (l: string) => (l === "EXTREME" ? "bg-rose" : l === "HIGH" ? "bg-orange-400" : l === "MEDIUM" ? "bg-amber" : "bg-emerald");
+
+/** Versão enxuta: uma linha por par; detalhes só ao expandir. */
+export function CandidateList({ candidates, onPick }: { candidates: TradeCandidateView[]; onPick?: (c: TradeCandidateView) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!candidates.length) return <p className="text-xs text-text-muted">Nenhum par com divergência ≥ 1.0 — sem candidatos macro agora.</p>;
+  return (
+    <div className="space-y-1.5">
+      {candidates.map((c) => {
+        const isOpen = open === c.symbol;
+        return (
+          <div key={c.symbol} className="rounded-xl border border-border bg-surface-2/60">
+            <button onClick={() => setOpen(isOpen ? null : c.symbol)} className="w-full flex items-center gap-3 px-3 py-2 text-left">
+              <span className="w-6 text-xs font-extrabold text-text-muted">#{c.priority}</span>
+              <span className="w-20 text-sm font-extrabold text-text-primary">{c.symbol}</span>
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold ${c.bias === "LONG" ? "bg-emerald/15 text-emerald" : "bg-rose/15 text-rose"}`}>{c.bias}</span>
+              <span className="ml-auto text-xs tabular-nums text-text-secondary">Δ <b className="text-text-primary">{c.macro_divergence.toFixed(2)}</b></span>
+              <span className="inline-flex items-center gap-1 text-[10px] text-text-muted" title={`Risco de eventos: ${c.event_risk}`}><span className={`w-2 h-2 rounded-full ${riskDot(c.event_risk)}`} />{c.event_risk !== "LOW" && c.event_risk}</span>
+              {isOpen ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />}
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 text-xs space-y-2">
+                <p className="text-text-muted"><span className="text-emerald font-bold">{c.strong_currency} {c.strong_score > 0 ? "+" : ""}{c.strong_score.toFixed(2)}</span> vs <span className="text-rose font-bold">{c.weak_currency} {c.weak_score > 0 ? "+" : ""}{c.weak_score.toFixed(2)}</span> · confiança {c.confidence}</p>
+                {c.event_risk_events.length > 0 && <p className="text-amber">⚠ {c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event} em ${e.minutes_until < 60 ? `${e.minutes_until}min` : `${(e.minutes_until / 60).toFixed(1)}h`}`).join(" · ")}</p>}
+                <p className="text-text-secondary leading-snug">{c.reason}</p>
+                {onPick && <button onClick={() => onPick(c)} className="font-bold text-accent hover:underline">Analisar no SMC/ICT →</button>}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
