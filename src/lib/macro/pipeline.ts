@@ -238,11 +238,17 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
   }).returning({ id: macroAnalyses.id });
 
   const ids = await saveRawEvents(input.events, { tzOffsetMinutes: input.tzOffsetMinutes, sourceRef: `analysis:${analysis.id}`, userEdits: input.userEdits ?? null });
-  const interp = await interpretPendingEvents(cfg, analysis.id);
+  // Interpretação é tolerante a falha da IA: o RAW já está salvo e o que já foi interpretado é reaproveitado.
+  // Se a IA cair (503/429), devolvemos o ranking com os dados disponíveis + aviso para repetir — nada se perde.
+  let interp: InterpretOutcome;
+  let aiFailure: string | null = null;
+  try { interp = await interpretPendingEvents(cfg, analysis.id); }
+  catch (e) { aiFailure = (e as Error).message; interp = { interpreted: 0, model: null, promptVersion: null, warnings: [] }; }
   const computed = await recomputeScores({ session: input.session, analysisId: analysis.id, now, cfg });
   const warnings = [...computed.warnings, ...interp.warnings];
+  if (aiFailure) warnings.unshift(`IA indisponível ao interpretar eventos (${aiFailure.slice(0, 160)}). Os eventos ficaram salvos; aguarde ~1 min e clique em "Confirmar e analisar" de novo — só o que faltou será enviado à IA.`);
 
-  if (input.withBrief !== false) {
+  if (input.withBrief !== false && !aiFailure) {
     try {
       const brief = await generateStructured({
         purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3,

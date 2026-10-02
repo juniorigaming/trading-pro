@@ -10,11 +10,13 @@ export interface AppEnv {
   OPENAI_MODEL?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  GEMINI_FALLBACK_MODEL?: string;
+  OPENAI_FALLBACK_MODEL?: string;
   APP_API_TOKEN?: string;
   DATABASE_URL?: string;
 }
 
-const KEYS: (keyof AppEnv)[] = ["AI_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "APP_API_TOKEN", "DATABASE_URL"];
+const KEYS: (keyof AppEnv)[] = ["AI_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_FALLBACK_MODEL", "OPENAI_FALLBACK_MODEL", "APP_API_TOKEN", "DATABASE_URL"];
 
 let overrides: Partial<AppEnv> | null = null;
 /** Para testes: sobrescreve o ambiente sem tocar em process.env. */

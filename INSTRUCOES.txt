@@ -1,124 +1,14 @@
-=====================================================================
- IA v1 - MODULO DE IA DE APOIO A DECISAO (Macro + G8 + SMC/ICT + Journal)
-=====================================================================
+IA v1.1 - RESILIENCIA A 503/429 DO GEMINI (4 arquivos)
+- Backoff maior (1.5s, 3s, 6s) nas tentativas
+- Modelo reserva automatico (gemini-3.5-flash-lite) quando o principal esta sobrecarregado
+- Se mesmo assim a IA falhar na interpretacao, a analise NAO quebra: devolve o ranking com o que ja
+  foi interpretado + aviso para clicar de novo (so o que faltou e reenviado)
 
-O QUE ESTE PACOTE FAZ
-- Adiciona 5 telas novas no menu: Analise Macro IA, Ranking G8, SMC / ICT,
-  Journal, Estatisticas (+ widgets no Dashboard).
-- Trade Candidates e Event Risk ficam como abas dentro de "Ranking G8".
-- 14 tabelas NOVAS no banco (nao altera nenhuma tabela existente).
-- A IA NAO executa trade. Ela le screenshots (OCR), interpreta eventos e
-  analisa estrutura. Score, ranking, divergencia, risco de evento e o
-  checklist SMC sao calculados no backend (deterministico, testado).
-- Funciona SEM chave de IA em modo "mock" (dados simulados) para voce ver
-  as telas. Com chave, usa OpenAI (pago) ou Gemini (GRATIS).
-
-NADA do que existe e removido. Suas 14 operacoes importadas continuam la e
-aparecem no Journal (o Journal "enriquece" a tabela trades existente).
-
----------------------------------------------------------------------
- PASSO 1 - COPIAR OS ARQUIVOS (PowerShell, um comando por vez)
----------------------------------------------------------------------
-Baixe ia-v1.zip para C:\Users\gonca\Downloads e rode:
-
+PowerShell, um por vez:
 cd C:\Users\gonca\Downloads
-
-Expand-Archive -Path .\ia-v1.zip -DestinationPath .\ia-v1 -Force
-
-Copy-Item -Path .\ia-v1\* -Destination .\trading-pro-main\trading-pro-main -Recurse -Force
-
+Expand-Archive -Path .\ia-v1.1.zip -DestinationPath . -Force
+Copy-Item -Path .\ia-v1.1\* -Destination .\trading-pro-main\trading-pro-main -Recurse -Force
 cd C:\Users\gonca\Downloads\trading-pro-main\trading-pro-main
-
 git add -A
-
-git commit -m "feat: modulo IA (analise macro, ranking G8, SMC/ICT, journal, estatisticas)"
-
+git commit -m "fix: retry/fallback de modelo e analise tolerante a falha da IA"
 git push origin main
-
-(O Cloudflare comeca o deploy sozinho. Leva uns 3-5 minutos.)
-
----------------------------------------------------------------------
- PASSO 2 - CRIAR AS TABELAS NO NEON (obrigatorio, 1 vez)
----------------------------------------------------------------------
-1. Abra https://console.neon.tech  -> seu projeto -> SQL Editor
-2. Abra o arquivo  SQL-NEON-modulo-ia.sql  (esta na raiz do zip) no Bloco
-   de Notas, selecione tudo (Ctrl+A), copie (Ctrl+C)
-3. Cole no SQL Editor e clique em RUN
-4. Deve terminar sem erro. Pode rodar de novo se precisar: ele usa
-   "IF NOT EXISTS" e nao apaga nada.
-
-Alternativa pelo PowerShell (se tiver o .env com DATABASE_URL na pasta):
-npm run db:migrate:ai
-
----------------------------------------------------------------------
- PASSO 3 - VARIAVEIS NO CLOUDFLARE
----------------------------------------------------------------------
-Cloudflare Dashboard -> Workers & Pages -> trading-pro -> Settings ->
-Variables and Secrets -> Add
-
-OPCAO A (GRATIS - recomendada agora):
-  1. Pegue uma chave gratis em https://aistudio.google.com/apikey
-  2. Adicione:
-     AI_PROVIDER      = gemini            (tipo: Text)
-     GEMINI_API_KEY   = <sua chave>       (tipo: SECRET)
-     GEMINI_MODEL     = gemini-2.5-flash  (tipo: Text, opcional)
-
-OPCAO B (OpenAI - paga, minimo US$5 de credito):
-     AI_PROVIDER      = openai
-     OPENAI_API_KEY   = <sua chave sk-...>   (tipo: SECRET)
-     OPENAI_MODEL     = gpt-4.1-mini         (opcional)
-
-OPCAO C (so para ver as telas, sem gastar nada):
-     AI_PROVIDER      = mock
-
-OPCIONAL (protecao simples das rotas de IA, ja que o app nao tem login):
-     APP_API_TOKEN    = <uma senha qualquer que voce inventar>  (SECRET)
-  Depois, na tela "Analise Macro IA", clique em "token" (canto superior
-  direito) e cole a mesma senha. Fica salvo no navegador.
-
-Depois de salvar as variaveis: Deployments -> "Retry deployment" (ou
-faca qualquer novo push) para o Worker reler as variaveis.
-
-As chaves ficam SO no backend (Worker). Nunca va para o navegador e nunca
-sao commitadas (.env esta no .gitignore; .env.example tem so placeholders).
-
----------------------------------------------------------------------
- PASSO 4 - TESTAR
----------------------------------------------------------------------
-1. https://trading-pro.junior-a-b2704.workers.dev/analise-macro
-   - Arraste 1 ou mais prints do calendario do Forex Factory (ou Ctrl+V)
-   - "Ler com IA" -> confira/edite a tabela -> "Confirmar e analisar"
-   - Resultado: Ranking G8, Trade Candidates, Event Risk
-2. /ranking-g8  -> abas Ranking, Divergence Matrix, Trade Candidates,
-   Event Risk, Historico 7D/30D/90D, Pesos
-3. /smc-ict     -> informe o ativo, rotule cada print com o timeframe,
-   "Analisar estrutura" -> checklist READY / WAIT / INVALID
-4. /journal     -> suas operacoes; clique numa para preencher contexto
-   macro, estrutura SMC, MAE/MFE, tags de erro, prints; botao "Revisao IA"
-5. /estatisticas -> por sessao, ativo, direcao, grade, modelo, MSS,
-   divergencia, dia da semana, tag de erro
-
-Se aparecer "Tabelas do modulo de IA ausentes": o Passo 2 nao foi feito.
-Se o Ranking vier zerado com "mock-1": a chave de IA nao esta configurada
-(Passo 3) - as telas funcionam, mas com dados simulados.
-
----------------------------------------------------------------------
- ARQUIVOS DESTE PACOTE
----------------------------------------------------------------------
-SUBSTITUIDOS (6): .env.example, package.json, bun.lock,
-  src/app/page.tsx (widget no dashboard), src/components/Sidebar.tsx (menu),
-  src/db/schema.ts (re-exporta o schema novo)
-NOVOS: drizzle/0001_ai_module.sql, scripts/run-sql.mjs, vitest.config.ts,
-  src/db/schema-ai.ts, src/lib/env.ts, src/lib/api-utils.ts,
-  src/lib/ai/* (service OpenAI/Gemini/mock, schemas, prompts versionados,
-  auditoria), src/lib/macro/* (scoring, pares, event risk, exposicao,
-  pipeline, provider de dados), src/lib/smc/checklist.ts,
-  src/lib/journal/* (service, stats), src/app/api/ai/*, src/app/api/macro/*,
-  src/app/api/smc/*, src/app/api/journal/*, src/app/api/portfolio/*,
-  src/app/api/intermarket/*, src/app/{analise-macro,ranking-g8,smc-ict,
-  journal,estatisticas}/page.tsx, src/components/ai/*, tests/*
-
-Verificado antes de enviar: tsc (0 erros), eslint nos arquivos novos
-(0 erros), 29 testes passando, next build OK, migration aplicada num
-Postgres real e fluxo completo testado ponta a ponta (OCR -> validacao ->
-analise -> ranking -> candidatos -> SMC -> journal -> revisao -> stats).

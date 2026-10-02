@@ -62,7 +62,7 @@ export function resolveProvider(): { provider: AIProvider; model: string; apiKey
   if (requested === "mock") return { provider: "mock", model: "mock-1", apiKey: null };
   if (requested === "gemini") {
     if (!env.GEMINI_API_KEY) return { provider: "mock", model: "mock-1 (GEMINI_API_KEY ausente)", apiKey: null };
-    return { provider: "gemini", model: env.GEMINI_MODEL || "gemini-2.5-flash", apiKey: env.GEMINI_API_KEY };
+    return { provider: "gemini", model: env.GEMINI_MODEL || "gemini-3.8-flash", apiKey: env.GEMINI_API_KEY };
   }
   if (!env.OPENAI_API_KEY) return { provider: "mock", model: "mock-1 (OPENAI_API_KEY ausente)", apiKey: null };
   return { provider: "openai", model: env.OPENAI_MODEL || "gpt-4.1-mini", apiKey: env.OPENAI_API_KEY };
@@ -83,12 +83,23 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 /** Chamada principal: retorna JSON validado pelo schema Zod. */
+/** Modelo reserva usado automaticamente quando o principal responde 429/503 repetidamente (free tier do Gemini oscila). */
+export function resolveFallbackModel(provider: AIProvider, primary: string): string | null {
+  const env = getEnv();
+  if (provider === "gemini") { const fb = env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite"; return fb !== primary ? fb : null; }
+  if (provider === "openai") { const fb = env.OPENAI_FALLBACK_MODEL || "gpt-4.1-mini"; return fb !== primary ? fb : null; }
+  return null;
+}
+
 export async function generateStructured<N extends SchemaName>(
   req: StructuredRequest & { schemaName: N },
+  modelOverride?: string,
 ): Promise<StructuredResponse<z.infer<(typeof SCHEMAS)[N]>>> {
   const zodSchema = SCHEMAS[req.schemaName];
   const jsonSchema = toJsonSchema(zodSchema);
-  const { provider, model, apiKey } = resolveProvider();
+  const resolved = resolveProvider();
+  const { provider, apiKey } = resolved;
+  const model = modelOverride ?? resolved.model;
   const started = Date.now();
   const timeoutMs = req.timeoutMs ?? 90_000;
   const images = req.images ?? [];
@@ -143,10 +154,16 @@ export async function generateStructured<N extends SchemaName>(
       const retryable = err.name === "AbortError" || (err instanceof AIError && RETRYABLE.has(err.status)) || /fetch failed|network|ECONNRESET/i.test(lastError);
       if (retryable && attempt < 3) {
         retries++;
-        await sleep(800 * Math.pow(2, attempt)); // 0.8s, 1.6s, 3.2s
+        await sleep(1500 * Math.pow(2, attempt)); // 1.5s, 3s, 6s
         continue;
       }
       await log(false, lastError);
+      // Esgotou as tentativas por sobrecarga/limite (429/503): tenta uma vez o modelo reserva.
+      const fallback = retryable && !modelOverride ? resolveFallbackModel(provider, model) : null;
+      if (fallback) {
+        console.warn(`[ai] ${model} indisponível (${lastError.slice(0, 80)}); tentando modelo reserva ${fallback}`);
+        return generateStructured(req, fallback);
+      }
       if (err instanceof AIError) throw err;
       if (err.name === "AbortError") throw new AIError("Tempo limite excedido ao chamar a IA", 504, "AI_TIMEOUT");
       throw new AIError(lastError, 502, "AI_ERROR");
