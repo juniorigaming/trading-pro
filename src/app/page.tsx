@@ -8,6 +8,7 @@ import GlobalFilters, { FilterState, defaultFilters, applyFilters } from "@/comp
 import AlertCard from "@/components/AlertCard";
 import MetricTile from "@/components/MetricTile";
 import CommandCenter from "@/components/CommandCenter";
+import DashboardAiWidgets from "@/components/ai/DashboardAiWidgets";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics, groupByAsset, groupBySession, groupBySetup, disciplineStats, buildCalendarData } from "@/lib/calculations";
 import { computeAccount } from "@/lib/account";
@@ -71,6 +72,9 @@ export default function DashboardPage() {
 
       {/* Command Center */}
       <CommandCenter />
+
+      {/* Módulo IA: ranking G8, candidatos, event risk, exposição */}
+      <DashboardAiWidgets />
 
       {trades.length === 0 && (
         <div className="glass-card p-5 mb-6 text-center">

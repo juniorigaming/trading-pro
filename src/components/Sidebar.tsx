@@ -16,6 +16,11 @@ import {
   TrendingUp,
   ChevronRight,
   NotebookPen,
+  BrainCircuit,
+  Trophy,
+  Crosshair,
+  BookOpenCheck,
+  PieChart,
 } from "lucide-react";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics } from "@/lib/calculations";
@@ -30,6 +35,11 @@ const navItems = [
   { label: "Gestão de Risco", href: "/risco", icon: ShieldCheck },
   { label: "Setup / Estratégia", href: "/setup", icon: Target },
   { label: "Macroeconomia", href: "/macro", icon: Globe },
+  { label: "Análise Macro IA", href: "/analise-macro", icon: BrainCircuit },
+  { label: "Ranking G8", href: "/ranking-g8", icon: Trophy },
+  { label: "SMC / ICT", href: "/smc-ict", icon: Crosshair },
+  { label: "Journal", href: "/journal", icon: BookOpenCheck },
+  { label: "Estatísticas", href: "/estatisticas", icon: PieChart },
   { label: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 

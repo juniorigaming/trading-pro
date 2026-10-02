@@ -7,6 +7,10 @@
     "nodejs_compat",
     "global_fetch_strictly_public"
   ],
+  "vars": {
+    "AI_PROVIDER": "gemini",
+    "GEMINI_MODEL": "gemini-2.5-flash"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
