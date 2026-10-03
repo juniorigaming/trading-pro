@@ -11,9 +11,14 @@ export async function apiFetch<T = unknown>(url: string, init: RequestInit = {})
   const headers = new Headers(init.headers || {});
   const t = getToken(); if (t) headers.set("x-app-token", t);
   if (init.body && !(init.body instanceof FormData) && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const res = await fetch(url, { ...init, headers, cache: "no-store" });
-  const text = await res.text();
-  let data: unknown = null; try { data = text ? JSON.parse(text) : null; } catch { data = { error: text.slice(0, 200) }; }
+  const method = (init.method ?? "GET").toUpperCase();
+  let res = await fetch(url, { ...init, headers, cache: "no-store" });
+  let text = await res.text();
+  // Cloudflare pode devolver uma página HTML (erro 1101/1102/52x) em cold start — para GET, tenta 1x de novo antes de desistir
+  const isHtml = (t: string) => /^\s*<(!doctype|html)/i.test(t);
+  if (method === "GET" && (res.status >= 500 || isHtml(text))) { await new Promise((r) => setTimeout(r, 900)); res = await fetch(url, { ...init, headers, cache: "no-store" }); text = await res.text(); }
+  let data: unknown = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { error: isHtml(text) ? `O servidor respondeu com uma página de erro (HTTP ${res.status}). Normalmente é instabilidade momentânea do Cloudflare/banco — recarregue a página em alguns segundos.` : text.slice(0, 200) }; }
   if (!res.ok) { const d = data as { error?: string; detail?: string; issues?: unknown[] } | null; throw new Error(d?.error ? `${d.error}${d.detail ? ` — ${d.detail}` : ""}${d.issues ? ` (${JSON.stringify(d.issues).slice(0, 160)})` : ""}` : `HTTP ${res.status}`); }
   return data as T;
 }

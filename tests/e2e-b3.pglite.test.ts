@@ -2,8 +2,9 @@
  *  Roda só quando @electric-sql/pglite está instalado: `npm i --no-save @electric-sql/pglite && npx vitest run tests/e2e-b3.pglite.test.ts` */
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { setEnvOverrides } from "@/lib/env";
+const PGLITE_PKG = "@electric-sql/pglite"; // import dinâmico por string: não quebra o typecheck quando o pacote (opcional) não está instalado
 vi.mock("@/db", async () => {
-  const { PGlite } = await import("@electric-sql/pglite");
+  const { PGlite } = (await import(/* @vite-ignore */ PGLITE_PKG)) as { PGlite: new () => { exec: (q: string) => Promise<unknown> } };
   const { drizzle } = await import("drizzle-orm/pglite");
   const { readFileSync } = await import("node:fs");
   const { getTableConfig } = await import("drizzle-orm/pg-core");
@@ -13,10 +14,10 @@ vi.mock("@/db", async () => {
   const cols = getTableConfig(trades).columns.map((c) => `"${c.name}" ${c.primary ? "SERIAL PRIMARY KEY" : c.getSQLType()}${c.notNull && !c.primary && !c.hasDefault ? " NOT NULL" : ""}`);
   await client.exec(`CREATE TABLE trades (${cols.join(", ")}); ALTER TABLE trades ALTER COLUMN is_demo SET DEFAULT false; ALTER TABLE trades ALTER COLUMN created_at SET DEFAULT now();`);
   for (const f of ["drizzle/0001_ai_module.sql", "drizzle/0002_b3_module.sql"]) await client.exec(readFileSync(f, "utf8"));
-  const db = drizzle(client);
+  const db = drizzle(client as never);
   return { getDb: () => db };
 });
-const hasPglite = await import("@electric-sql/pglite").then(() => true).catch(() => false);
+const hasPglite = await import(/* @vite-ignore */ PGLITE_PKG).then(() => true).catch(() => false);
 beforeAll(() => setEnvOverrides({ AI_PROVIDER: "mock" }));
 const J = (b: unknown) => new Request("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
 const PUT = (b: unknown) => new Request("http://x", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });

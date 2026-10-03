@@ -44,7 +44,7 @@ function B3Inner() {
   const [contractDraft, setContractDraft] = useState("");
 
   const load = useCallback(() => {
-    apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").then(setLatest).catch((e) => { setLatest(null); setErr(e.message); });
+    apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").then((r) => { setLatest(r); setErr(null); }).catch((e) => { setLatest(null); setErr(`Não consegui carregar a última análise B3: ${e.message}`); });
     apiFetch<{ di_contracts: DiContractConfig[] }>("/api/b3/settings").then((s) => { setContracts(s.di_contracts); setContractDraft(s.di_contracts.map((c) => `${c.code}:${c.tenor}`).join(", ")); }).catch(() => undefined);
     apiFetch<HistItem[]>("/api/b3/analyses?limit=20").then(setHistory).catch(() => setHistory([]));
   }, []);
@@ -97,13 +97,13 @@ function B3Inner() {
       } />
       {showSettings && <div className="glass-card p-4 mb-4 flex flex-wrap items-center gap-2 text-xs"><span className="text-text-muted">Contratos (código:vértice, separados por vírgula)</span><input value={contractDraft} onChange={(e) => setContractDraft(e.target.value)} className={`${inputCls} max-w-md`} placeholder="DI1F27:SHORT, DI1F29:MID, DI1F31:LONG" /><Btn onClick={saveContracts}>Salvar</Btn></div>}
 
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
-        <Tabs tabs={[...TABS]} value={tab} onChange={setTab} />
+      <div className="flex flex-col gap-3 mb-4">
+        <Tabs tabs={[...TABS]} value={tab} onChange={setTab} wrap />
         <div className="flex items-center gap-1.5 text-xs flex-wrap"><span className="text-text-muted mr-1">Sessão</span>{B3_SESSIONS.map((s) => <button key={s} onClick={() => setSession(s)} className={`px-2.5 py-1.5 rounded-lg border font-bold ${session === s ? "border-accent bg-accent-soft text-accent" : "border-border text-text-secondary"}`}>{B3_SESSION_LABEL[s]}</button>)}</div>
       </div>
 
       {busy && <div className="mb-3"><Spinner label={busy} /></div>}
-      {err && <div className="mb-3"><Notice kind="error">{err}</Notice></div>}
+      {err && <div className="mb-3"><Notice kind="error">{err} <button className="underline font-bold ml-1" onClick={() => { setErr(null); load(); }}>Tentar de novo</button></Notice></div>}
       {ok && <div className="mb-3"><Notice kind="info">{ok}</Notice></div>}
       {latest === undefined && <Spinner label="Carregando última análise..." />}
       {latest === null && tab !== "brasil" && tab !== "exterior" && tab !== "di" && <div className="mb-4"><Notice kind="warn">Ainda não há análise B3. Comece em <button className="underline font-bold" onClick={() => setTab("brasil")}>Brasil Macro</button> (calendário BR/EUA), <button className="underline font-bold" onClick={() => setTab("di")}>Curva DI</button> e <button className="underline font-bold" onClick={() => setTab("exterior")}>Exterior</button> — depois clique em Recalcular.</Notice></div>}

@@ -42,9 +42,9 @@ export function Btn({ children, onClick, disabled, variant = "primary", type = "
 export const inputCls = "bg-surface-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/40 w-full";
 export const selectCls = "bg-surface-2 border border-border rounded-lg px-2 py-1.5 text-xs text-text-primary focus:outline-none cursor-pointer";
 
-export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: string; icon?: React.ComponentType<{ size?: number }> }[]; value: T; onChange: (t: T) => void }) {
+export function Tabs<T extends string>({ tabs, value, onChange, wrap = false }: { tabs: { id: T; label: string; icon?: React.ComponentType<{ size?: number }> }[]; value: T; onChange: (t: T) => void; wrap?: boolean }) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
+    <div className={`flex gap-2 ${wrap ? "flex-wrap" : "overflow-x-auto pb-1"}`}>
       {tabs.map((t) => (
         <button key={t.id} onClick={() => onChange(t.id)} className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold whitespace-nowrap transition ${value === t.id ? "border-accent bg-accent-soft text-accent" : "border-border text-text-secondary hover:text-text-primary hover:bg-surface-2"}`}>
           {t.icon && <t.icon size={15} />}{t.label}
