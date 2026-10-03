@@ -121,6 +121,11 @@ export const trades = pgTable("trades", {
   unrealizedPnl: decimal("unrealized_pnl", { precision: 18, scale: 8 }),
 
   isDemo: boolean("is_demo").default(false),
+
+  // Carteiras multi-mercado (FOREX | B3 | CRYPTO) — drizzle/0003_portfolios.sql
+  portfolio: text("portfolio").notNull().default("FOREX"),
+  // Id externo da corretora/exchange (ticket MT5, order id Binance, etc.) — evita duplicar na importação
+  externalId: text("external_id"),
 });
 
 export const brokerageAccounts = pgTable("brokerage_accounts", {

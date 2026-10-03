@@ -8,7 +8,7 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 
 export default function PositionSizeCalculator() {
   const { config } = useConfig();
-  const [balance, setBalance] = useState<number>(config?.initialCapital || 10000);
+  const [balance, setBalance] = useState<number>(config?.initialCapital ?? 10000);
   const [riskPercent, setRiskPercent] = useState<number>(config?.riskPercent || 2.5);
   const [asset, setAsset] = useState<string>("EURUSD");
   const [entry, setEntry] = useState<number>(1.085);

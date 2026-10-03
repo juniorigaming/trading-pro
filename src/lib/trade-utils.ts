@@ -1,6 +1,8 @@
 // Helpers to compute derived trade fields and serialize DB rows for the API.
 
 export interface TradeInput {
+  portfolio?: "FOREX" | "B3" | "CRYPTO";
+  externalId?: string | null;
   date: string;
   time: string;
   asset: string;

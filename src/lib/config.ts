@@ -2,6 +2,7 @@ import { getDb } from "@/db";
 import { config } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { Config } from "./types";
+import { configKeyFor, normalizePortfolio, PORTFOLIO_META, type PortfolioId } from "./portfolio";
 
 export const DEFAULT_CONFIG: Config = {
   accountName: "Minha Conta",
@@ -34,6 +35,23 @@ export const DEFAULT_CONFIG: Config = {
 
 const CONFIG_KEY = "settings";
 
+/** Valores iniciais das carteiras novas: nascem zeradas, na moeda do mercado. */
+export function defaultConfigFor(p: PortfolioId): Config {
+  if (p === "FOREX") return DEFAULT_CONFIG;
+  const meta = PORTFOLIO_META[p];
+  return {
+    ...DEFAULT_CONFIG,
+    accountName: `Carteira ${meta.label}`,
+    currency: meta.currency,
+    initialCapital: 0,
+    totalDeposits: 0,
+    totalWithdrawals: 0,
+    riskPerTrade: 0,
+    dailyGoal: 0,
+    dailyLossLimit: 0,
+  };
+}
+
 const NUMERIC_KEYS = [
   "initialCapital",
   "riskPerTrade",
@@ -53,36 +71,48 @@ const NUMERIC_KEYS = [
 ] as const;
 
 // Coerce numeric fields: values may have been saved as strings from form inputs.
-export function normalizeConfig(raw: Partial<Config>): Config {
-  const merged: Record<string, unknown> = { ...DEFAULT_CONFIG, ...raw };
+export function normalizeConfig(raw: Partial<Config>, base: Config = DEFAULT_CONFIG): Config {
+  const merged: Record<string, unknown> = { ...base, ...raw };
   for (const key of NUMERIC_KEYS) {
     const num = Number(merged[key]);
-    merged[key] = Number.isFinite(num) ? num : DEFAULT_CONFIG[key];
+    merged[key] = Number.isFinite(num) ? num : base[key];
   }
   return merged as unknown as Config;
 }
 
-export async function getConfig(): Promise<Config> {
-  const rows = await getDb().select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
+/** Lê a configuração de uma carteira (FOREX = chave legada "settings", compatível com produção). */
+export async function getConfig(portfolio: PortfolioId | string = "FOREX"): Promise<Config> {
+  const p = normalizePortfolio(portfolio);
+  const key = configKeyFor(p);
+  const base = defaultConfigFor(p);
+  const rows = await getDb().select().from(config).where(eq(config.key, key)).limit(1);
   if (rows.length === 0) {
-    return DEFAULT_CONFIG;
+    return base;
   }
   try {
     const parsed = JSON.parse(rows[0].value);
-    return normalizeConfig(parsed);
+    return normalizeConfig(parsed, base);
   } catch {
-    return DEFAULT_CONFIG;
+    return base;
   }
 }
 
-export async function saveConfig(newConfig: Partial<Config>): Promise<Config> {
-  const current = await getConfig();
-  const merged = normalizeConfig({ ...current, ...newConfig });
-  const rows = await getDb().select().from(config).where(eq(config.key, CONFIG_KEY)).limit(1);
+export async function saveConfig(newConfig: Partial<Config>, portfolio: PortfolioId | string = "FOREX"): Promise<Config> {
+  const p = normalizePortfolio(portfolio);
+  const key = configKeyFor(p);
+  const current = await getConfig(p);
+  const merged = normalizeConfig({ ...current, ...newConfig }, defaultConfigFor(p));
+  const rows = await getDb().select().from(config).where(eq(config.key, key)).limit(1);
   if (rows.length === 0) {
-    await getDb().insert(config).values({ key: CONFIG_KEY, value: JSON.stringify(merged) });
+    await getDb().insert(config).values({ key, value: JSON.stringify(merged) });
   } else {
-    await getDb().update(config).set({ value: JSON.stringify(merged), updatedAt: new Date() }).where(eq(config.key, CONFIG_KEY));
+    await getDb().update(config).set({ value: JSON.stringify(merged), updatedAt: new Date() }).where(eq(config.key, key));
   }
   return merged;
+}
+
+/** Resumo das três carteiras de uma vez (usado pelo seletor do dashboard). */
+export async function getAllConfigs(): Promise<Record<PortfolioId, Config>> {
+  const [FOREX, B3, CRYPTO] = await Promise.all([getConfig("FOREX"), getConfig("B3"), getConfig("CRYPTO")]);
+  return { FOREX, B3, CRYPTO };
 }

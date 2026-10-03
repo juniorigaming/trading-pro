@@ -9,6 +9,8 @@ import AlertCard from "@/components/AlertCard";
 import MetricTile from "@/components/MetricTile";
 import CommandCenter from "@/components/CommandCenter";
 import DashboardAiWidgets from "@/components/ai/DashboardAiWidgets";
+import PortfolioSwitcher from "@/components/PortfolioSwitcher";
+import { usePortfolio } from "@/components/PortfolioProvider";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics, groupByAsset, groupBySession, groupBySetup, disciplineStats, buildCalendarData } from "@/lib/calculations";
 import { computeAccount } from "@/lib/account";
@@ -17,6 +19,7 @@ import { formatCurrency, formatPercent, formatR, formatNumber } from "@/lib/util
 export default function DashboardPage() {
   const { trades, loading } = useTrades();
   const { config } = useConfig();
+  const { meta, ready } = usePortfolio();
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
 
   const filteredTrades = useMemo(() => applyFilters(trades, filters), [trades, filters]);
@@ -43,7 +46,7 @@ export default function DashboardPage() {
     return days;
   }, [calendarMap]);
 
-  if (loading) {
+  if (loading || !ready) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-emerald/30 border-t-emerald rounded-full animate-spin" />
@@ -57,8 +60,11 @@ export default function DashboardPage() {
       <header className="mb-6 md:mb-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Dashboard</h1>
-            <p className="text-sm text-slate-muted mt-1">Visão geral da sua performance de trading</p>
+            <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight flex items-center gap-3">
+              Dashboard
+              <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${meta.accent.bg} ${meta.accent.text} border ${meta.accent.border}`}>{meta.label} · {config?.currency || meta.currency}</span>
+            </h1>
+            <p className="text-sm text-slate-muted mt-1">{meta.description}</p>
           </div>
           <Link
             href="/operacoes/novo"
@@ -70,17 +76,25 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Command Center */}
+      {/* Carteiras: Forex · B3 · Cripto */}
+      <PortfolioSwitcher />
+
+      {/* Command Center (conta da carteira ativa) */}
       <CommandCenter />
 
-      {/* Módulo IA: ranking G8, candidatos, event risk, exposição */}
-      <DashboardAiWidgets />
+      {/* Inteligência de mercado — só os widgets do mercado da carteira ativa (sem repetir cards) */}
+      <DashboardAiWidgets portfolio={meta.id} />
 
       {trades.length === 0 && (
         <div className="glass-card p-5 mb-6 text-center">
-          <p className="text-sm text-slate-300 mb-3">Você ainda não tem operações registradas. Saldo inicial: <span className="font-bold text-text-primary">{formatCurrency(initialCapital)}</span></p>
-          <div className="flex justify-center gap-3">
+          <p className="text-sm text-slate-300 mb-3">
+            A carteira <span className="font-bold text-text-primary">{meta.label}</span> ainda não tem operações. Saldo inicial: <span className="font-bold text-text-primary">{formatCurrency(initialCapital)}</span>
+            {initialCapital === 0 && <span className="text-slate-muted"> — defina o capital em Configurações.</span>}
+          </p>
+          <div className="flex flex-wrap justify-center gap-4">
             <Link href="/operacoes/novo" className="text-xs font-bold text-emerald hover:underline">+ Registrar primeira operação</Link>
+            <Link href="/configuracoes#importar" className="text-xs font-bold text-sky hover:underline">Importar arquivo da corretora</Link>
+            <Link href="/configuracoes#carteira" className="text-xs font-bold text-amber hover:underline">Definir saldo inicial</Link>
           </div>
         </div>
       )}
@@ -91,10 +105,10 @@ export default function DashboardPage() {
       {/* Key Metrics Row */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
-          label="Saldo Realizado"
-          value={formatCurrency(account.realizedBalance)}
-          sub={`Equity: ${formatCurrency(account.equity)}`}
-          positive={account.realizedPnl >= 0}
+          label="Expectância por Operação"
+          value={metrics.totalTrades > 0 ? `${metrics.expectancy >= 0 ? "+" : ""}${formatCurrency(metrics.expectancy)}` : "—"}
+          sub={`${metrics.totalTrades} operações · Payoff ${metrics.payoffRatio > 0 ? formatNumber(metrics.payoffRatio) : "—"}`}
+          positive={metrics.expectancy >= 0}
         />
         <StatCard
           label="Resultado Acumulado"
@@ -287,7 +301,7 @@ export default function DashboardPage() {
               }`}
             >
               <span className="text-[9px] font-medium opacity-70">{item.label}</span>
-              {item.data && <span>{item.data.result > 0 ? "+" : ""}${Math.abs(Math.round(item.data.result))}</span>}
+              {item.data && <span>{item.data.result > 0 ? "+" : item.data.result < 0 ? "-" : ""}{meta.currencySymbol}{Math.abs(Math.round(item.data.result))}</span>}
             </Link>
           ))}
         </div>

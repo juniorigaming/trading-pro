@@ -26,7 +26,8 @@ export interface AccountState {
 
 export function computeAccount(trades: Trade[], config: Config | null): AccountState {
   const cfg = config ?? ({} as Config);
-  const initialBalance = cfg.initialCapital || 10000;
+  // Carteiras B3/Cripto nascem com capital 0 — só usa 10000 quando a config ainda não carregou.
+  const initialBalance = config && Number.isFinite(Number(cfg.initialCapital)) ? Number(cfg.initialCapital) : 10000;
   const totalDeposits = cfg.totalDeposits || 0;
   const totalWithdrawals = cfg.totalWithdrawals || 0;
   const riskPercent = cfg.riskPercent || 2.5;

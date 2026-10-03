@@ -1,6 +1,10 @@
 export interface Trade {
   id: number;
   createdAt: string;
+  /** Carteira: FOREX | B3 | CRYPTO (default FOREX para registros antigos) */
+  portfolio?: "FOREX" | "B3" | "CRYPTO";
+  /** Ticket/ordem na corretora (importação) */
+  externalId?: string | null;
   date: string;
   time: string;
   asset: string;

@@ -26,6 +26,8 @@ import {
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics } from "@/lib/calculations";
 import { formatCurrency } from "@/lib/utils";
+import { usePortfolio } from "@/components/PortfolioProvider";
+import { PORTFOLIOS, PORTFOLIO_META } from "@/lib/portfolio";
 
 const navItems = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -55,8 +57,10 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { trades } = useTrades();
   const { config } = useConfig();
+  const { portfolio, setPortfolio, meta } = usePortfolio();
   const initialCapital = config?.initialCapital ?? 10000;
   const metrics = calculateMetrics(trades, initialCapital);
+  const currency = config?.currency || meta.currency;
   const growthClamped = Math.max(0, Math.min(100, 50 + metrics.growthPercent));
 
   return (
@@ -148,8 +152,11 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
         <div className={`border-t border-border ${collapsed ? "md:px-2 px-4 py-4" : "px-4 py-4"}`}>
           {!collapsed && (
             <div className="glass-card p-3 rounded-xl">
-              <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-1">Saldo</p>
-              <p className={`text-lg font-bold ${metrics.netResult >= 0 ? "text-emerald" : "text-rose"}`}>{formatCurrency(metrics.currentCapital)}</p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">Saldo · {meta.label}</p>
+                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${meta.accent.bg} ${meta.accent.text}`}>{currency}</span>
+              </div>
+              <p className={`text-lg font-bold ${metrics.netResult >= 0 ? "text-emerald" : "text-rose"}`}>{formatCurrency(metrics.currentCapital, currency)}</p>
               <p className={`text-[10px] mt-0.5 font-semibold ${metrics.growthPercent >= 0 ? "text-emerald" : "text-rose"}`}>
                 {metrics.growthPercent >= 0 ? "+" : ""}{metrics.growthPercent.toFixed(2)}%
               </p>
@@ -159,6 +166,38 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
                   style={{ width: `${growthClamped}%` }}
                 />
               </div>
+              {/* Troca rápida de carteira */}
+              <div className="grid grid-cols-3 gap-1 mt-3" role="tablist" aria-label="Carteira ativa">
+                {PORTFOLIOS.map((id) => {
+                  const m = PORTFOLIO_META[id];
+                  const on = id === portfolio;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="tab"
+                      aria-selected={on}
+                      onClick={() => setPortfolio(id)}
+                      className={`text-[10px] font-extrabold py-1.5 rounded-lg border transition ${on ? `${m.accent.bg} ${m.accent.text} ${m.accent.border}` : "text-text-muted border-border hover:bg-surface-3"}`}
+                    >
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {collapsed && (
+            <div className="hidden md:flex flex-col items-center gap-1">
+              {PORTFOLIOS.map((id) => {
+                const m = PORTFOLIO_META[id];
+                const on = id === portfolio;
+                return (
+                  <button key={id} type="button" title={`Carteira ${m.label}`} onClick={() => setPortfolio(id)} className={`w-9 h-7 text-[10px] font-extrabold rounded-lg border transition ${on ? `${m.accent.bg} ${m.accent.text} ${m.accent.border}` : "text-text-muted border-border hover:bg-surface-3"}`}>
+                    {m.short}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

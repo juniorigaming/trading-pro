@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate:ai": "node scripts/run-sql.mjs drizzle/0001_ai_module.sql",
-    "db:migrate:b3": "node scripts/run-sql.mjs drizzle/0002_b3_module.sql"
+    "db:migrate:b3": "node scripts/run-sql.mjs drizzle/0002_b3_module.sql",
+    "db:migrate:portfolios": "node scripts/run-sql.mjs drizzle/0003_portfolios.sql"
   },
   "dependencies": {
     "date-fns": "^4.4.0",

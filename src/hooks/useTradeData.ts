@@ -1,137 +1,190 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Trade, Config } from "@/lib/types";
+import { usePortfolio } from "@/components/PortfolioProvider";
+import { PORTFOLIO_META, type PortfolioId } from "@/lib/portfolio";
+import { setDisplayCurrency } from "@/lib/utils";
 
-// Cache em memória para navegação instantânea entre abas
-let tradesCache: Trade[] | null = null;
-let tradesCacheTime = 0;
-const CACHE_TTL = 30 * 1000; // 30 segundos - navegação entre abas fica instantânea
+// Cache em memória POR CARTEIRA para navegação instantânea entre abas
+const CACHE_TTL = 30 * 1000; // 30 segundos
+const tradesCache = new Map<PortfolioId, { data: Trade[]; time: number }>();
+const configCache = new Map<PortfolioId, { data: Config; time: number }>();
 
-export function useTrades() {
-  const [trades, setTrades] = useState<Trade[]>(() => {
-    // Se tem cache recente, usa imediatamente - fica rápido
-    if (tradesCache && Date.now() - tradesCacheTime < CACHE_TTL) {
-      return tradesCache;
-    }
-    return [];
-  });
-  const [loading, setLoading] = useState(!tradesCache);
+function cachedTrades(p: PortfolioId): Trade[] | null {
+  const c = tradesCache.get(p);
+  return c && Date.now() - c.time < CACHE_TTL ? c.data : null;
+}
+
+/** Limpa todos os caches (após importação ou exclusão em massa). */
+export function invalidateTradeCaches() {
+  tradesCache.clear();
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tradesChanged"));
+}
+
+/**
+ * Operações da carteira ativa (ou da carteira passada em `override`).
+ * Troca de carteira → refetch automático; cache separado por carteira.
+ */
+export function useTrades(override?: PortfolioId) {
+  const { portfolio: active } = usePortfolio();
+  const portfolio = override ?? active;
+  const [trades, setTrades] = useState<Trade[]>(() => cachedTrades(portfolio) ?? []);
+  const [loading, setLoading] = useState(!cachedTrades(portfolio));
   const [error, setError] = useState<string | null>(null);
-  const fetchingRef = useRef(false);
+  const fetchingRef = useRef<PortfolioId | null>(null);
+  const portfolioRef = useRef(portfolio);
+  useEffect(() => { portfolioRef.current = portfolio; }, [portfolio]);
 
   const refetch = useCallback(async (force = false) => {
-    // Evita fetch duplicado se já está buscando
-    if (fetchingRef.current && !force) return;
-    
-    // Se tem cache válido e não é force, não busca
-    if (!force && tradesCache && Date.now() - tradesCacheTime < CACHE_TTL) {
-      setTrades(tradesCache);
+    const p = portfolio;
+    if (fetchingRef.current === p && !force) return;
+
+    const cached = cachedTrades(p);
+    if (!force && cached) {
+      setTrades(cached);
       setLoading(false);
       return;
     }
 
-    fetchingRef.current = true;
+    fetchingRef.current = p;
     setLoading(true);
     try {
-      const start = Date.now();
-      const res = await fetch(`/api/trades?limit=100&t=${Date.now()}`, { 
-        cache: "no-store",
-      });
+      const res = await fetch(`/api/trades?portfolio=${p}&limit=200&t=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.details || errData.error || `Erro ${res.status}`);
       }
-      const data = await res.json();
-      const duration = Date.now() - start;
-      console.log(`[useTrades] Loaded ${data.length} trades in ${duration}ms`);
-      
-      tradesCache = data;
-      tradesCacheTime = Date.now();
-      setTrades(data);
-      setError(null);
+      const data = (await res.json()) as Trade[];
+      tradesCache.set(p, { data, time: Date.now() });
+      // só aplica se o usuário ainda está na mesma carteira (evita misturar respostas atrasadas)
+      if (portfolioRef.current === p) {
+        setTrades(data);
+        setError(null);
+      }
     } catch (e) {
       console.error("[useTrades] error:", e);
-      setError(e instanceof Error ? e.message : "Erro desconhecido");
+      if (portfolioRef.current === p) setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
-      setLoading(false);
-      fetchingRef.current = false;
+      if (fetchingRef.current === p) fetchingRef.current = null;
+      if (portfolioRef.current === p) setLoading(false);
     }
-  }, []);
+  }, [portfolio]);
 
   const removeTrade = useCallback((id: number) => {
     setTrades((prev) => {
       const next = prev.filter((t) => t.id !== id);
-      tradesCache = next;
-      tradesCacheTime = Date.now();
+      tradesCache.set(portfolio, { data: next, time: Date.now() });
       return next;
     });
-  }, []);
+  }, [portfolio]);
 
   const addTrade = useCallback((newTrade: Trade) => {
     setTrades((prev) => {
       const next = [newTrade, ...prev];
-      tradesCache = next;
-      tradesCacheTime = Date.now();
+      tradesCache.set(portfolio, { data: next, time: Date.now() });
       return next;
     });
-  }, []);
+  }, [portfolio]);
 
+  // Troca de carteira: mostra cache (se houver) e busca
   useEffect(() => {
-    // Só busca se não tem cache
-    if (!tradesCache || Date.now() - tradesCacheTime > CACHE_TTL) {
-      refetch();
+    const cached = cachedTrades(portfolio);
+    if (cached) {
+      Promise.resolve().then(() => { setTrades(cached); setLoading(false); });
+    } else {
+      Promise.resolve().then(() => { setTrades([]); void refetch(true); });
     }
+  }, [portfolio, refetch]);
+
+  // Importação / exclusão em massa em outro componente
+  useEffect(() => {
+    const onChanged = () => refetch(true);
+    window.addEventListener("tradesChanged", onChanged);
+    window.addEventListener("tradesCleared", onChanged);
+    return () => {
+      window.removeEventListener("tradesChanged", onChanged);
+      window.removeEventListener("tradesCleared", onChanged);
+    };
   }, [refetch]);
 
-  return { trades, loading, error, refetch, removeTrade, addTrade };
+  return { trades, loading, error, refetch, removeTrade, addTrade, portfolio };
 }
 
-// Config com cache também
-let configCache: Config | null = null;
-let configCacheTime = 0;
+/** Configuração (capital, moeda, limites) da carteira ativa — ou de `override`. */
+export function useConfig(override?: PortfolioId) {
+  const { portfolio: active } = usePortfolio();
+  const portfolio = override ?? active;
+  const [config, setConfig] = useState<Config | null>(() => configCache.get(portfolio)?.data ?? null);
+  const [loading, setLoading] = useState(!configCache.get(portfolio));
+  const portfolioRef = useRef(portfolio);
+  useEffect(() => { portfolioRef.current = portfolio; }, [portfolio]);
 
-function coerceConfig(data: Config): Config {
-  return data;
-}
-
-export function useConfig() {
-  const [config, setConfig] = useState<Config | null>(() => configCache);
-  const [loading, setLoading] = useState(!configCache);
-
-  const refetch = useCallback(async () => {
-    if (configCache && Date.now() - configCacheTime < 60000) {
-      setConfig(configCache);
+  const refetch = useCallback(async (force = false) => {
+    const p = portfolio;
+    const cached = configCache.get(p);
+    if (!force && cached && Date.now() - cached.time < 60000) {
+      setConfig(cached.data);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/config?t=${Date.now()}`, { cache: "no-store" });
-      const data = await res.json();
-      configCache = data;
-      configCacheTime = Date.now();
-      setConfig(data);
+      const res = await fetch(`/api/config?portfolio=${p}&t=${Date.now()}`, { cache: "no-store" });
+      const data = (await res.json()) as Config;
+      configCache.set(p, { data, time: Date.now() });
+      if (portfolioRef.current === p) {
+        setConfig(data);
+        if (!override) setDisplayCurrency(data.currency || PORTFOLIO_META[p].currency);
+      }
     } finally {
-      setLoading(false);
+      if (portfolioRef.current === p) setLoading(false);
     }
-  }, []);
+  }, [portfolio, override]);
 
   useEffect(() => {
-    if (!configCache) refetch();
-  }, [refetch]);
+    const cached = configCache.get(portfolio);
+    if (cached) Promise.resolve().then(() => { setConfig(cached.data); setLoading(false); void refetch(); });
+    else Promise.resolve().then(() => { setConfig(null); void refetch(); });
+  }, [portfolio, refetch]);
 
   const save = useCallback(async (partial: Partial<Config>) => {
-    const res = await fetch("/api/config", {
+    const p = portfolio;
+    const res = await fetch(`/api/config?portfolio=${p}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(partial),
     });
-    const data = await res.json();
-    configCache = data;
-    configCacheTime = Date.now();
+    const data = (await res.json()) as Config;
+    configCache.set(p, { data, time: Date.now() });
     setConfig(data);
+    if (!override) setDisplayCurrency(data.currency || PORTFOLIO_META[p].currency);
+    window.dispatchEvent(new CustomEvent("configChanged", { detail: p }));
     return data;
-  }, []);
+  }, [portfolio, override]);
 
-  return { config, loading, refetch, save };
+  return { config, loading, refetch, save, portfolio };
+}
+
+/** Resumo das 3 carteiras (saldo/moeda) para o seletor do dashboard. */
+export function useAllConfigs() {
+  const [configs, setConfigs] = useState<Record<PortfolioId, Config> | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/config?all=1&t=${Date.now()}`, { cache: "no-store" });
+      const data = (await res.json()) as Record<PortfolioId, Config>;
+      if (data && data.FOREX) {
+        setConfigs(data);
+        (Object.keys(data) as PortfolioId[]).forEach((p) => configCache.set(p, { data: data[p], time: Date.now() }));
+      }
+    } catch {
+      /* mantém o que tinha */
+    }
+  }, []);
+  useEffect(() => {
+    Promise.resolve().then(load);
+    const onChanged = () => load();
+    window.addEventListener("configChanged", onChanged);
+    return () => window.removeEventListener("configChanged", onChanged);
+  }, [load]);
+  return { configs, reload: load };
 }

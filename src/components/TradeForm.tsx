@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Save, ImagePlus, X, AlertCircle } from "lucide-react";
 import { Trade, Config } from "@/lib/types";
 import { useConfig, useTrades } from "@/hooks/useTradeData";
+import { usePortfolio } from "@/components/PortfolioProvider";
+import { PORTFOLIOS, PORTFOLIO_META, type PortfolioId } from "@/lib/portfolio";
 import { calculateMetrics } from "@/lib/calculations";
 import { setupScore, executionScore } from "@/lib/scores";
 import { formatCurrency } from "@/lib/utils";
@@ -15,8 +17,8 @@ const MARKET_GROUPS = {
   "FOREX - Pares Maiores": ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD"],
   "FOREX - Cruzados & Metais": ["EURJPY", "GBPJPY", "EURGBP", "EURCHF", "AUDJPY", "XAUUSD", "XAGUSD"],
   "B3 - Ações": ["PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "ABEV3", "MGLU3", "WEGE3", "B3SA3", "LREN3", "GGBR4", "USIM5", "JBSS3", "RENT3", "RAIL3", "CIEL3", "COGN3", "MRFG3"],
-  "B3 - Índices e Dólar": ["WIN", "WDO", "IND", "DOL", "IBOV", "IBOV Futuro", "Dólar Futuro"],
-  "CRIPTO - Principais": ["BTCUSD", "ETHUSD", "SOLUSD", "BNBUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "AVAXUSD", "LINKUSD", "LTCUSD"],
+  "B3 - Índices e Dólar": ["WIN", "WDO", "IND", "DOL", "BIT", "IBOV", "BOVA11", "SMAL11"],
+  "CRIPTO - Principais": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "BTCUSD", "ETHUSD", "SOLUSD"],
   "CRIPTO - BRL": ["BTCBRL", "ETHBRL", "SOLBRL"],
   "FUTUROS - EUA": ["ES - S&P 500", "NQ - Nasdaq", "YM - Dow Jones", "RTY - Russell", "GC - Ouro Futuro", "SI - Prata Futura", "CL - Petróleo", "NG - Gás Natural"],
   "AÇÕES & ÍNDICES - EUA": ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "NFLX", "SPY", "QQQ", "NAS100", "US30", "SPX500"],
@@ -56,6 +58,7 @@ export interface TradeFormValues {
   date: string;
   time: string;
   asset: string;
+  portfolio: PortfolioId;
   direction: "BUY" | "SELL";
   session: string;
   timeframeEntry: string;
@@ -97,6 +100,7 @@ function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRis
     date: t ? new Date(t.date).toISOString().split("T")[0] : now.toISOString().split("T")[0],
     time: t?.time || now.toTimeString().slice(0, 5),
     asset: t?.asset || "EURUSD",
+    portfolio: (t?.portfolio as PortfolioId) || "FOREX",
     direction: t?.direction || "BUY",
     session: t?.session || "Nova York",
     timeframeEntry: t?.timeframeEntry || "15m",
@@ -156,8 +160,11 @@ function detectMarket(asset: string): string {
 
 export default function TradeForm({ trade }: { trade?: Trade }) {
   const router = useRouter();
-  const { config } = useConfig();
-  const { trades } = useTrades();
+  const { portfolio: activePortfolio } = usePortfolio();
+  const [form, setForm] = useState<TradeFormValues>(() => tradeToFormValues(trade || null, 10000, 2.5));
+  const formPortfolio: PortfolioId = form.portfolio || activePortfolio;
+  const { config } = useConfig(formPortfolio);
+  const { trades } = useTrades(formPortfolio);
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -170,13 +177,25 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
     return metrics.currentCapital;
   }, [trades, config, trade]);
 
-  const [form, setForm] = useState<TradeFormValues>(() => tradeToFormValues(trade || null, 10000, 2.5));
+  // Nova operação: nasce na carteira ativa, com ativo/sessão padrão do mercado
+  useEffect(() => {
+    if (!trade) {
+      const m = PORTFOLIO_META[activePortfolio];
+      Promise.resolve().then(() => setForm((prev) => (prev.portfolio === activePortfolio ? prev : { ...prev, portfolio: activePortfolio, asset: m.defaultAsset, session: m.defaultSession })));
+    }
+  }, [activePortfolio, trade]);
 
   useEffect(() => {
     if (!trade && config) {
-      setForm((prev) => ({ ...prev, accountBalanceAtTrade: String(suggestedBalance), riskPercent: String(config.riskPercent) }));
+      Promise.resolve().then(() => setForm((prev) => ({ ...prev, accountBalanceAtTrade: String(suggestedBalance), riskPercent: String(config.riskPercent) })));
     }
-  }, [config, suggestedBalance]);
+  }, [config, suggestedBalance, trade]);
+
+  const changePortfolio = (p: PortfolioId) => {
+    const m = PORTFOLIO_META[p];
+    setForm((prev) => ({ ...prev, portfolio: p, asset: m.defaultAsset, session: m.defaultSession }));
+    setCustomAsset(false);
+  };
 
   const steps = ["Dados Básicos", "Gestão de Risco", "Contexto SMC", "Macro & Checklist", "Resultado & Diário"];
 
@@ -293,6 +312,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       } as never)?.score ?? null;
 
       const payload = {
+        portfolio: formPortfolio,
         date: form.date,
         time: form.time,
         asset: form.asset,
@@ -416,6 +436,20 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       >
         {step === 1 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="flex flex-col gap-1.5 md:col-span-2 lg:col-span-3">
+              <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold">Carteira *</label>
+              <div className="grid grid-cols-3 gap-2">
+                {PORTFOLIOS.map((id) => {
+                  const m = PORTFOLIO_META[id]; const on = id === formPortfolio;
+                  return (
+                    <button key={id} type="button" onClick={() => changePortfolio(id)} aria-pressed={on} className={`rounded-xl border px-3 py-2 text-left transition ${on ? `${m.accent.bg} ${m.accent.border}` : "border-white/5 bg-dark-800 hover:bg-white/[0.04]"}`}>
+                      <span className={`block text-xs font-extrabold ${on ? "text-text-primary" : "text-slate-300"}`}>{m.label}</span>
+                      <span className="block text-[10px] text-slate-muted">{m.currency} · {m.defaultAsset}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <FormField label="Data *" type="date" value={form.date} onChange={(v) => update("date", v)} />
             <FormField label="Horário *" type="time" value={form.time} onChange={(v) => update("time", v)} />
             
@@ -436,7 +470,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
                     }}
                     className="flex-1 bg-dark-800 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-emerald/30 transition appearance-none cursor-pointer"
                   >
-                    {Object.entries(MARKET_GROUPS).map(([group, assets]) => (
+                    {Object.entries(MARKET_GROUPS).sort(([a], [b]) => Number(PORTFOLIO_META[formPortfolio].assetGroups.includes(b)) - Number(PORTFOLIO_META[formPortfolio].assetGroups.includes(a))).map(([group, assets]) => (
                       <optgroup key={group} label={group}>
                         {assets.map((a) => (
                           <option key={a} value={a}>{a}</option>
@@ -463,7 +497,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             </div>
 
             <FormSelect label="Direção *" value={form.direction} onChange={(v) => update("direction", v)} options={[{ value: "BUY", label: "BUY / Compra" }, { value: "SELL", label: "SELL / Venda" }]} />
-            <FormSelect label="Sessão" value={form.session} onChange={(v) => update("session", v)} options={["Ásia", "Londres", "Nova York", "B3 - Pregão", "B3 - After", "Cripto 24h", "Outro"].map((s) => ({ value: s, label: s }))} />
+            <FormSelect label="Sessão" value={form.session} onChange={(v) => update("session", v)} options={Array.from(new Set([...PORTFOLIO_META[formPortfolio].sessions, ...(form.session ? [form.session] : [])])).map((s) => ({ value: s, label: s }))} />
             <FormSelect label="Timeframe Entrada" value={form.timeframeEntry} onChange={(v) => update("timeframeEntry", v)} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
             <FormSelect label="Timeframe Contexto" value={form.timeframeContext} onChange={(v) => update("timeframeContext", v)} options={TIMEFRAMES.map((t) => ({ value: t, label: t }))} />
             <FormSelect label="Setup" value={form.setup} onChange={(v) => update("setup", v)} options={SETUPS.map((s) => ({ value: s, label: s }))} />

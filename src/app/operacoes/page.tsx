@@ -2,13 +2,16 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Eye, Pencil, Trash2, Download } from "lucide-react";
+import { Plus, Eye, Pencil, Trash2, Download, Upload } from "lucide-react";
 import { useTrades } from "@/hooks/useTradeData";
+import PortfolioSwitcher from "@/components/PortfolioSwitcher";
+import { usePortfolio } from "@/components/PortfolioProvider";
 import { formatCurrency, formatR } from "@/lib/utils";
 import { Trade } from "@/lib/types";
 
 export default function OperacoesPage() {
   const { trades, loading, refetch, removeTrade, error } = useTrades();
+  const { meta } = usePortfolio();
   const [search, setSearch] = useState("");
   const [resultFilter, setResultFilter] = useState("Todos");
   const [assetFilter, setAssetFilter] = useState("all");
@@ -86,9 +89,18 @@ export default function OperacoesPage() {
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
       <header className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Operações</h1>
-          <p className="text-sm text-slate-muted mt-1">Histórico completo das suas operações registradas ({trades.length})</p>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight flex items-center gap-3">
+            Operações
+            <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg ${meta.accent.bg} ${meta.accent.text} border ${meta.accent.border}`}>{meta.label} · {meta.currency}</span>
+          </h1>
+          <p className="text-sm text-slate-muted mt-1">Histórico da carteira {meta.label} ({trades.length} operações)</p>
           {error && <p className="text-xs text-rose mt-1">Erro: {error} - <button onClick={() => refetch()} className="underline">Tentar novamente</button></p>}
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <PortfolioSwitcher compact />
+          <Link href="/configuracoes#importar" className="inline-flex items-center justify-center gap-2 px-4 py-2.5 border border-border bg-surface-2 hover:bg-surface-3 text-text-primary text-xs font-bold rounded-xl transition">
+            <Upload size={14} /> Importar da corretora
+          </Link>
         </div>
       </header>
 
@@ -146,8 +158,11 @@ export default function OperacoesPage() {
         <div className="glass-card-strong p-12 text-center text-slate-muted text-sm">Carregando operações...</div>
       ) : filtered.length === 0 ? (
         <div className="glass-card-strong p-12 text-center">
-          <p className="text-sm text-slate-muted mb-3">Nenhuma operação encontrada.</p>
-          <Link href="/operacoes/novo" className="text-sm font-bold text-emerald hover:underline">+ Registrar nova operação</Link>
+          <p className="text-sm text-slate-muted mb-3">Nenhuma operação na carteira {meta.label}.</p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <Link href="/operacoes/novo" className="text-sm font-bold text-emerald hover:underline">+ Registrar nova operação</Link>
+            <Link href="/configuracoes#importar" className="text-sm font-bold text-sky hover:underline">Importar arquivo da corretora</Link>
+          </div>
         </div>
       ) : (
         <div className="glass-card-strong overflow-x-auto">

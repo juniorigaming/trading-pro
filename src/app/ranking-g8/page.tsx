@@ -1,18 +1,17 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Trophy, Grid3X3, Siren, LineChart as LineChartIcon, SlidersHorizontal, RefreshCw, Save, Target } from "lucide-react";
+import { Trophy, Grid3X3, Siren, LineChart as LineChartIcon, RefreshCw, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
 import G8Ranking from "@/components/ai/G8Ranking";
 import { DivergenceMatrix, TradeCandidates } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import ScoreHistoryChart from "@/components/ai/ScoreHistoryChart";
-import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
+import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL } from "@/components/ai/ui";
 import { apiFetch } from "@/lib/ai/client";
 import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView } from "@/lib/ai/types";
 import { SESSIONS, type Session } from "@/lib/ai/types";
-import type { ScoringConfig } from "@/lib/macro/config";
 
-type Tab = "ranking" | "matriz" | "candidatos" | "risco" | "historico" | "pesos";
+type Tab = "ranking" | "matriz" | "candidatos" | "risco" | "historico";
 
 export default function RankingG8Page() {
   const router = useRouter();
@@ -23,8 +22,6 @@ export default function RankingG8Page() {
   const [session, setSession] = useState<Session | "ALL">("ALL");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [cfg, setCfg] = useState<{ active: ScoringConfig; defaults: ScoringConfig } | null>(null);
-  const [cfgText, setCfgText] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -37,28 +34,15 @@ export default function RankingG8Page() {
     } catch (e) { setErr((e as Error).message); }
   }, [session]);
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
-  useEffect(() => { if (tab === "pesos" && !cfg) apiFetch<{ active: ScoringConfig; defaults: ScoringConfig }>("/api/macro/scoring-config").then((c) => { setCfg(c); setCfgText(JSON.stringify(c.active, null, 2)); }).catch((e) => setErr(e.message)); }, [tab, cfg]);
 
   const recompute = async () => {
     setBusy("Recalculando scores com os eventos já interpretados (sem IA)..."); setErr(null);
     try { const r = await apiFetch<MacroAnalysisResult>("/api/macro/scores/recompute", { method: "POST", body: JSON.stringify({ session: session === "ALL" ? "LONDON" : session, persist: true }) }); setLatest({ ...r, analysis_id: r.analysis_id ?? "recalc" }); setScores(r.currencies); setCandidates(r.trade_candidates); }
     catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
-  const saveCfg = async () => {
-    setErr(null);
-    try {
-      const parsed = JSON.parse(cfgText) as ScoringConfig;
-      const version = prompt("Nome da nova versão de pesos (ex.: v2-mais-peso-bc):", `${parsed.version}-${new Date().toISOString().slice(0, 10)}`);
-      if (!version) return;
-      const r = await apiFetch<{ active: ScoringConfig }>("/api/macro/scoring-config", { method: "PUT", body: JSON.stringify({ version, config: parsed }) });
-      setCfg((c) => (c ? { ...c, active: r.active } : c)); setCfgText(JSON.stringify(r.active, null, 2));
-      alert("Pesos salvos. Use “Recalcular” para aplicar aos scores atuais.");
-    } catch (e) { setErr((e as Error).message); }
-  };
-
   const tabs = [
     { id: "ranking" as Tab, label: "Ranking G8", icon: Trophy }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
-    { id: "risco" as Tab, label: "Event Risk", icon: Siren }, { id: "historico" as Tab, label: "Histórico 7D/30D/90D", icon: LineChartIcon }, { id: "pesos" as Tab, label: "Pesos", icon: SlidersHorizontal },
+    { id: "risco" as Tab, label: "Event Risk", icon: Siren }, { id: "historico" as Tab, label: "Histórico 7D/30D/90D", icon: LineChartIcon }
   ];
 
   return (
@@ -93,12 +77,6 @@ export default function RankingG8Page() {
       {tab === "candidatos" && <Section title="Trade Candidates" sub="symbol · direction · strong/weak · divergência · confiança · prioridade · event risk. Clique para levar ao módulo SMC/ICT.">{candidates ? <TradeCandidates candidates={candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /> : <Spinner />}</Section>}
       {tab === "risco" && <Section title="Event Risk" sub="LOW · MEDIUM · HIGH · EXTREME (as duas pernas do par com evento de alto impacto iminente)">{latest ? <EventRiskPanel eventRisk={latest.event_risk} pending={latest.pending_events} pairsToAvoid={latest.pairs_to_avoid} /> : <p className="text-xs text-text-muted">Sem análise salva para esta sessão.</p>}</Section>}
       {tab === "historico" && <Section title="Evolução dos scores" sub="Um ponto por moeda a cada análise/recalculo persistido"><ScoreHistoryChart /></Section>}
-      {tab === "pesos" && (
-        <Section title="Pesos do score (configuráveis, versionados)" sub="Edite o JSON e salve como nova versão. Toda análise registra a versão usada (scoring_version)." right={<div className="flex gap-2"><Btn variant="ghost" onClick={() => cfg && setCfgText(JSON.stringify(cfg.defaults, null, 2))}>Restaurar padrão</Btn><Btn onClick={saveCfg}><Save size={14} />Salvar versão</Btn></div>}>
-          {!cfg ? <Spinner /> : <textarea value={cfgText} onChange={(e) => setCfgText(e.target.value)} rows={28} spellCheck={false} className={`${inputCls} font-mono text-[11px] leading-relaxed`} />}
-          <p className="text-[10px] text-text-muted mt-2">Fórmula: contribuição = direction_value × importance_weight × category_multiplier × impact_factor × confidence_factor × decaimento(meia-vida). Score = soma, limitado a ±clamp, arredondado em score_step.</p>
-        </Section>
-      )}
     </div>
   );
 }

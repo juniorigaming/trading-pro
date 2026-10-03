@@ -17,9 +17,23 @@ function brasiliaNowMinutes(): number {
   return (utcMin - 180 + 24 * 60) % (24 * 60);
 }
 
-export function getCurrentSession(config: Config | null): SessionInfo {
+export function getCurrentSession(config: Config | null, portfolio: "FOREX" | "B3" | "CRYPTO" = "FOREX"): SessionInfo {
   const cfg = config ?? ({} as Config);
   const now = brasiliaNowMinutes();
+
+  // Cripto negocia 24h/7
+  if (portfolio === "CRYPTO") return { session: "Cripto 24h", isActive: true };
+
+  // B3 (horário de Brasília): pregão 09:00–18:25 (WIN/WDO), after 18:25–18:50
+  if (portfolio === "B3") {
+    const day = new Date(Date.now() - 3 * 60 * 60 * 1000).getUTCDay();
+    if (day === 0 || day === 6) return { session: "Fim de semana", isActive: false };
+    if (now >= toMinutes("09:00") && now < toMinutes("10:00")) return { session: "B3 - Abertura", isActive: true };
+    if (now >= toMinutes("10:00") && now < toMinutes("17:30")) return { session: "B3 - Pregão", isActive: true };
+    if (now >= toMinutes("17:30") && now < toMinutes("18:25")) return { session: "B3 - Fechamento", isActive: true };
+    if (now >= toMinutes("18:25") && now < toMinutes("18:50")) return { session: "B3 - After", isActive: true };
+    return { session: "Fechado", isActive: false };
+  }
 
   const ranges: { name: string; start: string; end: string }[] = [
     { name: "Ásia", start: cfg.sessionAsiaStart || "21:00", end: cfg.sessionAsiaEnd || "01:00" },

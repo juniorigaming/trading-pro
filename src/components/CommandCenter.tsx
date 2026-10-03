@@ -1,38 +1,27 @@
 "use client";
 import { useMemo } from "react";
-import { Activity, Gauge, TrendingUp, TrendingDown, Minus, Radio, ShieldCheck, Clock, DollarSign } from "lucide-react";
+import { Activity, ShieldCheck, Clock, DollarSign } from "lucide-react";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { computeAccount } from "@/lib/account";
 import { getCurrentSession } from "@/lib/session";
 import { calculateMetrics } from "@/lib/calculations";
 import { formatCurrency, formatNumber, formatR } from "@/lib/utils";
-
-function BiasTag({ value }: { value: string }) {
-  const up = value === "Bullish" || value === "Rising" || value === "Risk-On";
-  const down = value === "Bearish" || value === "Falling" || value === "Risk-Off";
-  const Icon = up ? TrendingUp : down ? TrendingDown : Minus;
-  const cls = up ? "text-emerald" : down ? "text-rose" : "text-text-muted";
-  return (
-    <span className={`inline-flex items-center gap-1 text-xs font-bold ${cls}`}>
-      <Icon size={13} /> {value}
-    </span>
-  );
-}
+import { usePortfolio } from "@/components/PortfolioProvider";
 
 export default function CommandCenter() {
   const { trades } = useTrades();
   const { config } = useConfig();
+  const { meta } = usePortfolio();
+  const currency = config?.currency || meta.currency;
   const account = useMemo(() => computeAccount(trades, config), [trades, config]);
   const metrics = useMemo(() => calculateMetrics(trades, config?.initialCapital ?? 10000), [trades, config]);
-  const session = useMemo(() => getCurrentSession(config), [config]);
+  const session = useMemo(() => getCurrentSession(config, meta.id), [config, meta.id]);
 
   const riskLimit = (config?.riskPercent || 2.5) * (account.equity / 100) * (config?.maxTradesPerDay || 5);
   const weeklyLimit = (config?.weeklyRiskLimit || 5) * (account.equity / 100);
   const riskUsedPct = riskLimit > 0 ? (account.riskUsedToday / riskLimit) * 100 : 0;
   const openRiskPct = account.equity > 0 ? (account.openRisk / account.equity) * 100 : 0;
   const accountState = metrics.currentLossSequence >= 3 ? "Em alerta" : metrics.netResult >= 0 ? "Positiva" : "Negativa";
-
-  const isLight = typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "light";
 
   const cellCls =
     "glass-card p-3 rounded-xl";
@@ -44,7 +33,8 @@ export default function CommandCenter() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-accent-soft flex items-center justify-center"><Activity size={16} className="text-accent" /></div>
-          <h2 className="text-base font-bold text-text-primary">Market &amp; Account Status</h2>
+          <h2 className="text-base font-bold text-text-primary">Status da Conta</h2>
+          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md ${meta.accent.bg} ${meta.accent.text}`}>{meta.label} · {currency}</span>
         </div>
         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border ${
           session.isActive ? "bg-emerald/10 text-emerald border-emerald/20" : "bg-surface-3 text-text-muted border-border"
@@ -102,20 +92,6 @@ export default function CommandCenter() {
           <p className={labelCls}>Open Risk</p>
           <p className={valueCls}>{formatNumber(openRiskPct)}%</p>
           <p className="text-[10px] text-text-muted">max {formatNumber(config?.maxOpenRisk || 2)}%</p>
-        </div>
-      </div>
-
-      {/* Macro snapshot */}
-      <div className="glass-card p-3 rounded-xl mb-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Radio size={14} className="text-accent" />
-          <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">Macro Snapshot</h3>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-          <div><p className="text-[10px] text-text-muted">USD Bias</p><BiasTag value="Neutro" /></div>
-          <div><p className="text-[10px] text-text-muted">DXY</p><BiasTag value="Neutro" /></div>
-          <div><p className="text-[10px] text-text-muted">US02Y</p><BiasTag value="Neutral" /></div>
-          <div><p className="text-[10px] text-text-muted">Regime</p><BiasTag value="Risk-On" /></div>
         </div>
       </div>
 

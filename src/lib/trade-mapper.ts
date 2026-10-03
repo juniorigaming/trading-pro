@@ -11,6 +11,9 @@ export function mapTradeValues(input: TradeInput) {
   const computed = computeTradeFields(input);
 
   const db = {
+    // undefined → INSERT usa o default FOREX e UPDATE não altera a carteira
+    portfolio: input.portfolio === "B3" || input.portfolio === "CRYPTO" ? input.portfolio : input.portfolio === "FOREX" ? "FOREX" : undefined,
+    externalId: input.externalId ?? undefined,
     date: new Date(input.date),
     time: input.time || "00:00",
     asset: input.asset,
