@@ -3,12 +3,12 @@
  * contribution = direction_value × importance_weight × category_multiplier × impact_factor × confidence_factor × decay(idade)
  * score(ccy) = média ponderada das contribuições vivas, arredondada em passos (0.25) e limitada a ±2.
  */
-import { G8, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification } from "@/lib/ai/types";
+import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification } from "@/lib/ai/types";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
 
 export interface ScoredEvent {
   event_id: number;
-  currency: Currency;
+  currency: AnyCurrency;
   event: string;
   impact: "high" | "medium" | "low" | "holiday" | "unknown";
   released_at: Date; // scheduled_at do evento (quando saiu)
@@ -90,15 +90,17 @@ export function confidenceFor(liveWeights: { w: number; dir: number }[]): Confid
 export interface ComputeInput {
   events: ScoredEvent[];
   now: Date;
-  previousScores?: Partial<Record<Currency, number>>; // último snapshot
+  previousScores?: Partial<Record<string, number>>; // último snapshot
   cfg?: ScoringConfig;
+  /** Moedas a pontuar (padrão G8). O módulo B3 usa o MESMO motor para BRL/CNY/USD. */
+  currencies?: readonly AnyCurrency[];
 }
 
-/** Calcula o score das 8 moedas + ranking. Puro: mesma entrada ⇒ mesma saída. */
+/** Calcula o score das moedas (padrão: 8 do G8) + ranking. Puro: mesma entrada ⇒ mesma saída. */
 export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] {
   const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
   const out: CurrencyScoreView[] = [];
-  for (const ccy of G8) {
+  for (const ccy of (input.currencies ?? G8) as readonly Currency[]) {
     const evs = input.events.filter((e) => e.currency === ccy && !e.superseded && e.impact !== "holiday");
     let num = 0, den = 0;
     const live: { w: number; dir: number }[] = [];

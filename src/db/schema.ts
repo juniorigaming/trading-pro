@@ -182,3 +182,4 @@ export const dailyBias = pgTable("daily_bias", {
 
 // Módulo de IA (Macro / G8 / SMC-ICT / Journal)
 export * from "./schema-ai";
+export * from "./schema-b3";

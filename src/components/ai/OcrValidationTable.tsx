@@ -1,17 +1,17 @@
 "use client";
 import { Plus, Trash2, CheckCircle2, AlertTriangle } from "lucide-react";
-import { G8, type EconomicEventInput } from "@/lib/ai/types";
+import { G8, type AnyCurrency, type EconomicEventInput } from "@/lib/ai/types";
 import { inputCls, selectCls, Btn, Badge } from "./ui";
 
 export type OcrRow = EconomicEventInput & { _id: string; _confirmed: boolean; _original?: Partial<EconomicEventInput> };
 const IMPACTS = ["high", "medium", "low", "holiday", "unknown"] as const;
 
-interface Props { rows: OcrRow[]; onChange: (rows: OcrRow[]) => void }
+interface Props { rows: OcrRow[]; onChange: (rows: OcrRow[]) => void; currencies?: readonly AnyCurrency[]; defaultCurrency?: AnyCurrency }
 
 /** Tela de validação do OCR: tudo editável; linhas com baixa confiança exigem confirmação explícita antes de interpretar. */
-export default function OcrValidationTable({ rows, onChange }: Props) {
+export default function OcrValidationTable({ rows, onChange, currencies = G8, defaultCurrency = "USD" }: Props) {
   const upd = (id: string, patch: Partial<OcrRow>) => onChange(rows.map((r) => (r._id === id ? { ...r, ...patch, user_edited: r.user_edited || Object.keys(patch).some((k) => !k.startsWith("_")) } : r)));
-  const add = () => onChange([...rows, { _id: Math.random().toString(36).slice(2), _confirmed: true, date: new Date().toISOString().slice(0, 10), time: null, currency: "USD", event: "", impact: "medium", actual: null, forecast: null, previous: null, source: "manual", ocr_confidence: 1, requires_manual_confirmation: false, user_edited: true }]);
+  const add = () => onChange([...rows, { _id: Math.random().toString(36).slice(2), _confirmed: true, date: new Date().toISOString().slice(0, 10), time: null, currency: defaultCurrency, event: "", impact: "medium", actual: null, forecast: null, previous: null, source: "manual", ocr_confidence: 1, requires_manual_confirmation: false, user_edited: true }]);
   const remove = (id: string) => onChange(rows.filter((r) => r._id !== id));
   const confirmAll = () => onChange(rows.map((r) => ({ ...r, _confirmed: true })));
   const pendingConfirm = rows.filter((r) => r.requires_manual_confirmation && !r._confirmed).length;
@@ -42,7 +42,7 @@ export default function OcrValidationTable({ rows, onChange }: Props) {
                   <td className="px-2 py-1"><input type="checkbox" checked={r._confirmed} onChange={(e) => upd(r._id, { _confirmed: e.target.checked })} className="accent-[var(--user-accent)]" title="Confirmar leitura" /></td>
                   <td className="px-2 py-1"><input value={r.date ?? ""} onChange={(e) => upd(r._id, { date: e.target.value || null })} className={`${inputCls} min-w-[6.5rem]`} placeholder="AAAA-MM-DD" /></td>
                   <td className="px-2 py-1"><input value={r.time ?? ""} onChange={(e) => upd(r._id, { time: e.target.value || null })} className={`${inputCls} min-w-[4.5rem]`} placeholder="HH:MM" /></td>
-                  <td className="px-2 py-1"><select value={r.currency} onChange={(e) => upd(r._id, { currency: e.target.value as OcrRow["currency"] })} className={selectCls}>{G8.map((c) => <option key={c}>{c}</option>)}</select></td>
+                  <td className="px-2 py-1"><select value={r.currency} onChange={(e) => upd(r._id, { currency: e.target.value as OcrRow["currency"] })} className={selectCls}>{currencies.map((c) => <option key={c}>{c}</option>)}</select></td>
                   <td className="px-2 py-1"><input value={r.event} onChange={(e) => upd(r._id, { event: e.target.value })} className={`${inputCls} min-w-[12rem]`} /></td>
                   <td className="px-2 py-1"><select value={r.impact} onChange={(e) => upd(r._id, { impact: e.target.value as OcrRow["impact"] })} className={`${selectCls} ${r.impact === "high" ? "text-rose" : r.impact === "medium" ? "text-amber" : ""}`}>{IMPACTS.map((i) => <option key={i} value={i}>{i}</option>)}</select></td>
                   <td className="px-2 py-1"><input value={r.actual ?? ""} onChange={(e) => upd(r._id, { actual: e.target.value || null })} className={`${inputCls} min-w-[4.5rem] ${released ? "font-bold" : ""}`} placeholder="—" /></td>

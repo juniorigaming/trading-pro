@@ -2,7 +2,7 @@
  * Event Risk — classifica risco de eventos PENDENTES (nunca realizados) para moedas e pares.
  * LOW < MEDIUM < HIGH < EXTREME
  */
-import type { Currency, EventRiskLevel, PendingEventView } from "@/lib/ai/types";
+import type { AnyCurrency, EventRiskLevel, PendingEventView } from "@/lib/ai/types";
 
 export interface EventRiskOptions {
   horizonHours?: number; // janela considerada (default 12h)
@@ -24,7 +24,7 @@ function eventScore(e: PendingEventView): number {
  * Risco para um conjunto de moedas (1 moeda = card; 2 moedas = par).
  * EXTREME: evento high nas DUAS pernas, ou ≥2 eventos high na janela, ou high em ≤60 min.
  */
-export function eventRiskFor(currencies: Currency[], pending: PendingEventView[], opts: EventRiskOptions = {}): { level: EventRiskLevel; events: PendingEventView[]; score: number } {
+export function eventRiskFor(currencies: readonly AnyCurrency[], pending: PendingEventView[], opts: EventRiskOptions = {}): { level: EventRiskLevel; events: PendingEventView[]; score: number } {
   const horizon = (opts.horizonHours ?? 12) * 60;
   const relevant = pending
     .filter((e) => currencies.includes(e.currency) && e.minutes_until >= 0 && e.minutes_until <= horizon)
@@ -45,7 +45,7 @@ export function eventRiskFor(currencies: Currency[], pending: PendingEventView[]
 export function toPendingView(e: { id: number; currency: string; event: string; scheduledAt: Date | string; impact: string; forecast: string | null; previous: string | null }, now: Date = new Date()): PendingEventView {
   const at = new Date(e.scheduledAt);
   return {
-    id: e.id, currency: e.currency as Currency, event: e.event, scheduled_at: at.toISOString(), impact: e.impact,
+    id: e.id, currency: e.currency as AnyCurrency, event: e.event, scheduled_at: at.toISOString(), impact: e.impact,
     forecast: e.forecast, previous: e.previous, minutes_until: Math.round((at.getTime() - now.getTime()) / 60_000),
   };
 }

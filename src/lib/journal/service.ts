@@ -4,6 +4,8 @@ import { getDb } from "@/db";
 import { errorTags, trades, tradeJournal, tradeMetrics, tradeScreenshots } from "@/db/schema";
 import { computeExposure, type ExposureResult } from "@/lib/macro/exposure";
 import type { JournalRow } from "./stats";
+import { b3InstrumentOf } from "@/lib/b3/types";
+import { splitSymbol } from "@/lib/macro/pairs";
 
 export interface JournalEntry {
   id: number; date: string; time: string; session: string; symbol: string; direction: "BUY" | "SELL"; status: string;
@@ -14,7 +16,9 @@ export interface JournalEntry {
   displacement: boolean | null; fvg: boolean | null; entry_model: string | null; setup_grade: string | null; setup_grade_locked_at: string | null;
   mae_r: number | null; mfe_r: number | null; mae_price: number | null; mfe_price: number | null;
   error_tags: string[]; lesson: string | null; notes: string | null; technical_analysis_id: number | null; macro_analysis_id: number | null;
-  ai_review: unknown | null; screenshots: { id: number; kind: string; timeframe: string | null; data_url: string }[];
+  ai_review: unknown | null; screenshots: { id: number; kind: string; timeframe: string | null; data_url: string }[];  // B3
+  market: string | null; b3_analysis_id: number | null; win_macro_score: number | null; dol_macro_score: number | null; usd_score: number | null; brl_score: number | null;
+  di_short: number | null; di_long: number | null; risk_regime: string | null; dxy_state: string | null; us10y_state: string | null; sp500_state: string | null; nasdaq_state: string | null; iron_ore_state: string | null; oil_state: string | null; event_risk_at_entry: string | null;
 }
 
 const n = (v: unknown): number | null => (v === null || v === undefined || v === "" ? null : Number(v));
@@ -43,6 +47,8 @@ export async function listJournal(limit = 200, withScreenshots = false, onlyId?:
     error_tags: tags.filter((x) => x.tradeId === t.id).map((x) => x.tag), lesson: j?.lesson ?? t.lesson ?? null, notes: t.notes ?? null,
     technical_analysis_id: j?.technicalAnalysisId ?? null, macro_analysis_id: j?.macroAnalysisId ?? null, ai_review: j?.aiReviewJson ?? null,
     screenshots: shots.filter((s) => s.tradeId === t.id).map((s) => ({ id: s.id, kind: s.kind, timeframe: s.timeframe, data_url: s.dataUrl })),
+    market: j?.market ?? (b3InstrumentOf(t.asset) ? "B3" : splitSymbol(t.asset) ? "FOREX" : null), b3_analysis_id: j?.b3AnalysisId ?? null, win_macro_score: j?.winMacroScore ?? null, dol_macro_score: j?.dolMacroScore ?? null, usd_score: j?.usdScore ?? null, brl_score: j?.brlScore ?? null,
+    di_short: j?.diShort ?? null, di_long: j?.diLong ?? null, risk_regime: j?.riskRegime ?? null, dxy_state: j?.dxyState ?? null, us10y_state: j?.us10yState ?? null, sp500_state: j?.sp500State ?? null, nasdaq_state: j?.nasdaqState ?? null, iron_ore_state: j?.ironOreState ?? null, oil_state: j?.oilState ?? null, event_risk_at_entry: j?.eventRiskAtEntry ?? null,
   }));
 }
 
@@ -55,6 +61,7 @@ export function toStatsRows(entries: JournalEntry[]): JournalRow[] {
   return entries.filter((e) => e.status === "CLOSED" || e.result).map((e) => ({
     id: e.id, date: e.date, session: e.session, symbol: e.symbol, direction: e.direction, resultType: e.result, resultAmount: e.pnl, realizedR: e.realized_r,
     maeR: e.mae_r, mfeR: e.mfe_r, setupGrade: e.setup_grade, entryModel: e.entry_model, mssTimeframe: e.mss_timeframe, mssType: e.mss_type, macroDivergence: e.macro_divergence, errorTags: e.error_tags,
+    market: e.market, instrument: b3InstrumentOf(e.symbol), winMacroScore: e.win_macro_score, dolMacroScore: e.dol_macro_score, diShort: e.di_short, diLong: e.di_long, riskRegime: e.risk_regime, dxyState: e.dxy_state, us10yState: e.us10y_state, sp500State: e.sp500_state, eventRiskAtEntry: e.event_risk_at_entry,
   }));
 }
 
@@ -70,6 +77,10 @@ export interface JournalUpsert {
   // metrics
   realized_r?: number | null; mae_r?: number | null; mfe_r?: number | null; mae_price?: number | null; mfe_price?: number | null; protected_structure?: string | null;
   screenshots?: { kind: "BEFORE" | "AFTER" | "OTHER"; timeframe?: string | null; data_url: string }[];
+  // B3
+  market?: string | null; b3_analysis_id?: number | null; win_macro_score?: number | null; dol_macro_score?: number | null; usd_score?: number | null; brl_score?: number | null;
+  di_short?: number | null; di_long?: number | null; risk_regime?: string | null; dxy_state?: string | null; us10y_state?: string | null; sp500_state?: string | null; nasdaq_state?: string | null; iron_ore_state?: string | null; oil_state?: string | null;
+  event_risk_at_entry?: string | null;
 }
 
 function sessionLabel(s?: string) { return s === "ASIA" ? "Ásia" : s === "LONDON" ? "Londres" : s === "NEW_YORK" ? "Nova York" : s || "Outro"; }
@@ -107,7 +118,10 @@ export async function updateJournalEntry(id: number, b: JournalUpsert, isNew = f
     ["strong_currency", "strongCurrency"], ["weak_currency", "weakCurrency"], ["macro_divergence", "macroDivergence"], ["macro_scores", "macroScores"], ["macro_analysis_id", "macroAnalysisId"], ["technical_analysis_id", "technicalAnalysisId"],
     ["htf_bias", "htfBias"], ["draw_on_liquidity", "drawOnLiquidity"], ["poi", "poi"], ["liquidity_sweep", "liquiditySweep"], ["mss_timeframe", "mssTimeframe"], ["mss_type", "mssType"], ["displacement", "displacement"], ["fvg", "fvg"],
     ["entry_model", "entryModel"], ["planned_rr", "plannedRr"], ["risk_percent", "riskPercent"], ["lesson", "lesson"], ["error_tags", "errorTags"],
+    ["market", "market"], ["b3_analysis_id", "b3AnalysisId"], ["win_macro_score", "winMacroScore"], ["dol_macro_score", "dolMacroScore"], ["usd_score", "usdScore"], ["brl_score", "brlScore"], ["di_short", "diShort"], ["di_long", "diLong"],
+    ["risk_regime", "riskRegime"], ["dxy_state", "dxyState"], ["us10y_state", "us10yState"], ["sp500_state", "sp500State"], ["nasdaq_state", "nasdaqState"], ["iron_ore_state", "ironOreState"], ["oil_state", "oilState"], ["event_risk_at_entry", "eventRiskAtEntry"],
   ];
+  if (b.market === undefined && isNew && b.symbol) j.market = b3InstrumentOf(b.symbol) ? "B3" : splitSymbol(b.symbol) ? "FOREX" : "OTHER";
   for (const [from, to] of map) if (b[from] !== undefined) (j as Record<string, unknown>)[to] = b[from];
   if (b.risk_usd !== undefined) j.riskUsd = b.risk_usd == null ? null : String(b.risk_usd);
   if (b.setup_grade !== undefined) {

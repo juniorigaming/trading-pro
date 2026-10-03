@@ -6,7 +6,7 @@ import { z } from "zod";
 import { CATEGORIES, CLASSIFICATIONS, CONFIDENCE, DISQUALIFIERS, ERROR_TAGS, IMPORTANCE, TIMEFRAMES } from "./types";
 
 const nullableStr = z.string().nullable();
-const currencyOcr = z.enum(["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY", "OTHER"]);
+const currencyOcr = z.enum(["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "CNY", "OTHER"]);
 
 // ---------------------------------------------------------------------------
 // 1) OCR do calendário econômico
@@ -50,7 +50,8 @@ export const EventInterpretationSchema = z.object({
       classification: z.enum(CLASSIFICATIONS).describe("Para a MOEDA do evento"),
       growth_implication: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE", "NA"]),
       inflation_implication: z.enum(["HOTTER", "NEUTRAL", "COOLER", "NA"]),
-      central_bank: z.enum(["FED", "ECB", "BOE", "BOJ", "SNB", "BOC", "RBA", "RBNZ"]),
+      central_bank: z.enum(["FED", "ECB", "BOE", "BOJ", "SNB", "BOC", "RBA", "RBNZ", "BCB", "PBOC", "NONE"]),
+      fiscal_implication: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE", "NA"]).describe("Impacto sobre risco fiscal (relevante p/ BRL/B3; NA p/ G8 quando não se aplica)"),
       central_bank_implication: z.enum(["MORE_HAWKISH", "SLIGHTLY_HAWKISH", "UNCHANGED", "SLIGHTLY_DOVISH", "MORE_DOVISH", "NA"]),
       priced_in: z.enum(["FULLY_PRICED", "MOSTLY_PRICED", "PARTIALLY_PRICED", "SURPRISE", "UNKNOWN"]),
       currency_implication: z.enum(["STRONG_POSITIVE", "POSITIVE", "NEUTRAL", "NEGATIVE", "STRONG_NEGATIVE"]),
@@ -178,8 +179,48 @@ function strictify(node: unknown): Record<string, unknown> {
   return n;
 }
 
+// ---------------------------------------------------------------------------
+// 6) OCR de painéis de mercado (DI, DXY, yields, índices, commodities, fluxo) — módulo B3
+// ---------------------------------------------------------------------------
+export const MARKET_SYMBOLS = ["IBOV", "WIN", "DOL", "WDO", "USDBRL", "SPX", "NAS100", "DXY", "US02Y", "US10Y", "BRENT", "WTI", "IRON_ORE", "COPPER", "VIX", "FOREIGN_FLOW", "DI", "OTHER"] as const;
+export const MarketExtractionSchema = z.object({
+  source_type: z.enum(["tradingview", "profit", "metatrader", "b3", "anbima", "investing", "news", "other"]),
+  rows: z.array(z.object({
+    symbol: z.enum(MARKET_SYMBOLS).describe("Ativo detectado; DI para contratos de juros (preencha contract_code)"),
+    contract_code: nullableStr.describe("Só para DI: código legível ex. DI1F27; null caso contrário"),
+    label_seen: z.string().describe("Texto do rótulo exatamente como aparece"),
+    value: z.number().nullable().describe("Último preço/taxa legível; null se ilegível"),
+    change_pct: z.number().nullable().describe("Variação % do dia se visível; null caso contrário"),
+    change_bp: z.number().nullable().describe("Variação em pontos-base (juros) se visível; null caso contrário"),
+    as_of: nullableStr.describe("Data/hora visível no painel; null se ausente"),
+    ocr_confidence: z.number().min(0).max(1),
+    requires_manual_confirmation: z.boolean(),
+  })),
+  overall_ocr_confidence: z.number().min(0).max(1),
+  notes: z.array(z.string()),
+});
+export type MarketExtraction = z.infer<typeof MarketExtractionSchema>;
+
+// ---------------------------------------------------------------------------
+// 7) Brief B3 (narrativa sobre números já calculados pelo backend)
+// ---------------------------------------------------------------------------
+export const B3BriefSchema = z.object({
+  headline: z.string(),
+  regime_narrative: z.string(),
+  win_view: z.string(),
+  dol_view: z.string(),
+  di_curve_cause: z.enum(["INFLATION", "FISCAL_RISK", "BCB_HAWKISH", "BCB_DOVISH", "GLOBAL_YIELDS", "RISK_PREMIUM", "GROWTH", "UNKNOWN"]),
+  di_curve_comment: z.string(),
+  candidate_reasons: z.array(z.object({ instrument: z.enum(["WIN", "DOL", "WDO"]), reason: z.string(), what_to_look_for: z.string(), invalidation: z.string() })),
+  conflicts: z.array(z.string()),
+  warnings: z.array(z.string()),
+});
+export type B3Brief = z.infer<typeof B3BriefSchema>;
+
 export const SCHEMAS = {
   calendar_extraction: CalendarExtractionSchema,
+  market_extraction: MarketExtractionSchema,
+  b3_brief: B3BriefSchema,
   event_interpretation: EventInterpretationSchema,
   session_brief: SessionBriefSchema,
   technical_analysis: TechnicalAnalysisSchema,

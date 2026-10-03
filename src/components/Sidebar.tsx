@@ -21,6 +21,7 @@ import {
   Crosshair,
   BookOpenCheck,
   PieChart,
+  Landmark,
 } from "lucide-react";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { calculateMetrics } from "@/lib/calculations";
@@ -37,6 +38,7 @@ const navItems = [
   { label: "Macroeconomia", href: "/macro", icon: Globe },
   { label: "Análise Macro IA", href: "/analise-macro", icon: BrainCircuit },
   { label: "Ranking G8", href: "/ranking-g8", icon: Trophy },
+  { label: "B3 Macro", href: "/b3", icon: Landmark },
   { label: "SMC / ICT", href: "/smc-ict", icon: Crosshair },
   { label: "Journal", href: "/journal", icon: BookOpenCheck },
   { label: "Estatísticas", href: "/estatisticas", icon: PieChart },

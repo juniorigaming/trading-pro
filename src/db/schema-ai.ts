@@ -81,6 +81,7 @@ export const macroInterpretations = pgTable(
     inflationImplication: text("inflation_implication").notNull(),
     centralBank: text("central_bank").notNull(),
     centralBankImplication: text("central_bank_implication").notNull(),
+    fiscalImplication: text("fiscal_implication"), // migration 0002 (B3)
     pricedIn: text("priced_in"),
     currencyImplication: text("currency_implication").notNull(),
     confidence: text("confidence").notNull(),
@@ -228,6 +229,23 @@ export const tradeJournal = pgTable("trade_journal", {
   errorTags: jsonb("error_tags").notNull().default([]),
   lesson: text("lesson"),
   aiReviewJson: jsonb("ai_review_json"),
+  // --- B3 (WIN/DOL/WDO) — migration 0002 ---
+  market: text("market"), // FOREX | B3 | OTHER
+  b3AnalysisId: integer("b3_analysis_id"),
+  winMacroScore: real("win_macro_score"),
+  dolMacroScore: real("dol_macro_score"),
+  usdScore: real("usd_score"),
+  brlScore: real("brl_score"),
+  diShort: real("di_short"),
+  diLong: real("di_long"),
+  riskRegime: text("risk_regime"),
+  dxyState: text("dxy_state"), // UP DOWN FLAT UNKNOWN
+  us10yState: text("us10y_state"),
+  sp500State: text("sp500_state"),
+  nasdaqState: text("nasdaq_state"),
+  ironOreState: text("iron_ore_state"),
+  oilState: text("oil_state"),
+  eventRiskAtEntry: text("event_risk_at_entry"), // LOW MEDIUM HIGH EXTREME
   createdAt: ts("created_at").defaultNow().notNull(),
   updatedAt: ts("updated_at").defaultNow().notNull(),
 });

@@ -5,8 +5,9 @@ import { Badge, Notice, PageHeader, Section, Spinner, Tabs } from "@/components/
 import { apiFetch } from "@/lib/ai/client";
 import type { MaeMfeStats, Observation, StatBucket } from "@/lib/journal/stats";
 
-interface Stats { total: StatBucket; by_session: StatBucket[]; by_symbol: StatBucket[]; by_direction: StatBucket[]; by_setup_grade: StatBucket[]; by_entry_model: StatBucket[]; by_mss_timeframe: StatBucket[]; by_mss_type: StatBucket[]; by_divergence: StatBucket[]; by_weekday: StatBucket[]; by_error_tag: StatBucket[]; mae_mfe: MaeMfeStats; observations: Observation[]; min_sample: number }
-const DIMS = [["by_session", "Sessão"], ["by_symbol", "Ativo"], ["by_direction", "Direção"], ["by_setup_grade", "Grade"], ["by_entry_model", "Modelo"], ["by_mss_timeframe", "MSS timeframe"], ["by_mss_type", "MSS tipo"], ["by_divergence", "Divergência macro"], ["by_weekday", "Dia da semana"], ["by_error_tag", "Tag de erro"]] as const;
+interface Stats { total: StatBucket; by_session: StatBucket[]; by_symbol: StatBucket[]; by_direction: StatBucket[]; by_setup_grade: StatBucket[]; by_entry_model: StatBucket[]; by_mss_timeframe: StatBucket[]; by_mss_type: StatBucket[]; by_divergence: StatBucket[]; by_weekday: StatBucket[]; by_error_tag: StatBucket[]; by_regime: StatBucket[]; by_macro_score: StatBucket[]; by_di_alignment: StatBucket[]; by_dxy_alignment: StatBucket[]; by_instrument: StatBucket[]; by_event_risk: StatBucket[]; filters?: { market: string; instrument: string | null }; mae_mfe: MaeMfeStats; observations: Observation[]; min_sample: number }
+const DIMS = [["by_session", "Sessão"], ["by_symbol", "Ativo"], ["by_direction", "Direção"], ["by_setup_grade", "Grade"], ["by_entry_model", "Modelo"], ["by_mss_timeframe", "MSS timeframe"], ["by_mss_type", "MSS tipo"], ["by_divergence", "Divergência macro"], ["by_weekday", "Dia da semana"], ["by_error_tag", "Tag de erro"], ["by_instrument", "Mercado / instrumento"], ["by_regime", "Regime B3"], ["by_macro_score", "Macro score (B3)"], ["by_di_alignment", "Alinhamento DI"], ["by_dxy_alignment", "Alinhamento DXY"], ["by_event_risk", "Event risk na entrada"]] as const;
+const MARKETS = [["ALL", "Todos"], ["FOREX", "Forex"], ["B3", "B3 (WIN/DOL/WDO)"], ["WIN", "WIN"], ["DOL", "DOL"], ["WDO", "WDO"]] as const;
 type DimKey = (typeof DIMS)[number][0];
 const f2 = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const pct = (v: number) => `${v.toFixed(0)}%`; // win_rate já vem em %
@@ -35,10 +36,14 @@ export default function EstatisticasPage() {
   const [data, setData] = useState<Stats | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dim, setDim] = useState<DimKey>("by_session");
-  useEffect(() => { apiFetch<Stats>("/api/journal/stats").then(setData).catch((e) => setErr(e.message)); }, []);
+  const [market, setMarket] = useState<(typeof MARKETS)[number][0]>("ALL");
+  useEffect(() => {
+    const q = market === "ALL" ? "" : market === "FOREX" || market === "B3" ? `?market=${market}` : `?market=B3&instrument=${market}`;
+    apiFetch<Stats>(`/api/journal/stats${q}`).then(setData).catch((e) => setErr(e.message));
+  }, [market]);
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      <PageHeader icon={BarChart3} title="Estatísticas do processo" sub="Win rate, R médio, profit factor, expectancy, MAE/MFE por dimensão. Padrões só viram conclusão com amostra relevante — antes disso são OBSERVAÇÕES." />
+      <PageHeader icon={BarChart3} title="Estatísticas do processo" sub="Win rate, R médio, profit factor, expectancy, MAE/MFE por dimensão. Padrões só viram conclusão com amostra relevante — antes disso são OBSERVAÇÕES." right={<div className="flex items-center gap-1.5 text-xs flex-wrap"><span className="text-text-muted">Mercado</span>{MARKETS.map(([k, l]) => <button key={k} onClick={() => setMarket(k)} className={`px-2.5 py-1.5 rounded-lg border font-bold ${market === k ? "border-accent bg-accent-soft text-accent" : "border-border text-text-secondary"}`}>{l}</button>)}</div>} />
       {err && <Notice kind="error">{err}</Notice>}
       {!data ? <Spinner label="Calculando..." /> : (
         <div className="space-y-4">

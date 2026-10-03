@@ -5,14 +5,16 @@ import { apiFetch } from "@/lib/ai/client";
 import { G8 } from "@/lib/ai/types";
 import { Spinner } from "./ui";
 
-const COLORS: Record<string, string> = { USD: "#60a5fa", EUR: "#34d399", GBP: "#f472b6", JPY: "#f87171", CHF: "#a78bfa", CAD: "#fb923c", AUD: "#facc15", NZD: "#2dd4bf" };
+const COLORS: Record<string, string> = { USD: "#60a5fa", EUR: "#34d399", GBP: "#f472b6", JPY: "#f87171", CHF: "#a78bfa", CAD: "#fb923c", AUD: "#facc15", NZD: "#2dd4bf", BRL: "#34d399", WIN: "#facc15", DOL: "#f87171" };
 type Row = { currency: string; score: number; computed_at: string };
 
-export default function ScoreHistoryChart() {
+/** Gráfico de histórico de scores (7D/30D/90D). Reutilizado pelo B3 via `endpoint` + `series` (USD/BRL/WIN/DOL). */
+export default function ScoreHistoryChart({ endpoint = "/api/macro/scores/history", series }: { endpoint?: string; series?: readonly string[] } = {}) {
+  const all = series ?? G8;
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [state, setState] = useState<{ days: number; rows: Row[] } | null>(null);
-  const [sel, setSel] = useState<string[]>([...G8]);
-  useEffect(() => { let alive = true; apiFetch<Row[]>(`/api/macro/scores/history?days=${days}`).then((r) => alive && setState({ days, rows: r })).catch(() => alive && setState({ days, rows: [] })); return () => { alive = false; }; }, [days]);
+  const [sel, setSel] = useState<string[]>([...all]);
+  useEffect(() => { let alive = true; apiFetch<Row[]>(`${endpoint}${endpoint.includes("?") ? "&" : "?"}days=${days}`).then((r) => alive && setState({ days, rows: r })).catch(() => alive && setState({ days, rows: [] })); return () => { alive = false; }; }, [days, endpoint]);
   const rows = state && state.days === days ? state.rows : null;
   const data = useMemo(() => {
     if (!rows) return [];
@@ -25,7 +27,7 @@ export default function ScoreHistoryChart() {
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {([7, 30, 90] as const).map((d) => <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${days === d ? "border-accent bg-accent-soft text-accent" : "border-border text-text-muted"}`}>{d}D</button>)}
         <span className="mx-1 text-text-muted">|</span>
-        {G8.map((c) => <button key={c} onClick={() => setSel((s) => (s.includes(c) ? s.filter((x) => x !== c) : [...s, c]))} className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${sel.includes(c) ? "border-transparent" : "border-border opacity-40"}`} style={{ color: COLORS[c], background: sel.includes(c) ? `${COLORS[c]}22` : undefined }}>{c}</button>)}
+        {all.map((c) => <button key={c} onClick={() => setSel((s) => (s.includes(c) ? s.filter((x) => x !== c) : [...s, c]))} className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${sel.includes(c) ? "border-transparent" : "border-border opacity-40"}`} style={{ color: COLORS[c], background: sel.includes(c) ? `${COLORS[c]}22` : undefined }}>{c}</button>)}
       </div>
       {rows == null ? <Spinner label="Carregando histórico..." /> : data.length < 2 ? <p className="text-xs text-text-muted py-6 text-center">Histórico insuficiente ({data.length} ponto). Cada Análise Macro grava um ponto por moeda — o gráfico ganha forma com o uso diário.</p> : (
         <ResponsiveContainer width="100%" height={260}>
@@ -36,7 +38,7 @@ export default function ScoreHistoryChart() {
             <Legend wrapperStyle={{ fontSize: 10 }} />
             <ReferenceLine y={0} stroke="#475569" />
             <ReferenceLine y={1} stroke="#10b98155" strokeDasharray="3 3" /><ReferenceLine y={-1} stroke="#f43f5e55" strokeDasharray="3 3" />
-            {G8.filter((c) => sel.includes(c)).map((c) => <Line key={c} type="monotone" dataKey={c} stroke={COLORS[c]} dot={false} strokeWidth={2} connectNulls />)}
+            {all.filter((c) => sel.includes(c)).map((c) => <Line key={c} type="monotone" dataKey={c} stroke={COLORS[c]} dot={false} strokeWidth={2} connectNulls />)}
           </LineChart>
         </ResponsiveContainer>
       )}

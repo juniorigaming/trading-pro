@@ -1,8 +1,9 @@
 "use client";
 import { Component, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BrainCircuit, Trophy, Siren, Target, ChevronRight } from "lucide-react";
+import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark } from "lucide-react";
 import { apiFetch } from "@/lib/ai/client";
+import { B3_SESSION_LABEL, type B3AnalysisResult } from "@/lib/b3/types";
 import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView } from "@/lib/ai/types";
 import { Badge, DeltaArrow, fmtScore, riskColor, scoreBg, SESSION_LABEL } from "./ui";
 import CurrencyExposure from "./CurrencyExposure";
@@ -53,6 +54,8 @@ function DashboardAiWidgetsInner() {
   const [latest, setLatest] = useState<MacroAnalysisResult | null>(null);
   const [cands, setCands] = useState<TradeCandidateView[]>([]);
   const [unavailable, setUnavailable] = useState(false);
+  const [b3, setB3] = useState<B3AnalysisResult | null>(null);
+  useEffect(() => { apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").then((r) => setB3(r && typeof r === "object" && "win" in r ? r : null)).catch(() => setB3(null)); }, []);
   useEffect(() => {
     Promise.all([apiFetch<CurrencyScoreView[]>("/api/macro/scores"), apiFetch<MacroAnalysisResult | null>("/api/macro/analyses?latest=1"), apiFetch<TradeCandidateView[]>("/api/macro/candidates")])
       .then(([s, l, c]) => { setScores(Array.isArray(s) ? s : []); setLatest(l && typeof l === "object" ? l : null); setCands(normalizeCandidates(c)); }).catch(() => setUnavailable(true));
@@ -85,6 +88,20 @@ function DashboardAiWidgetsInner() {
         {latest && <p className="text-[10px] text-text-muted mt-1">{(latest.pending_events ?? []).length} eventos pendentes</p>}
       </Link>
       <div className="glass-card p-4"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><BrainCircuit size={14} className="text-accent" />Exposição por moeda</p><CurrencyExposure compact /></div>
+      <Link href="/b3" className="glass-card p-4 hover:bg-surface-2/60 transition md:col-span-2 xl:col-span-4">
+        <div className="flex items-center justify-between mb-2"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5"><Landmark size={14} className="text-accent" />B3 Macro — WIN & DOL</p>{b3 && <span className="text-[10px] text-text-muted">{b3.date} · {B3_SESSION_LABEL[b3.session]}</span>}</div>
+        {!b3 ? <p className="text-xs text-text-muted">Sem análise B3 ainda — abra o módulo para carregar calendário BR/EUA, curva DI e exterior.</p> : (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+            <span>WIN <span className={`px-1.5 rounded font-bold ${scoreBg(b3.win.score)}`}>{fmtScore(b3.win.score)}</span> <span className="text-text-muted">{b3.win.bias}</span></span>
+            <span>DOL <span className={`px-1.5 rounded font-bold ${scoreBg(b3.dol.divergence)}`}>{fmtScore(b3.dol.divergence)}</span> <span className="text-text-muted">{b3.dol.bias}</span></span>
+            <span className="text-text-muted">USD {fmtScore(b3.usd.score)} · BRL {fmtScore(b3.brl.score)}</span>
+            <span className="text-text-muted">regime <b className="text-text-primary">{b3.regime}</b></span>
+            {b3.di_curve && <span className="text-text-muted">DI {b3.di_curve.shape}</span>}
+            {b3.event_risk.map((e) => <Badge key={e.instrument} className={riskColor(e.level)}>{e.instrument} {e.level}</Badge>)}
+            {b3.trade_candidates.slice(0, 3).map((c) => <span key={`${c.instrument}${c.bias}`} className="font-bold"><span className="text-text-primary">{c.instrument}</span> <span className={c.bias === "LONG" ? "text-emerald" : "text-rose"}>{c.bias}</span></span>)}
+          </div>
+        )}
+      </Link>
     </div>
   );
 }

@@ -8,6 +8,9 @@ export interface JournalRow {
   maeR: number | null; mfeR: number | null;
   setupGrade: string | null; entryModel: string | null; mssTimeframe: string | null; mssType: string | null;
   macroDivergence: number | null; errorTags: string[];
+  // B3 (opcionais — Forex deixa null)
+  market?: string | null; instrument?: "WIN" | "DOL" | "WDO" | null; winMacroScore?: number | null; dolMacroScore?: number | null; diShort?: number | null; diLong?: number | null;
+  riskRegime?: string | null; dxyState?: string | null; us10yState?: string | null; sp500State?: string | null; eventRiskAtEntry?: string | null;
 }
 
 export interface StatBucket {
@@ -56,6 +59,26 @@ export function groupBy(rows: JournalRow[], fn: (r: JournalRow) => string | stri
 export function divergenceBucket(d: number | null): string {
   if (d === null || d === undefined) return "sem macro";
   if (d >= 2.5) return "≥ 2.5"; if (d >= 1.5) return "1.5–2.5"; if (d >= 1.0) return "1.0–1.5"; return "< 1.0";
+}
+
+/** Bucket de score macro B3 (WIN score ou DOL divergência), na direção do trade. */
+export function macroScoreBucket(r: JournalRow): string {
+  const v = r.instrument === "WIN" ? r.winMacroScore : r.instrument ? r.dolMacroScore : null;
+  if (v === null || v === undefined) return "sem macro";
+  const long = r.direction === "BUY" || r.direction === "LONG";
+  const aligned = long ? v : -v; // positivo = macro a favor
+  if (aligned >= 1.5) return "macro forte a favor (≥1.5)"; if (aligned >= 0.75) return "macro a favor (0.75–1.5)"; if (aligned > -0.75) return "macro neutra"; return "contra macro";
+}
+/** Alinhamento com DI: WIN long quer DI caindo; DOL long quer DI curto caindo (menos carry). */
+export function diAlignmentBucket(r: JournalRow): string {
+  if (!r.instrument) return "n/a"; const long = r.direction === "BUY" || r.direction === "LONG";
+  const di = r.instrument === "WIN" ? r.diLong : r.diShort; if (di === null || di === undefined) return "DI não registrado";
+  if (Math.abs(di) < 4) return "DI estável"; const fav = di < 0; return fav === long ? "a favor do DI" : "contra o DI";
+}
+export function dxyAlignmentBucket(r: JournalRow): string {
+  if (!r.instrument) return "n/a"; const long = r.direction === "BUY" || r.direction === "LONG"; const d = r.dxyState;
+  if (!d || d === "UNKNOWN") return "DXY não registrado"; if (d === "FLAT") return "DXY estável";
+  const fav = r.instrument === "WIN" ? d === "DOWN" : d === "UP"; return fav === long ? "a favor do DXY" : "contra o DXY";
 }
 
 export function weekdayName(dateIso: string): string {

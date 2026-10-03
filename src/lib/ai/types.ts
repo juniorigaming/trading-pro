@@ -2,6 +2,10 @@
 
 export const G8 = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"] as const;
 export type Currency = (typeof G8)[number];
+/** Moedas extras aceitas no calendário (módulo B3): BRL (Brasil) e CNY (China). O ranking G8 continua só com as 8. */
+export const EXTRA_CURRENCIES = ["BRL", "CNY"] as const;
+export const ALL_CURRENCIES = [...G8, ...EXTRA_CURRENCIES] as const;
+export type AnyCurrency = (typeof ALL_CURRENCIES)[number];
 
 export const SESSIONS = ["ASIA", "LONDON", "NEW_YORK"] as const;
 export type Session = (typeof SESSIONS)[number];
@@ -13,7 +17,7 @@ export const CENTRAL_BANKS: Record<Currency, string> = {
 export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH"] as const;
 export type Classification = (typeof CLASSIFICATIONS)[number];
 
-export const CATEGORIES = ["INFLATION", "EMPLOYMENT", "GROWTH", "ACTIVITY", "CENTRAL_BANK", "HOUSING", "CONSUMPTION", "SENTIMENT", "TRADE", "OTHER"] as const;
+export const CATEGORIES = ["INFLATION", "EMPLOYMENT", "GROWTH", "ACTIVITY", "CENTRAL_BANK", "HOUSING", "CONSUMPTION", "SENTIMENT", "TRADE", "FISCAL", "OTHER"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const IMPORTANCE = ["HIGH", "MEDIUM_HIGH", "MEDIUM", "LOW"] as const;
@@ -42,6 +46,9 @@ export const ERROR_TAGS = [
   "EARLY_ENTRY", "POI_TOUCH_ENTRY", "NO_MSS", "INTERNAL_MSS", "FOMO", "CHASED_PRICE", "ENTRY_IN_EXTENSION",
   "SHORT_IN_DISCOUNT", "LONG_IN_PREMIUM", "STOP_TOO_TIGHT", "PREMATURE_BE", "OVEREXPOSURE", "CORRELATED_EXPOSURE",
   "TRADED_BEFORE_NEWS", "IGNORED_MACRO_CHANGE", "REVENGE_TRADE",
+  // B3 (WIN/DOL/WDO)
+  "TRADED_AGAINST_DI", "TRADED_AGAINST_DOL", "TRADED_AGAINST_GLOBAL_RISK", "TRADED_BEFORE_COPOM", "TRADED_BEFORE_US_DATA",
+  "IGNORED_FISCAL_RISK", "IGNORED_CHINA", "IGNORED_COMMODITIES",
 ] as const;
 export type ErrorTag = (typeof ERROR_TAGS)[number];
 
@@ -55,7 +62,7 @@ export interface EconomicEventInput {
   id?: number;
   date: string | null; // YYYY-MM-DD
   time: string | null; // HH:MM | all_day | tentative
-  currency: Currency;
+  currency: AnyCurrency;
   event: string;
   impact: "high" | "medium" | "low" | "holiday" | "unknown";
   actual: string | null;
@@ -99,7 +106,7 @@ export interface TradeCandidateView {
 
 export interface PendingEventView {
   id: number;
-  currency: Currency;
+  currency: AnyCurrency;
   event: string;
   scheduled_at: string;
   impact: string;

@@ -6,9 +6,9 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
-import { G8, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type Importance, type MacroAnalysisResult, type PendingEventView, type Session } from "@/lib/ai/types";
+import { ALL_CURRENCIES, G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type Importance, type MacroAnalysisResult, type PendingEventView, type Session } from "@/lib/ai/types";
 import { generateStructured } from "@/lib/ai/service";
-import { MACRO_SYSTEM, SESSION_BRIEF } from "@/lib/ai/prompts";
+import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
 import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
 import { baseContribution, computeCurrencyScores, normalizeEventKey, parseNumeric, type ScoredEvent } from "./scoring";
 import { buildTradeCandidates } from "./pairs";
@@ -39,7 +39,7 @@ export async function saveRawEvents(events: EconomicEventInput[], opts: SaveRawO
   const db = getDb();
   const ids: number[] = [];
   for (const e of events) {
-    if (!(G8 as readonly string[]).includes(e.currency) || !e.event?.trim()) continue;
+    if (!(ALL_CURRENCIES as readonly string[]).includes(e.currency) || !e.event?.trim()) continue;
     const scheduledAt = toScheduledAt(e.date, e.time, opts.tzOffsetMinutes ?? -180);
     const eventKey = normalizeEventKey(e.currency, e.event);
     const actual = e.actual && e.actual.trim() ? e.actual.trim() : null;
@@ -80,11 +80,22 @@ export async function saveRawEvents(events: EconomicEventInput[], opts: SaveRawO
 
 interface InterpretOutcome { interpreted: number; model: string | null; promptVersion: string | null; warnings: string[] }
 
+export interface InterpretOptions {
+  /** Moedas a interpretar (padrão: G8). O módulo B3 passa BRL/USD/CNY com prompt próprio. */
+  currencies?: readonly AnyCurrency[];
+  /** Prompt versionado a usar (padrão: MACRO_SYSTEM G8). */
+  prompt?: PromptDef;
+  /** Contexto extra enviado à IA (ex.: curva DI, Selic, fiscal) — nunca números inventados. */
+  extraContext?: Record<string, unknown>;
+}
+
 /** Interpreta (IA) todos os eventos released sem interpretação corrente. Em lotes de 20. */
-export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: number | null, onlyIds?: number[]): Promise<InterpretOutcome> {
+export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: number | null, onlyIds?: number[], options: InterpretOptions = {}): Promise<InterpretOutcome> {
   const db = getDb();
   const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
-  const conds = [eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since), sql`NOT EXISTS (SELECT 1 FROM macro_interpretations mi WHERE mi.event_id = ${economicEvents.id} AND mi.is_current = TRUE)`];
+  const currencies = options.currencies ?? G8;
+  const prompt = options.prompt ?? MACRO_SYSTEM;
+  const conds = [eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since), inArray(economicEvents.currency, [...currencies]), sql`NOT EXISTS (SELECT 1 FROM macro_interpretations mi WHERE mi.event_id = ${economicEvents.id} AND mi.is_current = TRUE)`];
   if (onlyIds?.length) conds.push(inArray(economicEvents.id, onlyIds));
   const todo = await db.select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
   if (todo.length === 0) return { interpreted: 0, model: null, promptVersion: null, warnings: [] };
@@ -92,7 +103,7 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
   // contexto por moeda: últimos drivers + score atual (para "já precificado" e mudança de narrativa)
   const latest = await latestScores();
   const context: Record<string, unknown> = {};
-  for (const c of G8) {
+  for (const c of currencies) {
     const s = latest.find((x) => x.currency === c);
     context[c] = s ? { score: s.score, classification: s.classification, drivers: s.drivers.slice(0, 4).map((d) => `${d.event} (${d.classification})`) } : { score: 0, classification: "NEUTRAL", drivers: [] };
   }
@@ -103,8 +114,8 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
     const batch = todo.slice(i, i + 20);
     const payload = batch.map((e) => ({ id: e.id, currency: e.currency, event: e.event, impact: e.impact, scheduled_at: e.scheduledAt.toISOString(), actual: e.actual, forecast: e.forecast, previous: e.previous }));
     const res = await generateStructured({
-      purpose: "macro_interpret", prompt: MACRO_SYSTEM, schemaName: "event_interpretation", temperature: 0.2,
-      user: JSON.stringify({ events: payload, context_by_currency: context }, null, 0),
+      purpose: prompt === MACRO_SYSTEM ? "macro_interpret" : "b3_macro_interpret", prompt, schemaName: "event_interpretation", temperature: 0.2,
+      user: JSON.stringify({ events: payload, context_by_currency: context, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
     });
     model = res.model; promptVersion = res.promptVersion;
     const byId = new Map(batch.map((e) => [e.id, e]));
@@ -115,7 +126,7 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
       await db.insert(macroInterpretations).values({
         eventId: ev.id, analysisId, category: it.category, subcategory: it.subcategory, importance: it.importance, classification: it.classification,
         directionValue: bc.direction_value, surpriseVsForecast: it.surprise_vs_forecast, changeVsPrevious: it.change_vs_previous,
-        growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
+        growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, fiscalImplication: it.fiscal_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
         pricedIn: it.priced_in, currencyImplication: it.currency_implication, confidence: it.confidence, reasoningSummary: it.reasoning_summary,
         weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
         scoringVersion: cfg.version, promptVersion: res.promptVersion, model: res.model, isCurrent: true,
@@ -152,8 +163,8 @@ export async function loadPendingEvents(now = new Date(), horizonHours = 72): Pr
   return rows.map((r) => toPendingView(r, now));
 }
 
-/** Eventos released + interpretação corrente → ScoredEvent[] */
-async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
+/** Eventos released + interpretação corrente → ScoredEvent[] (todas as moedas; quem consome filtra). */
+export async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
   const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
   const rows = await getDb().select({
     id: economicEvents.id, currency: economicEvents.currency, event: economicEvents.event, impact: economicEvents.impact, scheduledAt: economicEvents.scheduledAt,
@@ -163,7 +174,7 @@ async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
     .innerJoin(macroInterpretations, and(eq(macroInterpretations.eventId, economicEvents.id), eq(macroInterpretations.isCurrent, true)))
     .where(and(eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since)));
   return rows.map((r) => ({
-    event_id: r.id, currency: r.currency as Currency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
+    event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
     superseded: r.supersededBy !== null, category: r.category as Category, importance: r.importance as Importance,
     classification: r.classification as Classification, confidence: r.confidence as Confidence,
   }));

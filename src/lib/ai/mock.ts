@@ -20,18 +20,30 @@ export function mockStructured(schema: SchemaName, user: string): unknown {
       const ids = [...user.matchAll(/"id":\s*(\d+)/g)].map((m) => Number(m[1]));
       const ccyByEvent = new Map<number, string>();
       for (const m of user.matchAll(/"id":\s*(\d+)[^}]*?"currency":\s*"([A-Z]{3})"/g)) ccyByEvent.set(Number(m[1]), m[2]);
-      const CB: Record<string, string> = { USD: "FED", EUR: "ECB", GBP: "BOE", JPY: "BOJ", CHF: "SNB", CAD: "BOC", AUD: "RBA", NZD: "RBNZ" };
+      const CB: Record<string, string> = { USD: "FED", EUR: "ECB", GBP: "BOE", JPY: "BOJ", CHF: "SNB", CAD: "BOC", AUD: "RBA", NZD: "RBNZ", BRL: "BCB", CNY: "PBOC" };
       return {
         interpretations: ids.map((id, i) => ({
           event_id: id, category: i % 2 === 0 ? "INFLATION" : "GROWTH", subcategory: i % 2 === 0 ? "core_cpi_mom" : "pmi_services_flash",
           importance: i % 2 === 0 ? "HIGH" : "MEDIUM_HIGH", surprise_vs_forecast: "BEAT", change_vs_previous: "HIGHER",
           classification: i % 2 === 0 ? "BULLISH" : "NEUTRAL", growth_implication: "POSITIVE", inflation_implication: i % 2 === 0 ? "HOTTER" : "NEUTRAL",
-          central_bank: CB[ccyByEvent.get(id) ?? "USD"] ?? "FED", central_bank_implication: i % 2 === 0 ? "SLIGHTLY_HAWKISH" : "UNCHANGED", priced_in: "PARTIALLY_PRICED",
+          central_bank: CB[ccyByEvent.get(id) ?? "USD"] ?? "FED", fiscal_implication: "NA", central_bank_implication: i % 2 === 0 ? "SLIGHTLY_HAWKISH" : "UNCHANGED", priced_in: "PARTIALLY_PRICED",
           currency_implication: i % 2 === 0 ? "POSITIVE" : "NEUTRAL", confidence: "MEDIUM",
           reasoning_summary: "MOCK: dado acima do forecast → leve pressão hawkish → suporte moderado à moeda.",
         })),
       };
     }
+    case "market_extraction":
+      return {
+        source_type: "tradingview",
+        rows: [
+          { symbol: "DI", contract_code: "DI1F27", label_seen: "DI1F27", value: 14.85, change_pct: null, change_bp: -5, as_of: null, ocr_confidence: 0.9, requires_manual_confirmation: false },
+          { symbol: "DXY", contract_code: null, label_seen: "DXY", value: 104.2, change_pct: 0.3, change_bp: null, as_of: null, ocr_confidence: 0.92, requires_manual_confirmation: false },
+          { symbol: "IRON_ORE", contract_code: null, label_seen: "Iron Ore 62%", value: null, change_pct: null, change_bp: null, as_of: null, ocr_confidence: 0.3, requires_manual_confirmation: true },
+        ],
+        overall_ocr_confidence: 0.7, notes: ["Resposta MOCK — configure a chave de IA para OCR real."],
+      };
+    case "b3_brief":
+      return { headline: "MOCK: brief B3 simulado.", regime_narrative: "Resposta simulada.", win_view: "MOCK", dol_view: "MOCK", di_curve_cause: "UNKNOWN", di_curve_comment: "MOCK", candidate_reasons: [], conflicts: [], warnings: ["Provedor MOCK ativo"] };
     case "session_brief":
       return { headline: "MOCK: sessão sem narrativa real (configure a chave de IA).", narrative: "Resposta simulada para desenvolvimento.", candidate_reasons: [], pairs_to_avoid: [], warnings: ["Provedor MOCK ativo"] };
     case "technical_analysis":

@@ -1,11 +1,13 @@
 "use client";
 import { CheckCircle2, XCircle, CircleDashed } from "lucide-react";
 import type { ChecklistResult } from "@/lib/smc/checklist";
+import type { B3ChecklistResult } from "@/lib/b3/checklist";
 import { Badge, statusColor } from "./ui";
 
 const WORKFLOW = ["MACRO", "HTF DRAW", "LOCATION", "LIQUIDITY", "DISPLACEMENT", "MSS", "RETRACEMENT", "EXECUTION"];
 
-export default function SmcChecklist({ c }: { c: ChecklistResult }) {
+export default function SmcChecklist({ c }: { c: ChecklistResult | B3ChecklistResult }) {
+  const b3 = "macro_items" in c ? (c as B3ChecklistResult) : null;
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -23,6 +25,19 @@ export default function SmcChecklist({ c }: { c: ChecklistResult }) {
           </li>
         ))}
       </ul>
+      {b3 && (
+        <div className="mt-3 rounded-xl border border-border bg-surface-2/40 p-2.5">
+          <p className="text-[11px] font-extrabold text-text-primary mb-1.5">Checklist macro B3 — {b3.instrument}{b3.macro_summary ? <span className="font-normal text-text-muted"> · {b3.macro_summary}</span> : null}</p>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {b3.macro_items.map((it) => (
+              <li key={it.key} className="flex items-start gap-2 rounded-lg bg-surface-2/60 px-2.5 py-1.5">
+                {it.ok === true ? <CheckCircle2 size={15} className="text-emerald mt-0.5 shrink-0" /> : it.ok === false ? <XCircle size={15} className="text-rose mt-0.5 shrink-0" /> : <CircleDashed size={15} className="text-text-muted mt-0.5 shrink-0" />}
+                <div className="min-w-0"><p className="text-xs font-bold text-text-primary">{it.label}</p>{it.note && <p className="text-[10px] text-text-muted leading-snug">{it.note}</p>}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(c.disqualifiers.length > 0 || c.downgrades.length > 0) && (
         <div className="mt-3 space-y-1">
           {c.disqualifiers.length > 0 && <p className="text-[11px] text-rose"><b>Desqualificadores:</b> {c.disqualifiers.join(", ")}</p>}

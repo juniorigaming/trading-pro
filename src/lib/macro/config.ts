@@ -36,7 +36,7 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   importance_weight: { HIGH: 1.0, MEDIUM_HIGH: 0.7, MEDIUM: 0.45, LOW: 0.25 },
   category_multiplier: {
     CENTRAL_BANK: 1.0, INFLATION: 0.95, EMPLOYMENT: 0.9, GROWTH: 0.75, ACTIVITY: 0.65, CONSUMPTION: 0.6,
-    HOUSING: 0.4, TRADE: 0.4, SENTIMENT: 0.35, OTHER: 0.3,
+    HOUSING: 0.4, TRADE: 0.4, SENTIMENT: 0.35, FISCAL: 0.85, OTHER: 0.3,
   },
   impact_factor: { high: 1.0, medium: 0.65, low: 0.35, holiday: 0, unknown: 0.5 },
   confidence_factor: { HIGH: 1.0, MEDIUM: 0.75, LOW: 0.4 },
