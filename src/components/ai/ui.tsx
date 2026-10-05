@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { ArrowUp, ArrowDown, Minus, AlertTriangle, Info } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, AlertTriangle, Info, Loader2 } from "lucide-react";
 
 /** Tokens de cor do módulo IA — alinhados ao design do app: verde = forte, cinza = neutro, vermelho = fraco, âmbar/laranja = risco. */
 export function scoreColor(score: number) { return score >= 0.5 ? "text-emerald" : score <= -0.5 ? "text-rose" : "text-text-muted"; }
@@ -34,10 +34,14 @@ export function Notice({ kind = "info", children }: { kind?: "info" | "warn" | "
   const I = kind === "info" ? Info : AlertTriangle;
   return <div className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs ${cls}`}><I size={14} className="mt-0.5 shrink-0" /><div className="min-w-0">{children}</div></div>;
 }
-export function Btn({ children, onClick, disabled, variant = "primary", type = "button", className = "", title }: { children: ReactNode; onClick?: () => void; disabled?: boolean; variant?: "primary" | "ghost" | "danger"; type?: "button" | "submit"; className?: string; title?: string }) {
+export function Btn({ children, onClick, disabled, variant = "primary", type = "button", className = "", title, loading = false, loadingLabel = "Aguarde..." }: { children: ReactNode; onClick?: () => void; disabled?: boolean; variant?: "primary" | "ghost" | "danger"; type?: "button" | "submit"; className?: string; title?: string; loading?: boolean; loadingLabel?: string }) {
   const base = "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed";
   const v = variant === "primary" ? "bg-accent text-white hover:bg-accent/90 shadow-lg shadow-accent/20" : variant === "danger" ? "bg-rose/15 text-rose border border-rose/30 hover:bg-rose/25" : "border border-border text-text-secondary hover:text-text-primary hover:bg-surface-2";
-  return <button type={type} title={title} onClick={onClick} disabled={disabled} className={`${base} ${v} ${className}`}>{children}</button>;
+  return (
+    <button type={type} title={title} onClick={onClick} disabled={disabled || loading} aria-busy={loading} className={`${base} ${v} ${className}`}>
+      {loading ? (<><Loader2 size={16} className="animate-spin" />{loadingLabel}</>) : children}
+    </button>
+  );
 }
 export const inputCls = "bg-surface-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/40 w-full";
 export const selectCls = "bg-surface-2 border border-border rounded-lg px-2 py-1.5 text-xs text-text-primary focus:outline-none cursor-pointer";

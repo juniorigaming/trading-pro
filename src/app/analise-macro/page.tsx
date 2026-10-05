@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, ScanText, Sparkles, History, KeyRound, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import ImageDropzone from "@/components/ai/ImageDropzone";
+import AiWaitPanel from "@/components/ai/AiWaitPanel";
 import OcrValidationTable, { type OcrRow } from "@/components/ai/OcrValidationTable";
 import G8Ranking from "@/components/ai/G8Ranking";
 import { CandidateList } from "@/components/ai/DivergenceMatrix";
@@ -26,6 +27,7 @@ export default function AnaliseMacroPage() {
   const [ocrMeta, setOcrMeta] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<MacroAnalysisResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [busyKind, setBusyKind] = useState<"extract" | "analyze" | "open" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [history, setHistory] = useState<AnalysisListItem[] | null>(null);
   const [token, setTok] = useState("");
@@ -39,7 +41,7 @@ export default function AnaliseMacroPage() {
   useEffect(() => { if (tab === "historico") loadHistory(); }, [tab, loadHistory]);
 
   const extract = async () => {
-    setErr(null); setBusy("Lendo screenshots com IA (OCR estruturado)...");
+    setErr(null); setBusy("Lendo screenshots com IA (OCR estruturado)..."); setBusyKind("extract");
     try {
       const fd = new FormData();
       images.forEach((i) => fd.append("images", i.file, i.file.name));
@@ -48,26 +50,26 @@ export default function AnaliseMacroPage() {
       const r = await apiFetch<{ events: EconomicEventInput[]; meta: Record<string, unknown> }>("/api/ai/macro/extract", { method: "POST", body: fd });
       setRows(r.events.map((e) => ({ ...e, _id: uid(), _confirmed: !e.requires_manual_confirmation, _original: { actual: e.actual, forecast: e.forecast, previous: e.previous, event: e.event } })));
       setOcrMeta(r.meta); setStep("validate");
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
   const analyze = async () => {
     const unconfirmed = rows.filter((r) => r.requires_manual_confirmation && !r._confirmed).length;
     if (unconfirmed > 0 && !confirm(`${unconfirmed} evento(s) de baixa confiança ainda não confirmados. Continuar mesmo assim?`)) return;
-    setErr(null); setBusy("Salvando RAW → interpretando eventos → recalculando scores G8...");
+    setErr(null); setBusy("Salvando RAW → interpretando eventos → recalculando scores G8..."); setBusyKind("analyze");
     try {
       const userEdits: Record<string, unknown> = {};
       for (const r of rows) if (r.user_edited) userEdits[`${r.currency}|${r.event}`] = { from: r._original ?? null, to: { actual: r.actual, forecast: r.forecast, previous: r.previous, event: r.event } };
       const events = rows.filter((r) => r.event.trim()).map(({ _id, _confirmed, _original, ...e }) => { void _id; void _confirmed; void _original; return e; });
       const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief }) });
       setResult(r); setStep("result");
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
   const openAnalysis = async (id: number) => {
-    setErr(null); setBusy("Carregando análise...");
+    setErr(null); setBusy("Carregando análise..."); setBusyKind("open");
     try { const r = await apiFetch<{ resultJson: MacroAnalysisResult }>(`/api/macro/analyses?id=${id}`); setResult(r.resultJson); setStep("result"); setTab("nova"); }
-    catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
   const reset = () => { setStep("upload"); setImages([]); setRows([]); setResult(null); setOcrMeta(null); setErr(null); };
@@ -91,7 +93,33 @@ export default function AnaliseMacroPage() {
       </div>
 
       {err && <div className="mb-4"><Notice kind="error">{err}</Notice></div>}
-      {busy && <div className="mb-4"><Spinner label={busy} /></div>}
+      {busyKind === "extract" && (
+        <div className="mb-4">
+          <AiWaitPanel
+            steps={[
+              "Enviando os screenshots para leitura",
+              "Lendo data, hora, moeda e evento (OCR estruturado)",
+              "Extraindo actual, forecast e previous",
+              "Conferindo a confiança de cada campo",
+              "Organizando os eventos para você validar",
+            ]}
+          />
+        </div>
+      )}
+      {busyKind === "analyze" && (
+        <div className="mb-4">
+          <AiWaitPanel
+            steps={[
+              "Salvando os eventos (RAW)",
+              "Interpretando ACTUAL vs FORECAST de cada evento",
+              "Recalculando o Ranking G8",
+              "Procurando divergências e candidatos",
+              "Avaliando o risco de eventos por par",
+            ]}
+          />
+        </div>
+      )}
+      {busy && busyKind !== "extract" && busyKind !== "analyze" && <div className="mb-4"><Spinner label={busy} /></div>}
 
       {tab === "historico" && (
         <Section title="Análises anteriores" sub="RAW e interpretação ficam separados; cada análise guarda modelo, prompt_version, scoring_version e suas edições." right={<Btn variant="ghost" onClick={loadHistory}><RefreshCw size={14} /></Btn>}>
@@ -114,7 +142,7 @@ export default function AnaliseMacroPage() {
           <Section className="lg:col-span-2" title="1. Screenshots do calendário (Forex Factory ou similar)" sub="Envie quantos prints precisar (semana inteira, páginas diferentes). Eventos sem 'Actual' são tratados como pendentes.">
             <ImageDropzone images={images} onChange={setImages} max={10} />
             <div className="flex flex-wrap items-center gap-3 mt-4">
-              <Btn onClick={extract} disabled={!images.length || !!busy}><ScanText size={16} />Ler com IA ({images.length})</Btn>
+              <Btn onClick={extract} disabled={!images.length || !!busy} loading={busyKind === "extract"} loadingLabel="Aguarde, analisando as informações..."><ScanText size={16} />Ler com IA ({images.length})</Btn>
               <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Inserir eventos manualmente</Btn>
             </div>
           </Section>
@@ -135,7 +163,7 @@ export default function AnaliseMacroPage() {
         <Section title="2. Validar leitura do OCR" sub={ocrMeta ? `${String(ocrMeta.provider ?? "")} · ${String(ocrMeta.model ?? "")} · ${String(ocrMeta.promptVersion ?? ocrMeta.prompt_version ?? "")} · fuso detectado: ${String(ocrMeta.detectedTimezone ?? "n/d")}${ocrMeta.notes ? ` · ${String(ocrMeta.notes)}` : ""}` : "Entrada manual"} right={<Btn variant="ghost" onClick={reset}>Recomeçar</Btn>}>
           <OcrValidationTable rows={rows} onChange={setRows} />
           <div className="flex flex-wrap items-center gap-3 mt-4">
-            <Btn onClick={analyze} disabled={!rows.length || !!busy}><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
+            <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Aguarde, analisando as informações..."><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
           </div>
         </Section>
