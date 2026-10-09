@@ -1,0 +1,714 @@
+diff --git a/src/components/ai/MacroSummary.tsx b/src/components/ai/MacroSummary.tsx
+index 0e7e1b3..cb23dea 100644
+--- a/src/components/ai/MacroSummary.tsx
++++ b/src/components/ai/MacroSummary.tsx
+@@ -52,6 +52,7 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
+             <>
+               <p className="text-xl font-extrabold text-emerald">{s.strongest.currency} <span className="text-sm tabular-nums">{fmt5(s.strongest.score)}</span></p>
+               <p className={`text-[11px] font-semibold ${confColor(s.strongest.confidence_pct)}`}>confiança {s.strongest.confidence_pct}%</p>
++              {s.strongest.score <= 0 && <p className="text-[10px] text-text-muted mt-0.5">Nenhuma moeda com força positiva — é a melhor do ranking, não uma moeda forte.</p>}
+             </>
+           ) : <p className="text-sm text-text-muted">sem dado</p>}
+         </div>
+@@ -83,13 +84,13 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
+         <div className="glass-card p-4">
+           <h3 className="text-sm font-extrabold text-text-primary flex items-center gap-1.5 mb-2"><TrendingUp size={15} className="text-emerald" />Top 3 LONG</h3>
+           {s.top_long.length === 0 ? (
+-            <p className="text-xs text-text-muted">Nenhum par com assimetria positiva e evidência suficiente.</p>
++            <p className="text-xs text-text-muted">Nenhum par LONG com evidência suficiente. Pares com assimetria mas confiança baixa aparecem em <b>Pares a evitar</b> — e não são recomendados.</p>
+           ) : <ul className="space-y-1.5">{s.top_long.map((c) => <PairRow key={c.symbol} c={c} />)}</ul>}
+         </div>
+         <div className="glass-card p-4">
+           <h3 className="text-sm font-extrabold text-text-primary flex items-center gap-1.5 mb-2"><TrendingDown size={15} className="text-rose" />Top 3 SHORT</h3>
+           {s.top_short.length === 0 ? (
+-            <p className="text-xs text-text-muted">Nenhum par com assimetria negativa e evidência suficiente.</p>
++            <p className="text-xs text-text-muted">Nenhum par SHORT com evidência suficiente. Pares com assimetria mas confiança baixa aparecem em <b>Pares a evitar</b> — e não são recomendados.</p>
+           ) : <ul className="space-y-1.5">{s.top_short.map((c) => <PairRow key={c.symbol} c={c} />)}</ul>}
+         </div>
+       </div>
+diff --git a/src/lib/ai/types.ts b/src/lib/ai/types.ts
+index b9e0438..f8f9420 100644
+--- a/src/lib/ai/types.ts
++++ b/src/lib/ai/types.ts
+@@ -1,91 +1,91 @@
+-/** Tipos e enums compartilhados do módulo de IA. */
+-
+-export const G8 = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"] as const;
+-export type Currency = (typeof G8)[number];
+-/** Moedas extras aceitas no calendário (módulo B3): BRL (Brasil) e CNY (China). O ranking G8 continua só com as 8. */
+-export const EXTRA_CURRENCIES = ["BRL", "CNY"] as const;
+-export const ALL_CURRENCIES = [...G8, ...EXTRA_CURRENCIES] as const;
+-export type AnyCurrency = (typeof ALL_CURRENCIES)[number];
+-
+-export const SESSIONS = ["ASIA", "LONDON", "NEW_YORK"] as const;
+-export type Session = (typeof SESSIONS)[number];
+-
+-export const CENTRAL_BANKS: Record<Currency, string> = {
+-  USD: "FED", EUR: "ECB", GBP: "BOE", JPY: "BOJ", CHF: "SNB", CAD: "BOC", AUD: "RBA", NZD: "RBNZ",
+-};
+-
+-export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH"] as const;
+-export type Classification = (typeof CLASSIFICATIONS)[number];
+-
+-export const CATEGORIES = ["INFLATION", "EMPLOYMENT", "GROWTH", "ACTIVITY", "CENTRAL_BANK", "HOUSING", "CONSUMPTION", "SENTIMENT", "TRADE", "FISCAL", "OTHER"] as const;
+-export type Category = (typeof CATEGORIES)[number];
+-
+-export const IMPORTANCE = ["HIGH", "MEDIUM_HIGH", "MEDIUM", "LOW"] as const;
+-export type Importance = (typeof IMPORTANCE)[number];
+-
+-export const CONFIDENCE = ["HIGH", "MEDIUM", "LOW"] as const;
+-export type Confidence = (typeof CONFIDENCE)[number];
+-
+-export const EVENT_RISK = ["LOW", "MEDIUM", "HIGH", "EXTREME"] as const;
+-export type EventRiskLevel = (typeof EVENT_RISK)[number];
+-
+-export const SCORE_CLASS = ["VERY_STRONG", "STRONG", "MODERATELY_STRONG", "NEUTRAL", "MODERATELY_WEAK", "WEAK", "VERY_WEAK"] as const;
+-export type ScoreClassification = (typeof SCORE_CLASS)[number];
+-
+-export const MOMENTUM = ["STRENGTHENING", "WEAKENING", "STABLE", "NARRATIVE_SHIFT"] as const;
+-export type Momentum = (typeof MOMENTUM)[number];
+-
+-export const TIMEFRAMES = ["MN", "W1", "D1", "H4", "H1", "M30", "M15", "M5", "M3", "M1"] as const;
+-export type Timeframe = (typeof TIMEFRAMES)[number];
+-
+-export const ENTRY_MODELS = ["NONE", "MODEL_A_AGGRESSIVE", "MODEL_B_CONFIRMED"] as const;
+-export const SETUP_GRADES = ["A", "B", "C", "NO_TRADE"] as const;
+-export const SETUP_STATUS = ["READY", "WAIT", "INVALID"] as const;
+-
+-export const ERROR_TAGS = [
+-  "EARLY_ENTRY", "POI_TOUCH_ENTRY", "NO_MSS", "INTERNAL_MSS", "FOMO", "CHASED_PRICE", "ENTRY_IN_EXTENSION",
+-  "SHORT_IN_DISCOUNT", "LONG_IN_PREMIUM", "STOP_TOO_TIGHT", "PREMATURE_BE", "OVEREXPOSURE", "CORRELATED_EXPOSURE",
+-  "TRADED_BEFORE_NEWS", "IGNORED_MACRO_CHANGE", "REVENGE_TRADE",
+-  // B3 (WIN/DOL/WDO)
+-  "TRADED_AGAINST_DI", "TRADED_AGAINST_DOL", "TRADED_AGAINST_GLOBAL_RISK", "TRADED_BEFORE_COPOM", "TRADED_BEFORE_US_DATA",
+-  "IGNORED_FISCAL_RISK", "IGNORED_CHINA", "IGNORED_COMMODITIES",
+-] as const;
+-export type ErrorTag = (typeof ERROR_TAGS)[number];
+-
+-export const DISQUALIFIERS = [
+-  "POI_TOUCH_ONLY", "NO_SWEEP", "NO_DISPLACEMENT", "NO_MSS", "INTERNAL_MSS_ONLY", "MSS_TOO_MICRO", "AGAINST_MACRO",
+-  "AGAINST_HTF", "LONG_IN_PREMIUM", "SHORT_IN_DISCOUNT", "EXTENDED_PRICE", "HIGH_EVENT_RISK", "POOR_IMAGE", "CONFLICTING_TIMEFRAMES",
+-] as const;
+-
+-/** Linha do calendário econômico (RAW) — independe da origem (screenshot, API, manual). */
+-export interface EconomicEventInput {
+-  id?: number;
+-  date: string | null; // YYYY-MM-DD
+-  time: string | null; // HH:MM | all_day | tentative
+-  currency: AnyCurrency;
+-  event: string;
+-  impact: "high" | "medium" | "low" | "holiday" | "unknown";
+-  actual: string | null;
+-  forecast: string | null;
+-  previous: string | null;
+-  source: "screenshot_ai" | "calendar_api" | "manual";
+-  ocr_confidence?: number | null;
+-  requires_manual_confirmation?: boolean;
+-  user_edited?: boolean;
+-}
+-
+-export interface CurrencyScoreView {
+-  currency: Currency;
+-  score: number;
+-  score_raw: number;
+-  previous_score: number | null;
+-  score_delta: number | null;
+-  momentum: Momentum | null;
+-  classification: ScoreClassification;
+-  bias: "BULLISH" | "NEUTRAL" | "BEARISH";
+-  confidence: Confidence;
+-  rank: number;
+-  live_events: number;
++/** Tipos e enums compartilhados do módulo de IA. */
++
++export const G8 = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"] as const;
++export type Currency = (typeof G8)[number];
++/** Moedas extras aceitas no calendário (módulo B3): BRL (Brasil) e CNY (China). O ranking G8 continua só com as 8. */
++export const EXTRA_CURRENCIES = ["BRL", "CNY"] as const;
++export const ALL_CURRENCIES = [...G8, ...EXTRA_CURRENCIES] as const;
++export type AnyCurrency = (typeof ALL_CURRENCIES)[number];
++
++export const SESSIONS = ["ASIA", "LONDON", "NEW_YORK"] as const;
++export type Session = (typeof SESSIONS)[number];
++
++export const CENTRAL_BANKS: Record<Currency, string> = {
++  USD: "FED", EUR: "ECB", GBP: "BOE", JPY: "BOJ", CHF: "SNB", CAD: "BOC", AUD: "RBA", NZD: "RBNZ",
++};
++
++export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH"] as const;
++export type Classification = (typeof CLASSIFICATIONS)[number];
++
++export const CATEGORIES = ["INFLATION", "EMPLOYMENT", "GROWTH", "ACTIVITY", "CENTRAL_BANK", "HOUSING", "CONSUMPTION", "SENTIMENT", "TRADE", "FISCAL", "OTHER"] as const;
++export type Category = (typeof CATEGORIES)[number];
++
++export const IMPORTANCE = ["HIGH", "MEDIUM_HIGH", "MEDIUM", "LOW"] as const;
++export type Importance = (typeof IMPORTANCE)[number];
++
++export const CONFIDENCE = ["HIGH", "MEDIUM", "LOW"] as const;
++export type Confidence = (typeof CONFIDENCE)[number];
++
++export const EVENT_RISK = ["LOW", "MEDIUM", "HIGH", "EXTREME"] as const;
++export type EventRiskLevel = (typeof EVENT_RISK)[number];
++
++export const SCORE_CLASS = ["VERY_STRONG", "STRONG", "MODERATELY_STRONG", "NEUTRAL", "MODERATELY_WEAK", "WEAK", "VERY_WEAK"] as const;
++export type ScoreClassification = (typeof SCORE_CLASS)[number];
++
++export const MOMENTUM = ["STRENGTHENING", "WEAKENING", "STABLE", "NARRATIVE_SHIFT"] as const;
++export type Momentum = (typeof MOMENTUM)[number];
++
++export const TIMEFRAMES = ["MN", "W1", "D1", "H4", "H1", "M30", "M15", "M5", "M3", "M1"] as const;
++export type Timeframe = (typeof TIMEFRAMES)[number];
++
++export const ENTRY_MODELS = ["NONE", "MODEL_A_AGGRESSIVE", "MODEL_B_CONFIRMED"] as const;
++export const SETUP_GRADES = ["A", "B", "C", "NO_TRADE"] as const;
++export const SETUP_STATUS = ["READY", "WAIT", "INVALID"] as const;
++
++export const ERROR_TAGS = [
++  "EARLY_ENTRY", "POI_TOUCH_ENTRY", "NO_MSS", "INTERNAL_MSS", "FOMO", "CHASED_PRICE", "ENTRY_IN_EXTENSION",
++  "SHORT_IN_DISCOUNT", "LONG_IN_PREMIUM", "STOP_TOO_TIGHT", "PREMATURE_BE", "OVEREXPOSURE", "CORRELATED_EXPOSURE",
++  "TRADED_BEFORE_NEWS", "IGNORED_MACRO_CHANGE", "REVENGE_TRADE",
++  // B3 (WIN/DOL/WDO)
++  "TRADED_AGAINST_DI", "TRADED_AGAINST_DOL", "TRADED_AGAINST_GLOBAL_RISK", "TRADED_BEFORE_COPOM", "TRADED_BEFORE_US_DATA",
++  "IGNORED_FISCAL_RISK", "IGNORED_CHINA", "IGNORED_COMMODITIES",
++] as const;
++export type ErrorTag = (typeof ERROR_TAGS)[number];
++
++export const DISQUALIFIERS = [
++  "POI_TOUCH_ONLY", "NO_SWEEP", "NO_DISPLACEMENT", "NO_MSS", "INTERNAL_MSS_ONLY", "MSS_TOO_MICRO", "AGAINST_MACRO",
++  "AGAINST_HTF", "LONG_IN_PREMIUM", "SHORT_IN_DISCOUNT", "EXTENDED_PRICE", "HIGH_EVENT_RISK", "POOR_IMAGE", "CONFLICTING_TIMEFRAMES",
++] as const;
++
++/** Linha do calendário econômico (RAW) — independe da origem (screenshot, API, manual). */
++export interface EconomicEventInput {
++  id?: number;
++  date: string | null; // YYYY-MM-DD
++  time: string | null; // HH:MM | all_day | tentative
++  currency: AnyCurrency;
++  event: string;
++  impact: "high" | "medium" | "low" | "holiday" | "unknown";
++  actual: string | null;
++  forecast: string | null;
++  previous: string | null;
++  source: "screenshot_ai" | "calendar_api" | "manual";
++  ocr_confidence?: number | null;
++  requires_manual_confirmation?: boolean;
++  user_edited?: boolean;
++}
++
++export interface CurrencyScoreView {
++  currency: Currency;
++  score: number;
++  score_raw: number;
++  previous_score: number | null;
++  score_delta: number | null;
++  momentum: Momentum | null;
++  classification: ScoreClassification;
++  bias: "BULLISH" | "NEUTRAL" | "BEARISH";
++  confidence: Confidence;
++  rank: number;
++  live_events: number;
+   drivers: {
+     event_id: number; event: string; classification: Classification; weight: number; released_at: string;
+     /** direction_value × peso — quanto este evento empurrou o score (sinal = direção). */
+@@ -107,21 +107,21 @@ export interface CurrencyScoreView {
+   no_data?: boolean;
+   /** Score na escala de apresentação (−5..+5). */
+   score_display?: number;
+-}
+-
+-export interface TradeCandidateView {
+-  symbol: string;
+-  bias: "LONG" | "SHORT";
+-  strong_currency: Currency;
+-  weak_currency: Currency;
+-  strong_score: number;
+-  weak_score: number;
+-  macro_divergence: number;
+-  confidence: Confidence;
+-  priority: number;
+-  event_risk: EventRiskLevel;
+-  event_risk_events: PendingEventView[];
+-  reason: string;
++}
++
++export interface TradeCandidateView {
++  symbol: string;
++  bias: "LONG" | "SHORT";
++  strong_currency: Currency;
++  weak_currency: Currency;
++  strong_score: number;
++  weak_score: number;
++  macro_divergence: number;
++  confidence: Confidence;
++  priority: number;
++  event_risk: EventRiskLevel;
++  event_risk_events: PendingEventView[];
++  reason: string;
+   /** Força relativa na escala de apresentação (−5..+5): base − cotada. */
+   relative_strength?: number;
+   /** FORTE LONG · LONG · NEUTRO · SHORT · FORTE SHORT */
+@@ -134,37 +134,41 @@ export interface TradeCandidateView {
+   quote_score?: number;
+   /** Eventos pendentes capazes de invalidar o viés. */
+   invalidation_events?: string[];
+-}
+-
++  /** true = evidência suficiente para ser APRESENTADO como candidato. false = vai para 'pares a evitar'. */
++  eligible?: boolean;
++  /** Motivo de não ser elegível (quando eligible = false). */
++  ineligible_reason?: string;
++}
++
+ export const PAIR_STRENGTH = ["FORTE LONG", "LONG", "NEUTRO", "SHORT", "FORTE SHORT"] as const;
+ export type PairStrengthClass = (typeof PAIR_STRENGTH)[number];
+ 
+-export interface PendingEventView {
+-  id: number;
+-  currency: AnyCurrency;
+-  event: string;
+-  scheduled_at: string;
+-  impact: string;
+-  forecast: string | null;
+-  previous: string | null;
+-  minutes_until: number;
+-}
+-
+-export interface MacroAnalysisResult {
+-  analysis_id: string;
+-  date: string;
+-  session: Session;
+-  currencies: CurrencyScoreView[];
+-  ranking: Currency[];
+-  trade_candidates: TradeCandidateView[];
+-  pending_events: PendingEventView[];
+-  event_risk: { currency: Currency; current_bias: string; level: EventRiskLevel; events: PendingEventView[] }[];
+-  pairs_to_avoid: { symbol: string; reason: string }[];
++export interface PendingEventView {
++  id: number;
++  currency: AnyCurrency;
++  event: string;
++  scheduled_at: string;
++  impact: string;
++  forecast: string | null;
++  previous: string | null;
++  minutes_until: number;
++}
++
++export interface MacroAnalysisResult {
++  analysis_id: string;
++  date: string;
++  session: Session;
++  currencies: CurrencyScoreView[];
++  ranking: Currency[];
++  trade_candidates: TradeCandidateView[];
++  pending_events: PendingEventView[];
++  event_risk: { currency: Currency; current_bias: string; level: EventRiskLevel; events: PendingEventView[] }[];
++  pairs_to_avoid: { symbol: string; reason: string }[];
+   /** Resumo macro consolidado (moeda mais forte/fraca, top 3 long/short, alertas). */
+   summary?: MacroSummaryView;
+-  warnings: string[];
+-  meta: { scoring_version: string; prompt_version: string | null; model: string | null; events_interpreted: number };
+-}
++  warnings: string[];
++  meta: { scoring_version: string; prompt_version: string | null; model: string | null; events_interpreted: number };
++}
+ 
+ /** Resumo macro consolidado — fonte única para o dashboard (evita recalcular na UI). */
+ export interface MacroSummaryView {
+diff --git a/src/lib/macro/config.ts b/src/lib/macro/config.ts
+index 97bf7ee..8af2c9a 100644
+--- a/src/lib/macro/config.ts
++++ b/src/lib/macro/config.ts
+@@ -1,33 +1,33 @@
+-/**
+- * Configuração central do motor de scoring (pesos, decaimento, limiares).
+- * Pode ser sobrescrita pela tabela scoring_config (linha is_active=true) sem reescrever a lógica.
+- */
+-import type { Category, Classification, Confidence, Importance } from "@/lib/ai/types";
+-
+-export interface ScoringConfig {
+-  version: string;
+-  /** valor base da classificação */
+-  direction_value: Record<Classification, number>;
+-  /** peso por tier de importância (a IA classifica importance; a categoria ajusta) */
+-  importance_weight: Record<Importance, number>;
+-  /** multiplicador por categoria (BC e inflação pesam mais que sentimento) */
+-  category_multiplier: Record<Category, number>;
+-  /** ajuste pelo impacto do calendário (FF high/medium/low) */
+-  impact_factor: Record<"high" | "medium" | "low" | "holiday" | "unknown", number>;
+-  confidence_factor: Record<Confidence, number>;
+-  /** meia-vida em dias: dado decai; banco central persiste mais tempo */
+-  half_life_days: { default: number; CENTRAL_BANK: number; INFLATION: number; EMPLOYMENT: number };
+-  /** abaixo disso o evento deixa de contar como "vivo" */
+-  min_weight_alive: number;
+-  /** máximo de dias para considerar um evento (hard cutoff) */
+-  max_age_days: number;
+-  score_step: number;
+-  clamp: number;
+-  classification_thresholds: { very_strong: number; strong: number; moderately_strong: number };
+-  narrative_shift_min_delta: number;
+-  momentum_min_delta: number;
+-  pair_min_divergence: number;
+-  event_risk_hours: { intraday: number; overnight: number };
++/**
++ * Configuração central do motor de scoring (pesos, decaimento, limiares).
++ * Pode ser sobrescrita pela tabela scoring_config (linha is_active=true) sem reescrever a lógica.
++ */
++import type { Category, Classification, Confidence, Importance } from "@/lib/ai/types";
++
++export interface ScoringConfig {
++  version: string;
++  /** valor base da classificação */
++  direction_value: Record<Classification, number>;
++  /** peso por tier de importância (a IA classifica importance; a categoria ajusta) */
++  importance_weight: Record<Importance, number>;
++  /** multiplicador por categoria (BC e inflação pesam mais que sentimento) */
++  category_multiplier: Record<Category, number>;
++  /** ajuste pelo impacto do calendário (FF high/medium/low) */
++  impact_factor: Record<"high" | "medium" | "low" | "holiday" | "unknown", number>;
++  confidence_factor: Record<Confidence, number>;
++  /** meia-vida em dias: dado decai; banco central persiste mais tempo */
++  half_life_days: { default: number; CENTRAL_BANK: number; INFLATION: number; EMPLOYMENT: number };
++  /** abaixo disso o evento deixa de contar como "vivo" */
++  min_weight_alive: number;
++  /** máximo de dias para considerar um evento (hard cutoff) */
++  max_age_days: number;
++  score_step: number;
++  clamp: number;
++  classification_thresholds: { very_strong: number; strong: number; moderately_strong: number };
++  narrative_shift_min_delta: number;
++  momentum_min_delta: number;
++  pair_min_divergence: number;
++  event_risk_hours: { intraday: number; overnight: number };
+   /**
+    * Massa de evidência mínima para o score atingir força plena (anti "1 evento = moeda forte").
+    * score = média_ponderada × massa/(massa + evidence_k). Com pouca evidência o score encolhe para 0.
+@@ -37,48 +37,51 @@ export interface ScoringConfig {
+   display_scale: number;
+   /** Bandas de força relativa do par, já na escala de apresentação (−5..+5). */
+   pair_bands: { neutral: number; weak: number; moderate: number; strong: number };
+-}
+-
+-export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
++  /** Confiança mínima (0–100) para um par ser APRESENTÁVEL como candidato. Abaixo disso ele só aparece em 'pares a evitar'. */
++  candidate_min_confidence_pct: number;
++}
++
++export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
+   version: "v2-evidence",
+-  direction_value: { VERY_BULLISH: 2, BULLISH: 1, NEUTRAL: 0, BEARISH: -1, VERY_BEARISH: -2 },
+-  importance_weight: { HIGH: 1.0, MEDIUM_HIGH: 0.7, MEDIUM: 0.45, LOW: 0.25 },
+-  category_multiplier: {
+-    CENTRAL_BANK: 1.0, INFLATION: 0.95, EMPLOYMENT: 0.9, GROWTH: 0.75, ACTIVITY: 0.65, CONSUMPTION: 0.6,
+-    HOUSING: 0.4, TRADE: 0.4, SENTIMENT: 0.35, FISCAL: 0.85, OTHER: 0.3,
+-  },
+-  impact_factor: { high: 1.0, medium: 0.65, low: 0.35, holiday: 0, unknown: 0.5 },
+-  confidence_factor: { HIGH: 1.0, MEDIUM: 0.75, LOW: 0.4 },
+-  half_life_days: { default: 5, CENTRAL_BANK: 14, INFLATION: 10, EMPLOYMENT: 8 },
+-  min_weight_alive: 0.06,
+-  max_age_days: 45,
+-  score_step: 0.25,
+-  clamp: 2.0,
+-  classification_thresholds: { very_strong: 1.5, strong: 1.0, moderately_strong: 0.5 },
+-  narrative_shift_min_delta: 1.0,
+-  momentum_min_delta: 0.25,
++  direction_value: { VERY_BULLISH: 2, BULLISH: 1, NEUTRAL: 0, BEARISH: -1, VERY_BEARISH: -2 },
++  importance_weight: { HIGH: 1.0, MEDIUM_HIGH: 0.7, MEDIUM: 0.45, LOW: 0.25 },
++  category_multiplier: {
++    CENTRAL_BANK: 1.0, INFLATION: 0.95, EMPLOYMENT: 0.9, GROWTH: 0.75, ACTIVITY: 0.65, CONSUMPTION: 0.6,
++    HOUSING: 0.4, TRADE: 0.4, SENTIMENT: 0.35, FISCAL: 0.85, OTHER: 0.3,
++  },
++  impact_factor: { high: 1.0, medium: 0.65, low: 0.35, holiday: 0, unknown: 0.5 },
++  confidence_factor: { HIGH: 1.0, MEDIUM: 0.75, LOW: 0.4 },
++  half_life_days: { default: 5, CENTRAL_BANK: 14, INFLATION: 10, EMPLOYMENT: 8 },
++  min_weight_alive: 0.06,
++  max_age_days: 45,
++  score_step: 0.25,
++  clamp: 2.0,
++  classification_thresholds: { very_strong: 1.5, strong: 1.0, moderately_strong: 0.5 },
++  narrative_shift_min_delta: 1.0,
++  momentum_min_delta: 0.25,
+   // 0.4 nativo = 1.0 na escala de apresentação (−5..+5): abaixo disso o par é considerado neutro.
+   pair_min_divergence: 0.4,
+-  event_risk_hours: { intraday: 4, overnight: 14 },
++  event_risk_hours: { intraday: 4, overnight: 14 },
+   evidence_k: 0.55,
+   display_scale: 2.5,
+   pair_bands: { neutral: 0.5, weak: 1.0, moderate: 1.5, strong: 2.5 },
+-};
+-
+-/** Mescla config vinda do banco com os defaults (campos ausentes caem no default). */
+-export function mergeScoringConfig(partial: Partial<ScoringConfig> | null | undefined): ScoringConfig {
+-  if (!partial) return DEFAULT_SCORING_CONFIG;
+-  const d = DEFAULT_SCORING_CONFIG;
+-  return {
+-    ...d, ...partial,
+-    direction_value: { ...d.direction_value, ...(partial.direction_value ?? {}) },
+-    importance_weight: { ...d.importance_weight, ...(partial.importance_weight ?? {}) },
+-    category_multiplier: { ...d.category_multiplier, ...(partial.category_multiplier ?? {}) },
+-    impact_factor: { ...d.impact_factor, ...(partial.impact_factor ?? {}) },
+-    confidence_factor: { ...d.confidence_factor, ...(partial.confidence_factor ?? {}) },
+-    half_life_days: { ...d.half_life_days, ...(partial.half_life_days ?? {}) },
+-    classification_thresholds: { ...d.classification_thresholds, ...(partial.classification_thresholds ?? {}) },
+-    event_risk_hours: { ...d.event_risk_hours, ...(partial.event_risk_hours ?? {}) },
++  candidate_min_confidence_pct: 40,
++};
++
++/** Mescla config vinda do banco com os defaults (campos ausentes caem no default). */
++export function mergeScoringConfig(partial: Partial<ScoringConfig> | null | undefined): ScoringConfig {
++  if (!partial) return DEFAULT_SCORING_CONFIG;
++  const d = DEFAULT_SCORING_CONFIG;
++  return {
++    ...d, ...partial,
++    direction_value: { ...d.direction_value, ...(partial.direction_value ?? {}) },
++    importance_weight: { ...d.importance_weight, ...(partial.importance_weight ?? {}) },
++    category_multiplier: { ...d.category_multiplier, ...(partial.category_multiplier ?? {}) },
++    impact_factor: { ...d.impact_factor, ...(partial.impact_factor ?? {}) },
++    confidence_factor: { ...d.confidence_factor, ...(partial.confidence_factor ?? {}) },
++    half_life_days: { ...d.half_life_days, ...(partial.half_life_days ?? {}) },
++    classification_thresholds: { ...d.classification_thresholds, ...(partial.classification_thresholds ?? {}) },
++    event_risk_hours: { ...d.event_risk_hours, ...(partial.event_risk_hours ?? {}) },
+     pair_bands: { ...d.pair_bands, ...(partial.pair_bands ?? {}) },
+-  };
+-}
++  };
++}
+diff --git a/src/lib/macro/pairs.ts b/src/lib/macro/pairs.ts
+index edfdf82..94ccf04 100644
+--- a/src/lib/macro/pairs.ts
++++ b/src/lib/macro/pairs.ts
+@@ -1,43 +1,43 @@
+-/**
+- * Matriz Forte × Fraca — divergência macro entre moedas e candidatos de pares.
+- * Macro define QUE par e QUAL direção — nunca é gatilho de entrada.
+- */
++/**
++ * Matriz Forte × Fraca — divergência macro entre moedas e candidatos de pares.
++ * Macro define QUE par e QUAL direção — nunca é gatilho de entrada.
++ */
+ import { G8, type Confidence, type Currency, type CurrencyScoreView, type EventRiskLevel, type PairStrengthClass, type PendingEventView, type TradeCandidateView } from "@/lib/ai/types";
+-import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
+-
+-/** Ordem de prioridade de base nas convenções de mercado (EUR > GBP > AUD > NZD > USD > CAD > CHF > JPY). */
+-const BASE_PRIORITY: Currency[] = ["EUR", "GBP", "AUD", "NZD", "USD", "CAD", "CHF", "JPY"];
+-
+-/** Retorna o símbolo convencional para duas moedas, ex. (JPY, NZD) → NZDJPY. */
+-export function conventionalPair(a: Currency, b: Currency): { symbol: string; base: Currency; quote: Currency } {
+-  const [base, quote] = BASE_PRIORITY.indexOf(a) < BASE_PRIORITY.indexOf(b) ? [a, b] : [b, a];
+-  return { symbol: `${base}${quote}`, base, quote };
+-}
+-
+-export const G8_PAIRS: { symbol: string; base: Currency; quote: Currency }[] = (() => {
+-  const out: { symbol: string; base: Currency; quote: Currency }[] = [];
+-  for (let i = 0; i < G8.length; i++) for (let j = i + 1; j < G8.length; j++) out.push(conventionalPair(G8[i], G8[j]));
+-  return out;
+-})();
+-
+-/** Divide um símbolo em base/quote. Suporta sufixos de corretora (EURUSD.s, EURUSDm). */
+-export function splitSymbol(symbol: string): { base: string; quote: string } | null {
+-  const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+-  const m = s.match(/^([A-Z]{3})([A-Z]{3})/);
+-  if (!m) return null;
+-  return { base: m[1], quote: m[2] };
+-}
+-
+-export interface DivergenceCell { strong: Currency; weak: Currency; divergence: number }
+-
+-/** Matriz 8×8 de diferenças (linha − coluna). */
+-export function divergenceMatrix(scores: CurrencyScoreView[]): Record<Currency, Record<Currency, number>> {
+-  const map = Object.fromEntries(scores.map((s) => [s.currency, s.score])) as Record<Currency, number>;
+-  const out = {} as Record<Currency, Record<Currency, number>>;
+-  for (const a of G8) { out[a] = {} as Record<Currency, number>; for (const b of G8) out[a][b] = Number(((map[a] ?? 0) - (map[b] ?? 0)).toFixed(2)); }
+-  return out;
+-}
+-
++import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
++
++/** Ordem de prioridade de base nas convenções de mercado (EUR > GBP > AUD > NZD > USD > CAD > CHF > JPY). */
++const BASE_PRIORITY: Currency[] = ["EUR", "GBP", "AUD", "NZD", "USD", "CAD", "CHF", "JPY"];
++
++/** Retorna o símbolo convencional para duas moedas, ex. (JPY, NZD) → NZDJPY. */
++export function conventionalPair(a: Currency, b: Currency): { symbol: string; base: Currency; quote: Currency } {
++  const [base, quote] = BASE_PRIORITY.indexOf(a) < BASE_PRIORITY.indexOf(b) ? [a, b] : [b, a];
++  return { symbol: `${base}${quote}`, base, quote };
++}
++
++export const G8_PAIRS: { symbol: string; base: Currency; quote: Currency }[] = (() => {
++  const out: { symbol: string; base: Currency; quote: Currency }[] = [];
++  for (let i = 0; i < G8.length; i++) for (let j = i + 1; j < G8.length; j++) out.push(conventionalPair(G8[i], G8[j]));
++  return out;
++})();
++
++/** Divide um símbolo em base/quote. Suporta sufixos de corretora (EURUSD.s, EURUSDm). */
++export function splitSymbol(symbol: string): { base: string; quote: string } | null {
++  const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
++  const m = s.match(/^([A-Z]{3})([A-Z]{3})/);
++  if (!m) return null;
++  return { base: m[1], quote: m[2] };
++}
++
++export interface DivergenceCell { strong: Currency; weak: Currency; divergence: number }
++
++/** Matriz 8×8 de diferenças (linha − coluna). */
++export function divergenceMatrix(scores: CurrencyScoreView[]): Record<Currency, Record<Currency, number>> {
++  const map = Object.fromEntries(scores.map((s) => [s.currency, s.score])) as Record<Currency, number>;
++  const out = {} as Record<Currency, Record<Currency, number>>;
++  for (const a of G8) { out[a] = {} as Record<Currency, number>; for (const b of G8) out[a][b] = Number(((map[a] ?? 0) - (map[b] ?? 0)).toFixed(2)); }
++  return out;
++}
++
+ 
+ /** Converte o score nativo (−2..+2) para a escala de apresentação (−5..+5). */
+ export function toDisplayScale(score: number, cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): number {
+@@ -79,63 +79,69 @@ export function pairConfidencePct(base: CurrencyScoreView, quote: CurrencyScoreV
+   const noData = base.no_data || quote.no_data ? 0.4 : 1;
+   const pct = legs * (0.55 + 0.45 * asym) * conflictPenalty * riskPenalty * noData;
+   return Math.max(0, Math.min(99, Math.round(pct)));
+-}
+-
+-export interface CandidateInput {
+-  scores: CurrencyScoreView[];
+-  pending: PendingEventView[]; // eventos pendentes (para event risk)
+-  eventRiskFor: (currencies: Currency[], pending: PendingEventView[]) => { level: EventRiskLevel; events: PendingEventView[] };
+-  cfg?: ScoringConfig;
+-  maxCandidates?: number;
+-}
+-
++}
++
++export interface CandidateInput {
++  scores: CurrencyScoreView[];
++  pending: PendingEventView[]; // eventos pendentes (para event risk)
++  eventRiskFor: (currencies: Currency[], pending: PendingEventView[]) => { level: EventRiskLevel; events: PendingEventView[] };
++  cfg?: ScoringConfig;
++  maxCandidates?: number;
++}
++
+ /** Gera candidatos ordenados pela maior assimetria macro (força relativa), com confiança e invalidação. */
+-export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[] {
+-  const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
+-  const byCcy = Object.fromEntries(input.scores.map((s) => [s.currency, s])) as Record<Currency, CurrencyScoreView>;
+-  const list: TradeCandidateView[] = [];
+-  for (const p of G8_PAIRS) {
+-    const b = byCcy[p.base], q = byCcy[p.quote];
+-    if (!b || !q) continue;
++export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[] {
++  const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
++  const byCcy = Object.fromEntries(input.scores.map((s) => [s.currency, s])) as Record<Currency, CurrencyScoreView>;
++  const list: TradeCandidateView[] = [];
++  for (const p of G8_PAIRS) {
++    const b = byCcy[p.base], q = byCcy[p.quote];
++    if (!b || !q) continue;
+     // Sem dado vivo numa das pernas não há viés macro — é ausência de evidência, não fraqueza.
+     if (b.no_data || q.no_data) continue;
+-    const div = Number((b.score - q.score).toFixed(2));
+-    if (Math.abs(div) < cfg.pair_min_divergence) continue;
++    const div = Number((b.score - q.score).toFixed(2));
++    if (Math.abs(div) < cfg.pair_min_divergence) continue;
+     const rel = Number((toDisplayScale(b.score, cfg) - toDisplayScale(q.score, cfg)).toFixed(2));
+     const strengthClass = classifyRelativeStrength(rel, cfg);
+     if (strengthClass === "NEUTRO") continue;
+     const bias: "LONG" | "SHORT" = rel > 0 ? "LONG" : "SHORT";
+     const strong = rel > 0 ? b : q;
+     const weak = rel > 0 ? q : b;
+-    const risk = input.eventRiskFor([p.base, p.quote], input.pending);
++    const risk = input.eventRiskFor([p.base, p.quote], input.pending);
+     const confPct = pairConfidencePct(b, q, rel, risk.level, cfg);
+     const invalidation = risk.events.slice(0, 4).map((e) => `${e.currency} ${e.event} (${e.minutes_until < 60 ? `${e.minutes_until}min` : `${(e.minutes_until / 60).toFixed(1)}h`})`);
+     const mixed = b.conflict || q.conflict;
+-    list.push({
+-      symbol: p.symbol, bias, strong_currency: strong.currency, weak_currency: weak.currency,
+-      strong_score: strong.score, weak_score: weak.score, macro_divergence: Math.abs(div),
++    list.push({
++      symbol: p.symbol, bias, strong_currency: strong.currency, weak_currency: weak.currency,
++      strong_score: strong.score, weak_score: weak.score, macro_divergence: Math.abs(div),
+       confidence: confidenceEnumFromPct(confPct), priority: 0,
+-      event_risk: risk.level, event_risk_events: risk.events,
++      event_risk: risk.level, event_risk_events: risk.events,
+       relative_strength: rel, strength_class: strengthClass, confidence_pct: confPct,
+       base_currency: p.base, quote_currency: p.quote,
+       base_score: toDisplayScale(b.score, cfg), quote_score: toDisplayScale(q.score, cfg),
+       invalidation_events: invalidation,
++      eligible: confPct >= cfg.candidate_min_confidence_pct && risk.level !== "EXTREME" && !mixed,
++      ineligible_reason:
++        confPct < cfg.candidate_min_confidence_pct ? `Confiança ${confPct}% abaixo do mínimo de ${cfg.candidate_min_confidence_pct}% — evidência macro insuficiente`
++        : risk.level === "EXTREME" ? "Event risk EXTREME — evento de alto impacto iminente"
++        : mixed ? "Indicadores conflitantes (viés misto) numa das pernas"
++        : undefined,
+       reason: `${p.base} ${fmt(toDisplayScale(b.score, cfg))} vs ${p.quote} ${fmt(toDisplayScale(q.score, cfg))} → força relativa ${fmt(rel)} (${divergenceLabel(rel, cfg)}), confiança ${confPct}%.` +
+         `${mixed ? " Há indicadores conflitantes numa das pernas (viés misto) — convicção reduzida." : ""}` +
+         ` ${strengthClass} em ${p.symbol} é o lado favorecido pela macro; aguardar confirmação SMC/ICT.`,
+-    });
+-  }
++    });
++  }
+   // Ordena pela assimetria ponderada pela confiança (evidência manda, não só o tamanho do Δ).
+   list.sort((a, b) =>
+     Math.abs(b.relative_strength ?? 0) * ((b.confidence_pct ?? 0) / 100) - Math.abs(a.relative_strength ?? 0) * ((a.confidence_pct ?? 0) / 100)
+     || Math.abs(b.relative_strength ?? 0) - Math.abs(a.relative_strength ?? 0)
+     || a.symbol.localeCompare(b.symbol));
+-  list.forEach((c, i) => (c.priority = i + 1));
+-  return list.slice(0, input.maxCandidates ?? 12);
+-}
+-
++  list.forEach((c, i) => (c.priority = i + 1));
++  return list.slice(0, input.maxCandidates ?? 12);
++}
++
+ function confidenceEnumFromPct(pct: number): Confidence {
+   return pct >= 65 ? "HIGH" : pct >= 40 ? "MEDIUM" : "LOW";
+ }
+ 
+-function fmt(n: number) { return `${n > 0 ? "+" : ""}${n.toFixed(2)}`; }
++function fmt(n: number) { return `${n > 0 ? "+" : ""}${n.toFixed(2)}`; }
+diff --git a/src/lib/macro/pipeline.ts b/src/lib/macro/pipeline.ts
+index a00b4f1..fec400c 100644
+--- a/src/lib/macro/pipeline.ts
++++ b/src/lib/macro/pipeline.ts
+@@ -221,6 +221,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+     return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
+   });
+   // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
++  // REGRA DE OURO: um par que entra aqui NUNCA pode aparecer no Top 3 (ver summary abaixo).
+   const avoidMap = new Map<string, string[]>();
+   const addAvoid = (symbol: string, reason: string) => {
+     const cur = avoidMap.get(symbol) ?? [];
+@@ -228,13 +229,11 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+     avoidMap.set(symbol, cur);
+   };
+   for (const c of candidates) {
++    // Não elegível (confiança baixa, risco extremo ou viés misto) ⇒ só serve de alerta.
++    if (c.eligible === false && c.ineligible_reason) addAvoid(c.symbol, c.ineligible_reason);
+     if (c.event_risk === "EXTREME") addAvoid(c.symbol, `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}`);
+     const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
+     if (sShift) addAvoid(c.symbol, "Mudança de narrativa recente em uma das pernas — aguardar confirmação");
+-    if ((c.confidence_pct ?? 0) < 40) addAvoid(c.symbol, `Confiança baixa (${c.confidence_pct ?? 0}%) — evidência macro insuficiente`);
+-    const bs = scores.find((s) => s.currency === c.base_currency);
+-    const qs = scores.find((s) => s.currency === c.quote_currency);
+-    if (bs?.conflict || qs?.conflict) addAvoid(c.symbol, "Indicadores conflitantes (viés misto) numa das pernas");
+   }
+   const pairsToAvoid = [...avoidMap.entries()].map(([symbol, reasons]) => ({ symbol, reason: reasons.join(" · ") }));
+ 
+@@ -260,14 +259,20 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+     }
+   }
+   for (const sc of scores) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
++  const presentable = candidates.filter((c) => c.eligible !== false && !avoidMap.has(c.symbol));
++  if (presentable.length === 0 && candidates.length > 0) {
++    warnings.push(`Nenhum par atingiu a confiança mínima (${cfg.candidate_min_confidence_pct}%) — os ${candidates.length} pares com assimetria aparecem apenas em "pares a evitar". Sem viés macro acionável nesta sessão.`);
++  }
+   const summary: MacroSummaryView = {
+     strongest: withData[0] ? { currency: withData[0].currency, score: withData[0].score_display ?? withData[0].score, confidence_pct: withData[0].confidence_pct ?? 0 } : null,
+     weakest: withData.length > 1 ? { currency: withData[withData.length - 1].currency, score: withData[withData.length - 1].score_display ?? withData[withData.length - 1].score, confidence_pct: withData[withData.length - 1].confidence_pct ?? 0 } : null,
+     overall_risk: overallRisk,
+     no_data_currencies: noData,
+     conflicted_currencies: conflicted,
+-    top_long: candidates.filter((c) => c.bias === "LONG").slice(0, 3),
+-    top_short: candidates.filter((c) => c.bias === "SHORT").slice(0, 3),
++    // Top 3 = apenas pares com evidência suficiente E que NÃO estão em "pares a evitar".
++    // Sem isso o dashboard se contradiz (recomendar e desaconselhar o mesmo par).
++    top_long: presentable.filter((c) => c.bias === "LONG").slice(0, 3),
++    top_short: presentable.filter((c) => c.bias === "SHORT").slice(0, 3),
+     alerts,
+   };
+ 

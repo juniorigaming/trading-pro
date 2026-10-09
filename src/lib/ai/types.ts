@@ -134,6 +134,10 @@ export interface TradeCandidateView {
   quote_score?: number;
   /** Eventos pendentes capazes de invalidar o viés. */
   invalidation_events?: string[];
+  /** true = evidência suficiente para ser APRESENTADO como candidato. false = vai para 'pares a evitar'. */
+  eligible?: boolean;
+  /** Motivo de não ser elegível (quando eligible = false). */
+  ineligible_reason?: string;
 }
 
 export const PAIR_STRENGTH = ["FORTE LONG", "LONG", "NEUTRO", "SHORT", "FORTE SHORT"] as const;

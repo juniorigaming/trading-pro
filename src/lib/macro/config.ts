@@ -37,6 +37,8 @@ export interface ScoringConfig {
   display_scale: number;
   /** Bandas de força relativa do par, já na escala de apresentação (−5..+5). */
   pair_bands: { neutral: number; weak: number; moderate: number; strong: number };
+  /** Confiança mínima (0–100) para um par ser APRESENTÁVEL como candidato. Abaixo disso ele só aparece em 'pares a evitar'. */
+  candidate_min_confidence_pct: number;
 }
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
@@ -63,6 +65,7 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   evidence_k: 0.55,
   display_scale: 2.5,
   pair_bands: { neutral: 0.5, weak: 1.0, moderate: 1.5, strong: 2.5 },
+  candidate_min_confidence_pct: 40,
 };
 
 /** Mescla config vinda do banco com os defaults (campos ausentes caem no default). */

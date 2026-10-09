@@ -120,6 +120,12 @@ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[
       base_currency: p.base, quote_currency: p.quote,
       base_score: toDisplayScale(b.score, cfg), quote_score: toDisplayScale(q.score, cfg),
       invalidation_events: invalidation,
+      eligible: confPct >= cfg.candidate_min_confidence_pct && risk.level !== "EXTREME" && !mixed,
+      ineligible_reason:
+        confPct < cfg.candidate_min_confidence_pct ? `Confiança ${confPct}% abaixo do mínimo de ${cfg.candidate_min_confidence_pct}% — evidência macro insuficiente`
+        : risk.level === "EXTREME" ? "Event risk EXTREME — evento de alto impacto iminente"
+        : mixed ? "Indicadores conflitantes (viés misto) numa das pernas"
+        : undefined,
       reason: `${p.base} ${fmt(toDisplayScale(b.score, cfg))} vs ${p.quote} ${fmt(toDisplayScale(q.score, cfg))} → força relativa ${fmt(rel)} (${divergenceLabel(rel, cfg)}), confiança ${confPct}%.` +
         `${mixed ? " Há indicadores conflitantes numa das pernas (viés misto) — convicção reduzida." : ""}` +
         ` ${strengthClass} em ${p.symbol} é o lado favorecido pela macro; aguardar confirmação SMC/ICT.`,

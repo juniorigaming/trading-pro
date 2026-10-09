@@ -52,6 +52,7 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
             <>
               <p className="text-xl font-extrabold text-emerald">{s.strongest.currency} <span className="text-sm tabular-nums">{fmt5(s.strongest.score)}</span></p>
               <p className={`text-[11px] font-semibold ${confColor(s.strongest.confidence_pct)}`}>confiança {s.strongest.confidence_pct}%</p>
+              {s.strongest.score <= 0 && <p className="text-[10px] text-text-muted mt-0.5">Nenhuma moeda com força positiva — é a melhor do ranking, não uma moeda forte.</p>}
             </>
           ) : <p className="text-sm text-text-muted">sem dado</p>}
         </div>
@@ -83,13 +84,13 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
         <div className="glass-card p-4">
           <h3 className="text-sm font-extrabold text-text-primary flex items-center gap-1.5 mb-2"><TrendingUp size={15} className="text-emerald" />Top 3 LONG</h3>
           {s.top_long.length === 0 ? (
-            <p className="text-xs text-text-muted">Nenhum par com assimetria positiva e evidência suficiente.</p>
+            <p className="text-xs text-text-muted">Nenhum par LONG com evidência suficiente. Pares com assimetria mas confiança baixa aparecem em <b>Pares a evitar</b> — e não são recomendados.</p>
           ) : <ul className="space-y-1.5">{s.top_long.map((c) => <PairRow key={c.symbol} c={c} />)}</ul>}
         </div>
         <div className="glass-card p-4">
           <h3 className="text-sm font-extrabold text-text-primary flex items-center gap-1.5 mb-2"><TrendingDown size={15} className="text-rose" />Top 3 SHORT</h3>
           {s.top_short.length === 0 ? (
-            <p className="text-xs text-text-muted">Nenhum par com assimetria negativa e evidência suficiente.</p>
+            <p className="text-xs text-text-muted">Nenhum par SHORT com evidência suficiente. Pares com assimetria mas confiança baixa aparecem em <b>Pares a evitar</b> — e não são recomendados.</p>
           ) : <ul className="space-y-1.5">{s.top_short.map((c) => <PairRow key={c.symbol} c={c} />)}</ul>}
         </div>
       </div>

@@ -221,6 +221,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
     return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
   });
   // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
+  // REGRA DE OURO: um par que entra aqui NUNCA pode aparecer no Top 3 (ver summary abaixo).
   const avoidMap = new Map<string, string[]>();
   const addAvoid = (symbol: string, reason: string) => {
     const cur = avoidMap.get(symbol) ?? [];
@@ -228,13 +229,11 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
     avoidMap.set(symbol, cur);
   };
   for (const c of candidates) {
+    // Não elegível (confiança baixa, risco extremo ou viés misto) ⇒ só serve de alerta.
+    if (c.eligible === false && c.ineligible_reason) addAvoid(c.symbol, c.ineligible_reason);
     if (c.event_risk === "EXTREME") addAvoid(c.symbol, `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}`);
     const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
     if (sShift) addAvoid(c.symbol, "Mudança de narrativa recente em uma das pernas — aguardar confirmação");
-    if ((c.confidence_pct ?? 0) < 40) addAvoid(c.symbol, `Confiança baixa (${c.confidence_pct ?? 0}%) — evidência macro insuficiente`);
-    const bs = scores.find((s) => s.currency === c.base_currency);
-    const qs = scores.find((s) => s.currency === c.quote_currency);
-    if (bs?.conflict || qs?.conflict) addAvoid(c.symbol, "Indicadores conflitantes (viés misto) numa das pernas");
   }
   const pairsToAvoid = [...avoidMap.entries()].map(([symbol, reasons]) => ({ symbol, reason: reasons.join(" · ") }));
 
@@ -260,14 +259,20 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
     }
   }
   for (const sc of scores) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
+  const presentable = candidates.filter((c) => c.eligible !== false && !avoidMap.has(c.symbol));
+  if (presentable.length === 0 && candidates.length > 0) {
+    warnings.push(`Nenhum par atingiu a confiança mínima (${cfg.candidate_min_confidence_pct}%) — os ${candidates.length} pares com assimetria aparecem apenas em "pares a evitar". Sem viés macro acionável nesta sessão.`);
+  }
   const summary: MacroSummaryView = {
     strongest: withData[0] ? { currency: withData[0].currency, score: withData[0].score_display ?? withData[0].score, confidence_pct: withData[0].confidence_pct ?? 0 } : null,
     weakest: withData.length > 1 ? { currency: withData[withData.length - 1].currency, score: withData[withData.length - 1].score_display ?? withData[withData.length - 1].score, confidence_pct: withData[withData.length - 1].confidence_pct ?? 0 } : null,
     overall_risk: overallRisk,
     no_data_currencies: noData,
     conflicted_currencies: conflicted,
-    top_long: candidates.filter((c) => c.bias === "LONG").slice(0, 3),
-    top_short: candidates.filter((c) => c.bias === "SHORT").slice(0, 3),
+    // Top 3 = apenas pares com evidência suficiente E que NÃO estão em "pares a evitar".
+    // Sem isso o dashboard se contradiz (recomendar e desaconselhar o mesmo par).
+    top_long: presentable.filter((c) => c.bias === "LONG").slice(0, 3),
+    top_short: presentable.filter((c) => c.bias === "SHORT").slice(0, 3),
     alerts,
   };
 
