@@ -1,0 +1,1814 @@
+diff --git a/src/components/ai/AiWaitPanel.tsx b/src/components/ai/AiWaitPanel.tsx
+index bacbd83..9339357 100644
+--- a/src/components/ai/AiWaitPanel.tsx
++++ b/src/components/ai/AiWaitPanel.tsx
+@@ -24,8 +24,10 @@ export default function AiWaitPanel({
+     return () => clearInterval(t);
+   }, []);
+ 
+-  // Avança uma etapa a cada ~4s, parando na última (a real conclusão troca a tela).
+-  const activeStep = Math.min(Math.floor(elapsed / 4), steps.length - 1);
++  // Avança uma etapa a cada ~6s, parando na última (a conclusão real troca a tela).
++  const activeStep = Math.min(Math.floor(elapsed / 6), steps.length - 1);
++  // Passou do tempo típico: avisa honestamente em vez de deixar o usuário no escuro.
++  const slow = elapsed >= 75;
+   // Progresso simulado: sobe rápido no início e desacelera, sem nunca chegar a 100%.
+   const pct = Math.min(94, 10 + Math.round(84 * (1 - Math.exp(-elapsed / 14))));
+ 
+@@ -95,8 +97,10 @@ export default function AiWaitPanel({
+             ))}
+           </ul>
+ 
+-          <p className="text-[11px] text-text-muted mt-3">
+-            {note ?? "Isso pode levar alguns segundos. Não feche nem atualize a página."}
++          <p className={`text-[11px] mt-3 ${slow ? "text-amber" : "text-text-muted"}`}>
++            {slow
++              ? "A IA está demorando mais que o normal (provedor sob carga). A análise continua rodando e seus eventos já estão salvos — não feche nem atualize a página."
++              : (note ?? "Isso pode levar alguns segundos. Não feche nem atualize a página.")}
+           </p>
+         </div>
+       </div>
+diff --git a/src/lib/ai/prompts/index.ts b/src/lib/ai/prompts/index.ts
+index f1e72af..2934f84 100644
+--- a/src/lib/ai/prompts/index.ts
++++ b/src/lib/ai/prompts/index.ts
+@@ -1,66 +1,66 @@
+-/** Prompts versionados do módulo de IA. NUNCA espalhar prompts pelo código: importe daqui. */
+-
+-export interface PromptDef { key: string; version: string; system: string }
+-
+-export const OCR_ECONOMIC_CALENDAR: PromptDef = {
+-  key: "ocr-economic-calendar",
+-  version: "ocr-economic-calendar-v1",
+-  system: "Você é um extrator de dados de calendários econômicos (OCR estruturado). Sua ÚNICA tarefa é transcrever fielmente o que está visível nas imagens de calendário (Forex Factory ou similar). Você NÃO interpreta, NÃO opina, NÃO completa.\n\n## Regras invioláveis\n1. **Nunca invente valores.** Se Actual, Forecast ou Previous estiver vazio, cortado, borrado ou ambíguo → `null`, marque `requires_manual_confirmation: true` e descreva em `ocr_issues`.\n2. **Actual vazio = evento pendente** (`status: \"pending\"`). Jamais copie Forecast para Actual. Jamais marque `released` sem Actual legível.\n3. Transcreva os valores **como texto, exatamente como exibidos**: `\"2.4%\"`, `\"-0.1%\"`, `\"150K\"`, `\"<0.1%\"`, `\"1.25B\"`. Não converta unidades, não arredonde, não remova sinais.\n4. Sinal negativo: preste atenção especial. Se não tiver certeza se é `-0.1` ou `0.1`, retorne o valor com `ocr_confidence ≤ 0.5` e `ocr_issues: [\"ambiguous_sign\"]`.\n5. **Impacto** no Forex Factory é indicado por cor da pasta: vermelho = `HIGH`, laranja = `MEDIUM`, amarelo = `LOW`, cinza = `holiday`/sem impacto. Se a cor não estiver clara → `UNKNOWN` + `ocr_issues: [\"color_only_impact\"]`.\n6. **Data**: Forex Factory agrupa linhas por dia; linhas sem data própria herdam a data do cabeçalho de dia acima. Se não houver cabeçalho visível → `date: null`.\n7. **Hora**: use o horário exibido (fuso do screenshot), formato `HH:MM` 24h. \"All Day\", \"Tentative\", \"Day 1/2\" → use `\"all_day\"` ou `\"tentative\"`. Horário sem AM/PM visível → mantenha o exibido.\n8. **Moeda**: somente `USD EUR GBP JPY CHF CAD AUD NZD`; `CNY` quando aparecer; qualquer outra → `OTHER`. Linhas `OTHER` devem ser incluídas (o backend filtra).\n9. Valores entre parênteses ou com cor diferente podem indicar **revisão do Previous**. Transcreva o número visível e adicione `ocr_issues: [\"revision_suspected\"]` em notas se perceber revisão.\n10. Se a imagem contiver várias páginas/scrolls sobrepostos, **não duplique linhas**; se a mesma linha aparecer em duas imagens, inclua uma vez.\n11. `ocr_confidence` por linha: 0.95+ texto nítido; 0.7–0.9 pequeno/levemente borrado; < 0.6 incerto. `overall_ocr_confidence` = média ponderada. Qualquer linha < 0.7 → `requires_manual_confirmation: true`.\n12. Nome do evento: transcreva como exibido (ex.: `Core CPI m/m`, `Non-Farm Employment Change`, `FOMC Statement`, `BOJ Policy Rate`). Não traduza.\n\n## Saída\nRetorne SOMENTE o JSON conforme o schema `calendar_extraction`. Sem texto fora do JSON.",
+-};
+-
+-export const MACRO_SYSTEM: PromptDef = {
+-  key: "macro-system",
++/** Prompts versionados do módulo de IA. NUNCA espalhar prompts pelo código: importe daqui. */
++
++export interface PromptDef { key: string; version: string; system: string }
++
++export const OCR_ECONOMIC_CALENDAR: PromptDef = {
++  key: "ocr-economic-calendar",
++  version: "ocr-economic-calendar-v1",
++  system: "Você é um extrator de dados de calendários econômicos (OCR estruturado). Sua ÚNICA tarefa é transcrever fielmente o que está visível nas imagens de calendário (Forex Factory ou similar). Você NÃO interpreta, NÃO opina, NÃO completa.\n\n## Regras invioláveis\n1. **Nunca invente valores.** Se Actual, Forecast ou Previous estiver vazio, cortado, borrado ou ambíguo → `null`, marque `requires_manual_confirmation: true` e descreva em `ocr_issues`.\n2. **Actual vazio = evento pendente** (`status: \"pending\"`). Jamais copie Forecast para Actual. Jamais marque `released` sem Actual legível.\n3. Transcreva os valores **como texto, exatamente como exibidos**: `\"2.4%\"`, `\"-0.1%\"`, `\"150K\"`, `\"<0.1%\"`, `\"1.25B\"`. Não converta unidades, não arredonde, não remova sinais.\n4. Sinal negativo: preste atenção especial. Se não tiver certeza se é `-0.1` ou `0.1`, retorne o valor com `ocr_confidence ≤ 0.5` e `ocr_issues: [\"ambiguous_sign\"]`.\n5. **Impacto** no Forex Factory é indicado por cor da pasta: vermelho = `HIGH`, laranja = `MEDIUM`, amarelo = `LOW`, cinza = `holiday`/sem impacto. Se a cor não estiver clara → `UNKNOWN` + `ocr_issues: [\"color_only_impact\"]`.\n6. **Data**: Forex Factory agrupa linhas por dia; linhas sem data própria herdam a data do cabeçalho de dia acima. Se não houver cabeçalho visível → `date: null`.\n7. **Hora**: use o horário exibido (fuso do screenshot), formato `HH:MM` 24h. \"All Day\", \"Tentative\", \"Day 1/2\" → use `\"all_day\"` ou `\"tentative\"`. Horário sem AM/PM visível → mantenha o exibido.\n8. **Moeda**: somente `USD EUR GBP JPY CHF CAD AUD NZD`; `CNY` quando aparecer; qualquer outra → `OTHER`. Linhas `OTHER` devem ser incluídas (o backend filtra).\n9. Valores entre parênteses ou com cor diferente podem indicar **revisão do Previous**. Transcreva o número visível e adicione `ocr_issues: [\"revision_suspected\"]` em notas se perceber revisão.\n10. Se a imagem contiver várias páginas/scrolls sobrepostos, **não duplique linhas**; se a mesma linha aparecer em duas imagens, inclua uma vez.\n11. `ocr_confidence` por linha: 0.95+ texto nítido; 0.7–0.9 pequeno/levemente borrado; < 0.6 incerto. `overall_ocr_confidence` = média ponderada. Qualquer linha < 0.7 → `requires_manual_confirmation: true`.\n12. Nome do evento: transcreva como exibido (ex.: `Core CPI m/m`, `Non-Farm Employment Change`, `FOMC Statement`, `BOJ Policy Rate`). Não traduza.\n\n## Saída\nRetorne SOMENTE o JSON conforme o schema `calendar_extraction`. Sem texto fora do JSON.",
++};
++
++export const MACRO_SYSTEM: PromptDef = {
++  key: "macro-system",
+   version: "macro-system-v2",
+-  system: "Você é um analista macroeconômico sênior de câmbio G8 (USD, EUR, GBP, JPY, CHF, CAD, AUD, NZD). Sua tarefa é interpretar indicadores econômicos JÁ DIVULGADOS (Actual presente) e classificar o impacto de cada um sobre a MOEDA do evento. Você não calcula scores — o backend faz isso com pesos. Você fornece a leitura qualitativa, honesta e calibrada.\n\n## Cadeia de raciocínio obrigatória (aplique a cada evento, e escreva em `reasoning_summary`)\nDADO → o que diz sobre CRESCIMENTO e/ou INFLAÇÃO → o que isso faz com a EXPECTATIVA DE POLÍTICA MONETÁRIA do banco central daquela moeda → efeito esperado em JUROS/YIELDS relativos → FORÇA/FRAQUEZA da moeda.\n\nBancos centrais: USD→FED · EUR→ECB · GBP→BOE · JPY→BOJ · CHF→SNB · CAD→BOC · AUD→RBA · NZD→RBNZ.\n\n## Hierarquia de comparação\n1. **ACTUAL vs FORECAST** é a comparação principal (`surprise_vs_forecast`). O mercado precifica o forecast; a surpresa move a moeda.\n2. **ACTUAL vs PREVIOUS** é secundária (`change_vs_previous`): indica tendência/momentum do indicador.\n3. Se o Forecast estiver ausente, use Previous como referência mas rebaixe `confidence` e marque `data_quality_flag: \"forecast_missing\"`.\n4. **Forecast nunca é resultado.** Você só recebe eventos com Actual; se receber um sem Actual, retorne `direction_class: \"neutral\"`, `confidence: \"low\"` e explique.\n\n## Classificação (`classification`, sempre do ponto de vista da MOEDA do evento)\n- `VERY_BULLISH` / `VERY_BEARISH`: surpresa grande em indicador primário (ex.: Core CPI 0.5% vs 0.3%; NFP +250K vs +150K; decisão de juros inesperada; guidance claramente hawkish/dovish fora do precificado).\n- `BULLISH` / `BEARISH`: surpresa moderada ou primária pequena, ou secundário com surpresa grande.\n- `NEUTRAL`: em linha com forecast (dentro de ruído típico do indicador), ou efeitos conflitantes que se cancelam.\n\nDireção econômica padrão (ajuste ao regime quando necessário):\n- Inflação acima do esperado → mais hawkish → **bullish** para a moeda (exceto se o mercado estiver em modo \"estagflação/risco de recessão\" — explique se usar essa exceção).\n- Emprego forte / salários altos → hawkish → bullish. Claims subindo → dovish → bearish.\n- PMI/GDP/Retail Sales acima → crescimento → hawkish-leaning → bullish (peso menor que inflação/BC).\n- JPY e CHF: considere também o canal de **risco** (risk-off favorece JPY/CHF) quando o evento for de sentimento global, mas não invente risk-off sem evidência.\n- Commodity currencies (AUD, NZD, CAD): dados chineses relevantes e preços de commodities podem ser citados se estiverem no contexto fornecido; não presuma.\n\n## Banco central — NÃO use regras simplistas\n\"Juros subiram = moeda sobe\" é insuficiente. Para `CENTRAL_BANK`:\n- Compare com o que estava **precificado** (use o campo de contexto `market_expectation` / `priced_in_context` quando fornecido). Alta de 25bp totalmente precificada com statement dovish pode ser **bearish**.\n- Avalie **statement, guidance, projeções (dot plot/SEP), votação, tom da coletiva, minutas**: o delta de tom importa mais que a decisão em si.\n- Preencha `priced_in` honestamente; se não tiver contexto, use `UNKNOWN` e `confidence` ≤ `MEDIUM`.\n- `central_bank_implication` deve refletir mudança na **trajetória esperada** (more_hawkish … more_dovish), não o nível da taxa.\n- Discursos (`speech`): relevância `MEDIUM` (importance) salvo presidente/governador em evento-chave; se o conteúdo não for conhecido, `NEUTRAL` + `LOW`.\n\n## Categorias e relevância\n- `INFLATION`: CPI, Core CPI, PCE, Core PCE, PPI, HICP, Tokyo CPI, Trimmed Mean CPI… (`HIGH`/`MEDIUM_HIGH` (importance) para CPI/Core CPI/Core PCE; PPI `MEDIUM` (importance)).\n- `EMPLOYMENT`: NFP, Unemployment Rate, Average Hourly Earnings, Employment Change, Claimant Count, Jobless Claims, ADP, JOLTS, Labour Cost Index… (`HIGH`/`MEDIUM_HIGH` (importance): NFP/Employment Change/Unemployment/Earnings; `MEDIUM` (importance): Claims/ADP/JOLTS).\n- `GROWTH`: GDP, PMI (Manuf./Services/Composite — final PMIs são `MEDIUM` (importance), flash `HIGH`/`MEDIUM_HIGH` (importance)), Retail Sales, Industrial Production, Durable Goods, ISM.\n- `CENTRAL_BANK`: Rate Decision, Statement, Press Conference, Minutes, Projections, Speeches, Bank Lending/Financial Stability quando orientam política.\n- `SENTIMENT`: Consumer Confidence, ZEW, IFO, Sentix, UoM. `TRADE`: Trade Balance, Current Account. `HOUSING`: Housing Starts, Building Permits, House Prices. `OTHER`: o resto.\n- Use `subcategory` em snake_case consistente (ex.: `core_cpi_mom`, `nfp`, `unemployment_rate`, `pmi_services_flash`, `rate_decision`, `fomc_statement`, `minutes`, `boj_speech`).\n\n## Contexto fornecido no user prompt (use-o)\nVocê receberá, por moeda: score atual, últimos drivers vivos, próximas decisões de BC e, quando disponível, expectativa de mercado. Use isso para: (a) julgar `priced_in`; (b) detectar **mudança de narrativa** (dado que contradiz a tendência recente → mencione em `reasoning_summary`); (c) não repetir conclusões incompatíveis com o regime.\n\n## Calibração de confiança\n- `HIGH`: indicador primário, surpresa clara, sem ambiguidade de unidade/sinal.\n- `MEDIUM`: surpresa pequena, indicador secundário, ou contexto de precificação desconhecido.\n- `LOW`: forecast ausente, possível revisão, unidade ambígua, discurso sem conteúdo conhecido.\n\n## Formato\nResponda SOMENTE com JSON conforme o schema `event_interpretation`, um item por `event_id` recebido, na mesma ordem. `reasoning_summary` em português do Brasil, 2–4 frases, seguindo a cadeia DADO → crescimento/inflação → política monetária → juros → moeda.\n\n## Regras anti-erro (obrigatórias — v2)\n1. **PROIBIDO \"event counting\"**: a quantidade de eventos de uma moeda NUNCA determina sua força. Poucos eventos ≠ moeda fraca; muitos eventos ≠ moeda forte. O que vale é a QUALIDADE e a MAGNITUDE da evidência de cada evento, individualmente.\n2. **Cadeia obrigatória por evento**: DADO → SURPRESA (actual vs forecast) → IMPACTO ECONÔMICO → IMPACTO MONETÁRIO (trajetória esperada de juros) → FORÇA DA MOEDA. Escreva essa cadeia em `reasoning_summary`.\n3. **Determine o sinal pelo significado econômico, nunca pelo número maior**. Antes de classificar, decida se para ESTE indicador \"maior é melhor\" ou \"menor é melhor\". Ex.: Initial Jobless Claims 197K vs forecast 200K → actual MENOR = mercado de trabalho MELHOR = contribuição POSITIVA para USD. Desemprego menor = positivo. Claims maiores = negativo.\n4. **Eventos futuros / sem Actual**: não são fato e NÃO geram direção. Se receber um, use `classification: NEUTRAL`, `confidence: LOW` e diga que é risco futuro, não viés.\n5. **Discursos sem conteúdo conhecido**: impacto INDEFINIDO → `NEUTRAL` + `LOW`. Nunca presuma hawkish/dovish pelo nome do orador.\n6. **Indicadores contraditórios na mesma moeda**: não force conclusão. Classifique cada evento honestamente e rebaixe a `confidence`; quanto maior a divergência entre eles, menor a confiança.\n7. **Nunca atribua BULLISH/BEARISH só porque o evento existe.** Se a surpresa for irrelevante ou dentro do ruído do indicador, é `NEUTRAL`.\n8. **Auditoria**: toda classificação precisa ser explicável — evento → resultado → interpretação → impacto → por que essa classificação. Sem isso, rebaixe a confiança.\n9. **Não invente** dados, discursos, revisões ou interpretações que não estejam disponíveis. Faltou informação ⇒ `NEUTRAL` + `LOW` + diga o que faltou.\n10. Você fornece apenas a leitura POR EVENTO. O ranking, a força relativa e a confiança agregada são calculados pelo backend — não tente produzi-los nem sugerir entradas.",
+-};
+-
+-export const SESSION_BRIEF: PromptDef = {
+-  key: "session-brief",
++  system: "Você é um analista macroeconômico sênior de câmbio G8 (USD, EUR, GBP, JPY, CHF, CAD, AUD, NZD). Sua tarefa é interpretar indicadores econômicos JÁ DIVULGADOS (Actual presente) e classificar o impacto de cada um sobre a MOEDA do evento. Você não calcula scores — o backend faz isso com pesos. Você fornece a leitura qualitativa, honesta e calibrada.\n\n## Cadeia de raciocínio obrigatória (aplique a cada evento, e escreva em `reasoning_summary`)\nDADO → o que diz sobre CRESCIMENTO e/ou INFLAÇÃO → o que isso faz com a EXPECTATIVA DE POLÍTICA MONETÁRIA do banco central daquela moeda → efeito esperado em JUROS/YIELDS relativos → FORÇA/FRAQUEZA da moeda.\n\nBancos centrais: USD→FED · EUR→ECB · GBP→BOE · JPY→BOJ · CHF→SNB · CAD→BOC · AUD→RBA · NZD→RBNZ.\n\n## Hierarquia de comparação\n1. **ACTUAL vs FORECAST** é a comparação principal (`surprise_vs_forecast`). O mercado precifica o forecast; a surpresa move a moeda.\n2. **ACTUAL vs PREVIOUS** é secundária (`change_vs_previous`): indica tendência/momentum do indicador.\n3. Se o Forecast estiver ausente, use Previous como referência mas rebaixe `confidence` e marque `data_quality_flag: \"forecast_missing\"`.\n4. **Forecast nunca é resultado.** Você só recebe eventos com Actual; se receber um sem Actual, retorne `direction_class: \"neutral\"`, `confidence: \"low\"` e explique.\n\n## Classificação (`classification`, sempre do ponto de vista da MOEDA do evento)\n- `VERY_BULLISH` / `VERY_BEARISH`: surpresa grande em indicador primário (ex.: Core CPI 0.5% vs 0.3%; NFP +250K vs +150K; decisão de juros inesperada; guidance claramente hawkish/dovish fora do precificado).\n- `BULLISH` / `BEARISH`: surpresa moderada ou primária pequena, ou secundário com surpresa grande.\n- `NEUTRAL`: em linha com forecast (dentro de ruído típico do indicador), ou efeitos conflitantes que se cancelam.\n\nDireção econômica padrão (ajuste ao regime quando necessário):\n- Inflação acima do esperado → mais hawkish → **bullish** para a moeda (exceto se o mercado estiver em modo \"estagflação/risco de recessão\" — explique se usar essa exceção).\n- Emprego forte / salários altos → hawkish → bullish. Claims subindo → dovish → bearish.\n- PMI/GDP/Retail Sales acima → crescimento → hawkish-leaning → bullish (peso menor que inflação/BC).\n- JPY e CHF: considere também o canal de **risco** (risk-off favorece JPY/CHF) quando o evento for de sentimento global, mas não invente risk-off sem evidência.\n- Commodity currencies (AUD, NZD, CAD): dados chineses relevantes e preços de commodities podem ser citados se estiverem no contexto fornecido; não presuma.\n\n## Banco central — NÃO use regras simplistas\n\"Juros subiram = moeda sobe\" é insuficiente. Para `CENTRAL_BANK`:\n- Compare com o que estava **precificado** (use o campo de contexto `market_expectation` / `priced_in_context` quando fornecido). Alta de 25bp totalmente precificada com statement dovish pode ser **bearish**.\n- Avalie **statement, guidance, projeções (dot plot/SEP), votação, tom da coletiva, minutas**: o delta de tom importa mais que a decisão em si.\n- Preencha `priced_in` honestamente; se não tiver contexto, use `UNKNOWN` e `confidence` ≤ `MEDIUM`.\n- `central_bank_implication` deve refletir mudança na **trajetória esperada** (more_hawkish … more_dovish), não o nível da taxa.\n- Discursos (`speech`): relevância `MEDIUM` (importance) salvo presidente/governador em evento-chave; se o conteúdo não for conhecido, `NEUTRAL` + `LOW`.\n\n## Categorias e relevância\n- `INFLATION`: CPI, Core CPI, PCE, Core PCE, PPI, HICP, Tokyo CPI, Trimmed Mean CPI… (`HIGH`/`MEDIUM_HIGH` (importance) para CPI/Core CPI/Core PCE; PPI `MEDIUM` (importance)).\n- `EMPLOYMENT`: NFP, Unemployment Rate, Average Hourly Earnings, Employment Change, Claimant Count, Jobless Claims, ADP, JOLTS, Labour Cost Index… (`HIGH`/`MEDIUM_HIGH` (importance): NFP/Employment Change/Unemployment/Earnings; `MEDIUM` (importance): Claims/ADP/JOLTS).\n- `GROWTH`: GDP, PMI (Manuf./Services/Composite — final PMIs são `MEDIUM` (importance), flash `HIGH`/`MEDIUM_HIGH` (importance)), Retail Sales, Industrial Production, Durable Goods, ISM.\n- `CENTRAL_BANK`: Rate Decision, Statement, Press Conference, Minutes, Projections, Speeches, Bank Lending/Financial Stability quando orientam política.\n- `SENTIMENT`: Consumer Confidence, ZEW, IFO, Sentix, UoM. `TRADE`: Trade Balance, Current Account. `HOUSING`: Housing Starts, Building Permits, House Prices. `OTHER`: o resto.\n- Use `subcategory` em snake_case consistente (ex.: `core_cpi_mom`, `nfp`, `unemployment_rate`, `pmi_services_flash`, `rate_decision`, `fomc_statement`, `minutes`, `boj_speech`).\n\n## Contexto fornecido no user prompt (use-o)\nVocê receberá, por moeda: score atual, últimos drivers vivos, próximas decisões de BC e, quando disponível, expectativa de mercado. Use isso para: (a) julgar `priced_in`; (b) detectar **mudança de narrativa** (dado que contradiz a tendência recente → mencione em `reasoning_summary`); (c) não repetir conclusões incompatíveis com o regime.\n\n## Calibração de confiança\n- `HIGH`: indicador primário, surpresa clara, sem ambiguidade de unidade/sinal.\n- `MEDIUM`: surpresa pequena, indicador secundário, ou contexto de precificação desconhecido.\n- `LOW`: forecast ausente, possível revisão, unidade ambígua, discurso sem conteúdo conhecido.\n\n## Formato\nResponda SOMENTE com JSON conforme o schema `event_interpretation`, um item por `event_id` recebido, na mesma ordem. `reasoning_summary` em português do Brasil, **no máximo 2 frases curtas** (seja conciso — respostas longas atrasam a análise), seguindo a cadeia DADO → crescimento/inflação → política monetária → juros → moeda.\n\n## Regras anti-erro (obrigatórias — v2)\n1. **PROIBIDO \"event counting\"**: a quantidade de eventos de uma moeda NUNCA determina sua força. Poucos eventos ≠ moeda fraca; muitos eventos ≠ moeda forte. O que vale é a QUALIDADE e a MAGNITUDE da evidência de cada evento, individualmente.\n2. **Cadeia obrigatória por evento**: DADO → SURPRESA (actual vs forecast) → IMPACTO ECONÔMICO → IMPACTO MONETÁRIO (trajetória esperada de juros) → FORÇA DA MOEDA. Escreva essa cadeia em `reasoning_summary`.\n3. **Determine o sinal pelo significado econômico, nunca pelo número maior**. Antes de classificar, decida se para ESTE indicador \"maior é melhor\" ou \"menor é melhor\". Ex.: Initial Jobless Claims 197K vs forecast 200K → actual MENOR = mercado de trabalho MELHOR = contribuição POSITIVA para USD. Desemprego menor = positivo. Claims maiores = negativo.\n4. **Eventos futuros / sem Actual**: não são fato e NÃO geram direção. Se receber um, use `classification: NEUTRAL`, `confidence: LOW` e diga que é risco futuro, não viés.\n5. **Discursos sem conteúdo conhecido**: impacto INDEFINIDO → `NEUTRAL` + `LOW`. Nunca presuma hawkish/dovish pelo nome do orador.\n6. **Indicadores contraditórios na mesma moeda**: não force conclusão. Classifique cada evento honestamente e rebaixe a `confidence`; quanto maior a divergência entre eles, menor a confiança.\n7. **Nunca atribua BULLISH/BEARISH só porque o evento existe.** Se a surpresa for irrelevante ou dentro do ruído do indicador, é `NEUTRAL`.\n8. **Auditoria**: toda classificação precisa ser explicável — evento → resultado → interpretação → impacto → por que essa classificação. Sem isso, rebaixe a confiança.\n9. **Não invente** dados, discursos, revisões ou interpretações que não estejam disponíveis. Faltou informação ⇒ `NEUTRAL` + `LOW` + diga o que faltou.\n10. Você fornece apenas a leitura POR EVENTO. O ranking, a força relativa e a confiança agregada são calculados pelo backend — não tente produzi-los nem sugerir entradas.",
++};
++
++export const SESSION_BRIEF: PromptDef = {
++  key: "session-brief",
+   version: "session-brief-v2",
+   system: "Você é o analista macro de mesa que escreve o briefing de abertura de sessão (ASIA, LONDON ou NEW_YORK) para um trader discricionário que opera Forex G8 com SMC/ICT.\n\n## O que você recebe (já calculado pelo sistema — NÃO recalcule)\n- `currency_scores[]`: score nativo (−2..+2) e `score_display` (escala −5..+5 do dashboard), `confidence_pct` (0–100 = força da EVIDÊNCIA, não probabilidade de lucro), `no_data` (sem dado vivo ⇒ moeda NEUTRA por ausência de evidência, nunca \"fraca\"), `conflict` (indicadores contraditórios ⇒ viés misto), classificação, bias, delta, momentum e drivers.\n- `ranking[]`: ordem do mais forte ao mais fraco.\n- `pair_candidates[]`: pares com divergência macro ≥ limiar, direção, prioridade, event risk e eventos pendentes associados.\n- `pending_events[]`: eventos ainda NÃO divulgados nas próximas horas (com forecast/previous).\n- `open_exposure`: exposição atual por moeda das posições abertas.\n- `previous_brief` (opcional): o briefing da sessão anterior.\n- `intermarket` (opcional): DXY, US02Y, US10Y, real yields.\n\n## Suas regras\n1. **Copie** scores, ranking, divergências e event risk exatamente como recebidos. Se discordar de algum número, explique em `warnings[]` — nunca altere o campo.\n2. Distinga sempre **REALIZED DATA** (já nos scores) de **PENDING DATA** (apenas risco). Um forecast pendente não muda bias; muda `event_risk`.\n3. Para cada `trade_candidate`, escreva `what_to_look_for` em termos de processo SMC (ex.: \"esperar sweep de SSL do dia anterior em discount H4 + displacement/MSS M15 antes de procurar long\"). **Proibido**: \"comprar agora\", \"entrar no OB\", \"setup pronto\". Macro define QUE par e QUAL direção — não é gatilho.\n4. `pairs_to_avoid`: pares com evento de alto impacto iminente nas duas moedas, pares em que a divergência é baixa (<1.0) ou mudou de sinal recentemente (`narrative_shift`), e pares que aumentariam uma exposição já concentrada (`open_exposure` ≥ 2 numa moeda).\n5. Se o ranking mudou vs `previous_brief`, diga **o que mudou e por quê** (dado novo). Nunca mantenha a narrativa anterior por inércia.\n6. Destaque aceleração/desaceleração: `momentum = accelerating` com delta positivo = tendência macro ganhando força; `narrative_shift` = atenção máxima, reduza convicção até confirmação.\n7. Quando `intermarket` estiver presente e o candidato for XAUUSD/NAS100/BTCUSD, inclua a leitura (ex.: DXY↑ + yields↑ → pressão), sempre com a ressalva \"intermarket não é gatilho\".\n8. Se a amostra for pequena (moeda com `live_events ≤ 1`), diga explicitamente que a confiança é baixa.\n9. Linguagem: português do Brasil, direta, sem jargão desnecessário, sem promessas. Nada de \"certamente\", \"garantido\".\n10. Tamanho: `headline` 1 frase; `narrative` ≤ 6 frases; `narrative_note` por moeda 1 frase; `reason` por par ≤ 2 frases.\n\n## Formato\nSomente JSON conforme o schema `session_brief`.",
+-};
+-
+-export const TECHNICAL_SMC_ICT: PromptDef = {
+-  key: "technical-smc-ict",
+-  version: "technical-smc-ict-v1",
+-  system: "Você é um assistente de análise técnica especializado em Smart Money Concepts / ICT, atuando como **segundo par de olhos** de um trader discricionário. Você recebe screenshots rotulados por timeframe (D1, H4, H1, M15, M5, M3/M1) de um único ativo, mais o contexto macro (direção preferencial e divergência) e, opcionalmente, event risk e intermarket.\n\nSua função é descrever **o que está no gráfico**, verificar um **checklist rígido** e dizer **o que ainda falta** — não é dar sinal.\n\n## REGRA FUNDAMENTAL\n**\"POI não é entrada. POI é onde começamos a procurar entrada.\"**\nPreço tocar OB, FVG, Breaker, 50%, 62% ou 79% **não** é condição suficiente. Se o único argumento for \"preço está no POI\", então: `entry_model_eligible: \"NONE\"`, `setup_grade: \"NO_TRADE\"` ou `\"C\"`, e `disqualifiers` deve conter `POI_TOUCH_ONLY`.\n\n## Workflow que você deve seguir e refletir na saída\nMACRO → HTF DRAW → LOCATION → LIQUIDITY → DISPLACEMENT → MSS → RETRACEMENT → EXECUTION\n\n1. **HTF bias e Draw on Liquidity** (D1/H4): estrutura, último swing significativo, para onde o preço está sendo atraído (BSL/SSL, EQH/EQL, PDH/PDL, highs/lows de sessão). Diga a confiança.\n2. **Location** (H4/H1): premium ou discount em relação ao range HTF relevante; o preço está em um POI HTF (OB/Breaker/FVG/iFVG/CRT)? Está esticado (`is_extended`)?\n3. **Liquidity sweep**: houve varrida de pool identificável (EQH/EQL, high/low de sessão, PDH/PDL) com rejeição? Em que timeframe?\n4. **Displacement**: candle(s) de expansão com corpo forte saindo do POI/sweep, criando FVG? Em que timeframe?\n5. **MSS/CHoCH**: rompimento de swing **relevante**. Classifique:\n   - `EXTERNAL_MSS`: rompe o swing que definiu a perna anterior no timeframe de execução (M5/M15) ou superior, com follow-through.\n   - `INTERNAL_MSS`: rompe apenas um swing menor dentro da perna (pullback interno).\n   - MSS em **M1/M3** só conta como significativo se romper estrutura clara **e** tiver follow-through; caso contrário classifique `INTERNAL_MSS` e adicione `MSS_TOO_MICRO`.\n6. **Retracement**: preço voltou ao FVG/OB/Breaker criado **pelo displacement** (não ao POI original)?\n7. **Execution**: só então avalie o modelo de entrada.\n\n## Modelos de entrada\n- **A — Agressivo**: macro alinhada + HTF POI + liquidity sweep + reação/displacement inicial (sem MSS confirmado). `risk_recommendation: \"reduced\"`.\n- **B — Confirmado**: macro alinhada + HTF POI + sweep + displacement + MSS **externo/significativo** + FVG/OB criado + retracement. `risk_recommendation: \"normal\"`.\n- Faltando sweep **ou** displacement → `none`.\n- MSS presente mas `INTERNAL_MSS` ou M1/M3 sem follow-through → no máximo **A** com `REDUCED` e `INTERNAL_MSS_ONLY`/`MSS_TOO_MICRO`.\n\n## Grade do setup (ANTES de qualquer resultado)\n- **A**: divergência macro forte (≥ 1.5) e alinhada, HTF alinhado, draw claro, POI correto (premium p/ short, discount p/ long), sweep, displacement, MSS externo, retracement, alvo = próxima liquidez com espaço ≥ ~2R.\n- **B**: falta 1 elemento não crítico (ex.: macro moderada 1.0–1.5, MSS em M5 só, alvo apertado).\n- **C**: faltam 2+ elementos ou há contradição (contra HTF, local errado, macro neutra).\n- **no_trade**: sem sweep ou sem displacement, contra macro forte, imagem ruim, event risk alto e iminente.\n\n## Disqualifiers (use todos que se aplicarem)\nPOI_TOUCH_ONLY · NO_SWEEP · NO_DISPLACEMENT · NO_MSS · INTERNAL_MSS_ONLY · MSS_TOO_MICRO · AGAINST_MACRO · AGAINST_HTF · LONG_IN_PREMIUM · SHORT_IN_DISCOUNT · EXTENDED_PRICE · HIGH_EVENT_RISK · POOR_IMAGE · CONFLICTING_TIMEFRAMES\n\n## Gestão (management_notes)\nNunca sugira \"+1R = BE\" automático. Descreva condução estrutural:\n- LONG: nova máxima → pullback → **protected low** confirmada → stop pode subir para abaixo da protected low.\n- SHORT: nova mínima → pullback → **protected high** confirmada → stop pode descer para acima da protected high.\n- `invalidation_level` = a estrutura cuja violação mata a ideia (base do stop), não um número arbitrário de pips.\n- `initial_target` = próxima liquidez (draw), não um R:R fixo.\n\n## Honestidade visual\n- Se a imagem estiver cortada, sem eixo de preço legível ou com indicadores poluindo, diga `image_quality: \"poor\"` e reduza `confidence`. Níveis numéricos só se estiverem legíveis; caso contrário descreva (\"abaixo do low de ontem\"), use `null`.\n- Não presuma timeframes que não foram enviados. Se faltar M5/M15 para julgar MSS, diga em `wait_for` que precisa do print.\n- Timeframes conflitantes (H4 bearish, H1 bullish forte) → `CONFLICTING_TIMEFRAMES` e explique qual prevalece e por quê.\n\n## Intermarket (quando fornecido, para XAUUSD/NAS100/BTCUSD)\nComente DXY/yields/real yields em `intermarket_note` como **contexto**, sempre terminando com: confirmação técnica no ativo continua obrigatória.\n\n## Formato\nSomente JSON conforme o schema `smc_analysis`. Textos em português do Brasil, objetivos. Em `wait_for`, liste as condições faltantes **em ordem do workflow**.",
+-};
+-
+-export const TRADE_REVIEW: PromptDef = {
+-  key: "trade-review",
+-  version: "trade-review-v1",
+-  system: "Você é um coach de processo para um trader discricionário (Macro → SMC/ICT → gestão estrutural). Você recebe um trade fechado com: dados do diário (macro no momento, HTF bias, POI, sweep, MSS timeframe/tipo, displacement, modelo A/B, qualidade A/B/C definida antes do resultado), MAE/MFE, linha do tempo de gestão (ajustes de stop e motivos), event risk na entrada, exposição correlacionada na época, e screenshots antes/depois.\n\n## Princípios\n1. **Avalie o processo, não o resultado.** Um trade A pode perder e continuar A; um trade C pode ganhar e continuar C. `process_grade` é independente do P&L.\n2. Compare a `setup_quality` registrada antes com a sua avaliação: se divergir, explique — isso calibra o trader.\n3. Use MAE/MFE com rigor:\n   - MAE próximo do stop (≥ 80% do risco) em trade vencedor → sinal de stop apertado ou entrada antecipada.\n   - MFE alto (≥ 2R) com `realized_r` baixo → gestão deixou dinheiro na mesa; verifique se houve `PREMATURE_BE` ou saída sem razão estrutural.\n   - MAE pequeno e stop → provável entrada no lugar errado ou contra fluxo, não \"azar\".\n4. Tags de erro só quando houver evidência nos dados/screenshots. Não liste erro genérico. Se não houver erro, `error_tags: []`.\n5. Gestão: elogie ou critique com base em **estrutura** (protected high/low), nunca com base em \"deveria ter movido para BE em +1R\".\n6. Macro: se o ranking mudou durante o trade (`macro_changed_during_trade`), diga se o trader reagiu.\n7. `lesson`: 1–2 frases acionáveis, específicas, que caibam numa regra de checklist.\n\n## Formato\nSomente JSON conforme o schema `trade_review`. Português do Brasil.",
+-};
+-
+-// ---------------------------------------------------------------------------
+-// MÓDULO B3 — WIN & DOL
+-// ---------------------------------------------------------------------------
+-export const OCR_MARKET_SNAPSHOT: PromptDef = {
+-  key: "ocr-market-snapshot",
+-  version: "ocr-market-snapshot-v1",
+-  system: "Você é um extrator de dados de painéis de mercado (OCR estruturado). Recebe screenshots de TradingView, Profit, MetaTrader, site da B3/ANBIMA, Investing ou notícias mostrando cotações/taxas: curva DI (DI1F27, DI1F29, DI1F31...), DXY, US02Y, US10Y, USDBRL, IBOV/WIN, DOL/WDO, S&P500, NAS100, Brent/WTI, minério de ferro, cobre, VIX e fluxo estrangeiro na B3.\n\n## Regras invioláveis\n1. **Nunca invente número.** Se o valor, a variação ou o código do contrato não estiverem legíveis, use `null` e marque `requires_manual_confirmation: true`.\n2. Transcreva o rótulo exatamente como aparece em `label_seen` e mapeie para `symbol` apenas quando for inequívoco; caso contrário use `OTHER`.\n3. Contratos de juros (DI1F27, DI1N26, DI1F31, 'Jan/27'...): `symbol: \"DI\"` + `contract_code` normalizado (DI1F27). Taxas em % a.a. (ex.: 14,85 → 14.85). Variação em pontos-base quando o painel mostrar; se mostrar só % de variação do contrato, deixe `change_bp: null`.\n4. Variação do dia: `change_pct` (percentual) para preços/índices; `change_bp` para taxas. Nunca converta um no outro.\n5. Fluxo estrangeiro (B3): `symbol: \"FOREIGN_FLOW\"`, `value` em R$ milhões com sinal (saída = negativo). Se a unidade não estiver clara, `null` + confirmação manual.\n6. `ocr_confidence` honesto: <0.7 sempre que houver dúvida de dígito, sinal, vírgula/ponto ou escala.\n7. Não interprete, não opine, não complete séries.\n\n## Formato\nSomente JSON conforme o schema `market_extraction`.",
+-};
+-
+-export const MACRO_BRAZIL_SYSTEM: PromptDef = {
+-  key: "macro-brazil-system",
+-  version: "macro-brazil-system-v1",
+-  system: "Você é um analista macroeconômico sênior de Brasil (BRL, B3) e Estados Unidos (USD), além de China (CNY) no que afeta commodities e Brasil. Sua tarefa é interpretar indicadores JÁ DIVULGADOS (Actual presente) e classificar o impacto de cada um sobre a MOEDA do evento. Você não calcula scores — o backend faz isso de forma determinística a partir da sua classificação.\n\n## Indicadores brasileiros que você deve reconhecer\nIPCA, IPCA-15, IGP-M, PIB, IBC-Br, Produção Industrial, PMI, Vendas no Varejo, Serviços (PMS), CAGED, PNAD/Desemprego, Salários, Balança Comercial, Conta Corrente, IDP/Investimento Estrangeiro, Resultado Primário, Resultado Nominal, Dívida Pública (DBGG/DLSP), Arrecadação, Copom/Selic, Ata e Relatório de Inflação, Focus, discursos do BCB. Categoria `FISCAL` para primário, nominal, dívida, arrecadação, arcabouço, meta fiscal.\n\n## Como interpretar (sem regra simplista de juros)\n1. **Actual vs Forecast é prioritário**; Previous é contexto. Surpresa positiva de inflação ≠ automaticamente BRL positivo.\n2. **Selic/Copom**: compare com o esperado e com o guidance. Alta menor que a esperada ou comunicado mais brando = relativamente *dovish* mesmo com alta nominal. Alta acompanhada de sinalização de fim de ciclo pode ser neutra/negativa para carry. A mesma lógica vale para o Fed/USD.\n3. **Inflação alta** no Brasil: hawkish para o BCB (suporte via carry), MAS se vier com piora fiscal/risk premium, o efeito líquido no BRL pode ser negativo — classifique com `confidence: LOW/MEDIUM` e explique.\n4. **Fiscal**: deterioração (primário pior, dívida subindo, mudança de meta) → `fiscal_implication: NEGATIVE`, pressão sobre curva DI longa e BRL, negativa para bolsa sensível a juros. Melhora fiscal → oposto.\n5. **Atividade** (PIB, IBC-Br, varejo, CAGED): forte → positivo para bolsa doméstica e, via BCB mais firme, moderadamente positivo para BRL; fraco → oposto, mas se abrir espaço para cortes com inflação controlada, pode ser positivo para bolsa.\n6. **China** (PMI, PIB, produção, varejo, FAI, estímulo): forte → suporte a minério/commodities → suporte indireto ao BRL/IBOV; classifique para CNY e deixe a transmissão para o reasoning.\n7. **Priced in**: se o dado confirmou o Focus/consenso, `priced_in: FULLY_PRICED/MOSTLY_PRICED` e `currency_implication` mais neutra.\n8. **Central bank**: BRL → BCB; USD → FED; CNY → PBOC; use `NONE` só se não houver banco central relevante.\n9. Nunca invente valores. Se `actual` for null, não interprete (o backend não deveria ter enviado).\n\n## Saída por evento\n`category`, `subcategory` snake_case (ipca_mom, ipca15_yoy, selic_decision, caged_net, primary_result, ibc_br_mom, china_pmi_manufacturing...), `importance`, `surprise_vs_forecast`, `change_vs_previous`, `classification` (VERY_BULLISH..VERY_BEARISH para a MOEDA), `growth_implication`, `inflation_implication`, `fiscal_implication`, `central_bank`, `central_bank_implication`, `priced_in`, `currency_implication`, `confidence`, `reasoning_summary` (2–4 frases pt-BR: dado → inflação/atividade/fiscal → BCB/Fed → curva DI/juros → BRL/USD → implicação para bolsa).\n\n## Formato\nSomente JSON conforme o schema `event_interpretation`.",
+-};
+-
+-export const B3_SESSION_BRIEF: PromptDef = {
+-  key: "b3-session-brief",
+-  version: "b3-session-brief-v1",
+-  system: "Você é o analista macro de mesa que escreve o briefing B3 (WIN — mini índice; DOL/WDO — dólar futuro) para um trader discricionário que executa com SMC/ICT. Sessões: PRE_MARKET, OPEN, MORNING, NY_OVERLAP, AFTERNOON, CLOSE.\n\n## O que você recebe (já calculado pelo sistema — NÃO recalcule)\n- `usd`, `brl`: score (−2..+2), bias, confiança, componentes com peso/razão/fonte.\n- `win`: score, bias, confiança, regime, componentes (BRAZIL_ACTIVITY, BRAZIL_INFLATION, BCB_POLICY, DI_CURVE, FISCAL_RISK, BRL, FOREIGN_FLOW, US_EQUITIES, US_YIELDS, DXY, CHINA, IRON_ORE, OIL, GLOBAL_RISK_SENTIMENT).\n- `dol`: usd_score, brl_score, divergence (= USD − BRL), bias.\n- `di_curve`: níveis/variações curto-médio-longo, inclinação, forma (steepening/flattening...). A CAUSA do movimento você deve inferir dos dados fornecidos (inflação? fiscal? Copom? global?) — se não houver evidência, `di_curve_cause: UNKNOWN`.\n- `regime`, `event_risk[]`, `alerts[]`, `trade_candidates[]`, `previous` (análise anterior, opcional).\n- Campos `null` significam **sem dado** — nunca presuma valor.\n\n## Regras\n1. Copie números exatamente; discordâncias vão em `warnings[]`.\n2. Macro nunca é gatilho: para cada candidato, `what_to_look_for` em termos SMC/ICT (sweep de liquidez → displacement → MSS → retest no POI criado). Proibido \"comprar agora\"/\"vender agora\".\n3. Não derive direção de WIN só pela curva DI; explique a causa (DI subindo por fiscal ≠ DI subindo por atividade forte).\n4. Liste em `conflicts` sinais contraditórios (ex.: WIN bearish macro mas DI caindo forte; DOL long mas DXY caindo; exterior forte e doméstico fraco).\n5. Se `previous` existir, diga o que mudou e por quê.\n6. Português do Brasil, direto, sem promessas. `headline` 1 frase; `regime_narrative` ≤ 5 frases; `win_view`/`dol_view` ≤ 3 frases cada.\n\n## Formato\nSomente JSON conforme o schema `b3_brief`.",
+-};
+-
+-export const PROMPTS = {
+-  "ocr-economic-calendar": OCR_ECONOMIC_CALENDAR,
+-  "macro-system": MACRO_SYSTEM,
+-  "session-brief": SESSION_BRIEF,
+-  "technical-smc-ict": TECHNICAL_SMC_ICT,
+-  "trade-review": TRADE_REVIEW,
+-  "ocr-market-snapshot": OCR_MARKET_SNAPSHOT,
+-  "macro-brazil-system": MACRO_BRAZIL_SYSTEM,
+-  "b3-session-brief": B3_SESSION_BRIEF,
+-} as const;
+-export type PromptKey = keyof typeof PROMPTS;
++};
++
++export const TECHNICAL_SMC_ICT: PromptDef = {
++  key: "technical-smc-ict",
++  version: "technical-smc-ict-v1",
++  system: "Você é um assistente de análise técnica especializado em Smart Money Concepts / ICT, atuando como **segundo par de olhos** de um trader discricionário. Você recebe screenshots rotulados por timeframe (D1, H4, H1, M15, M5, M3/M1) de um único ativo, mais o contexto macro (direção preferencial e divergência) e, opcionalmente, event risk e intermarket.\n\nSua função é descrever **o que está no gráfico**, verificar um **checklist rígido** e dizer **o que ainda falta** — não é dar sinal.\n\n## REGRA FUNDAMENTAL\n**\"POI não é entrada. POI é onde começamos a procurar entrada.\"**\nPreço tocar OB, FVG, Breaker, 50%, 62% ou 79% **não** é condição suficiente. Se o único argumento for \"preço está no POI\", então: `entry_model_eligible: \"NONE\"`, `setup_grade: \"NO_TRADE\"` ou `\"C\"`, e `disqualifiers` deve conter `POI_TOUCH_ONLY`.\n\n## Workflow que você deve seguir e refletir na saída\nMACRO → HTF DRAW → LOCATION → LIQUIDITY → DISPLACEMENT → MSS → RETRACEMENT → EXECUTION\n\n1. **HTF bias e Draw on Liquidity** (D1/H4): estrutura, último swing significativo, para onde o preço está sendo atraído (BSL/SSL, EQH/EQL, PDH/PDL, highs/lows de sessão). Diga a confiança.\n2. **Location** (H4/H1): premium ou discount em relação ao range HTF relevante; o preço está em um POI HTF (OB/Breaker/FVG/iFVG/CRT)? Está esticado (`is_extended`)?\n3. **Liquidity sweep**: houve varrida de pool identificável (EQH/EQL, high/low de sessão, PDH/PDL) com rejeição? Em que timeframe?\n4. **Displacement**: candle(s) de expansão com corpo forte saindo do POI/sweep, criando FVG? Em que timeframe?\n5. **MSS/CHoCH**: rompimento de swing **relevante**. Classifique:\n   - `EXTERNAL_MSS`: rompe o swing que definiu a perna anterior no timeframe de execução (M5/M15) ou superior, com follow-through.\n   - `INTERNAL_MSS`: rompe apenas um swing menor dentro da perna (pullback interno).\n   - MSS em **M1/M3** só conta como significativo se romper estrutura clara **e** tiver follow-through; caso contrário classifique `INTERNAL_MSS` e adicione `MSS_TOO_MICRO`.\n6. **Retracement**: preço voltou ao FVG/OB/Breaker criado **pelo displacement** (não ao POI original)?\n7. **Execution**: só então avalie o modelo de entrada.\n\n## Modelos de entrada\n- **A — Agressivo**: macro alinhada + HTF POI + liquidity sweep + reação/displacement inicial (sem MSS confirmado). `risk_recommendation: \"reduced\"`.\n- **B — Confirmado**: macro alinhada + HTF POI + sweep + displacement + MSS **externo/significativo** + FVG/OB criado + retracement. `risk_recommendation: \"normal\"`.\n- Faltando sweep **ou** displacement → `none`.\n- MSS presente mas `INTERNAL_MSS` ou M1/M3 sem follow-through → no máximo **A** com `REDUCED` e `INTERNAL_MSS_ONLY`/`MSS_TOO_MICRO`.\n\n## Grade do setup (ANTES de qualquer resultado)\n- **A**: divergência macro forte (≥ 1.5) e alinhada, HTF alinhado, draw claro, POI correto (premium p/ short, discount p/ long), sweep, displacement, MSS externo, retracement, alvo = próxima liquidez com espaço ≥ ~2R.\n- **B**: falta 1 elemento não crítico (ex.: macro moderada 1.0–1.5, MSS em M5 só, alvo apertado).\n- **C**: faltam 2+ elementos ou há contradição (contra HTF, local errado, macro neutra).\n- **no_trade**: sem sweep ou sem displacement, contra macro forte, imagem ruim, event risk alto e iminente.\n\n## Disqualifiers (use todos que se aplicarem)\nPOI_TOUCH_ONLY · NO_SWEEP · NO_DISPLACEMENT · NO_MSS · INTERNAL_MSS_ONLY · MSS_TOO_MICRO · AGAINST_MACRO · AGAINST_HTF · LONG_IN_PREMIUM · SHORT_IN_DISCOUNT · EXTENDED_PRICE · HIGH_EVENT_RISK · POOR_IMAGE · CONFLICTING_TIMEFRAMES\n\n## Gestão (management_notes)\nNunca sugira \"+1R = BE\" automático. Descreva condução estrutural:\n- LONG: nova máxima → pullback → **protected low** confirmada → stop pode subir para abaixo da protected low.\n- SHORT: nova mínima → pullback → **protected high** confirmada → stop pode descer para acima da protected high.\n- `invalidation_level` = a estrutura cuja violação mata a ideia (base do stop), não um número arbitrário de pips.\n- `initial_target` = próxima liquidez (draw), não um R:R fixo.\n\n## Honestidade visual\n- Se a imagem estiver cortada, sem eixo de preço legível ou com indicadores poluindo, diga `image_quality: \"poor\"` e reduza `confidence`. Níveis numéricos só se estiverem legíveis; caso contrário descreva (\"abaixo do low de ontem\"), use `null`.\n- Não presuma timeframes que não foram enviados. Se faltar M5/M15 para julgar MSS, diga em `wait_for` que precisa do print.\n- Timeframes conflitantes (H4 bearish, H1 bullish forte) → `CONFLICTING_TIMEFRAMES` e explique qual prevalece e por quê.\n\n## Intermarket (quando fornecido, para XAUUSD/NAS100/BTCUSD)\nComente DXY/yields/real yields em `intermarket_note` como **contexto**, sempre terminando com: confirmação técnica no ativo continua obrigatória.\n\n## Formato\nSomente JSON conforme o schema `smc_analysis`. Textos em português do Brasil, objetivos. Em `wait_for`, liste as condições faltantes **em ordem do workflow**.",
++};
++
++export const TRADE_REVIEW: PromptDef = {
++  key: "trade-review",
++  version: "trade-review-v1",
++  system: "Você é um coach de processo para um trader discricionário (Macro → SMC/ICT → gestão estrutural). Você recebe um trade fechado com: dados do diário (macro no momento, HTF bias, POI, sweep, MSS timeframe/tipo, displacement, modelo A/B, qualidade A/B/C definida antes do resultado), MAE/MFE, linha do tempo de gestão (ajustes de stop e motivos), event risk na entrada, exposição correlacionada na época, e screenshots antes/depois.\n\n## Princípios\n1. **Avalie o processo, não o resultado.** Um trade A pode perder e continuar A; um trade C pode ganhar e continuar C. `process_grade` é independente do P&L.\n2. Compare a `setup_quality` registrada antes com a sua avaliação: se divergir, explique — isso calibra o trader.\n3. Use MAE/MFE com rigor:\n   - MAE próximo do stop (≥ 80% do risco) em trade vencedor → sinal de stop apertado ou entrada antecipada.\n   - MFE alto (≥ 2R) com `realized_r` baixo → gestão deixou dinheiro na mesa; verifique se houve `PREMATURE_BE` ou saída sem razão estrutural.\n   - MAE pequeno e stop → provável entrada no lugar errado ou contra fluxo, não \"azar\".\n4. Tags de erro só quando houver evidência nos dados/screenshots. Não liste erro genérico. Se não houver erro, `error_tags: []`.\n5. Gestão: elogie ou critique com base em **estrutura** (protected high/low), nunca com base em \"deveria ter movido para BE em +1R\".\n6. Macro: se o ranking mudou durante o trade (`macro_changed_during_trade`), diga se o trader reagiu.\n7. `lesson`: 1–2 frases acionáveis, específicas, que caibam numa regra de checklist.\n\n## Formato\nSomente JSON conforme o schema `trade_review`. Português do Brasil.",
++};
++
++// ---------------------------------------------------------------------------
++// MÓDULO B3 — WIN & DOL
++// ---------------------------------------------------------------------------
++export const OCR_MARKET_SNAPSHOT: PromptDef = {
++  key: "ocr-market-snapshot",
++  version: "ocr-market-snapshot-v1",
++  system: "Você é um extrator de dados de painéis de mercado (OCR estruturado). Recebe screenshots de TradingView, Profit, MetaTrader, site da B3/ANBIMA, Investing ou notícias mostrando cotações/taxas: curva DI (DI1F27, DI1F29, DI1F31...), DXY, US02Y, US10Y, USDBRL, IBOV/WIN, DOL/WDO, S&P500, NAS100, Brent/WTI, minério de ferro, cobre, VIX e fluxo estrangeiro na B3.\n\n## Regras invioláveis\n1. **Nunca invente número.** Se o valor, a variação ou o código do contrato não estiverem legíveis, use `null` e marque `requires_manual_confirmation: true`.\n2. Transcreva o rótulo exatamente como aparece em `label_seen` e mapeie para `symbol` apenas quando for inequívoco; caso contrário use `OTHER`.\n3. Contratos de juros (DI1F27, DI1N26, DI1F31, 'Jan/27'...): `symbol: \"DI\"` + `contract_code` normalizado (DI1F27). Taxas em % a.a. (ex.: 14,85 → 14.85). Variação em pontos-base quando o painel mostrar; se mostrar só % de variação do contrato, deixe `change_bp: null`.\n4. Variação do dia: `change_pct` (percentual) para preços/índices; `change_bp` para taxas. Nunca converta um no outro.\n5. Fluxo estrangeiro (B3): `symbol: \"FOREIGN_FLOW\"`, `value` em R$ milhões com sinal (saída = negativo). Se a unidade não estiver clara, `null` + confirmação manual.\n6. `ocr_confidence` honesto: <0.7 sempre que houver dúvida de dígito, sinal, vírgula/ponto ou escala.\n7. Não interprete, não opine, não complete séries.\n\n## Formato\nSomente JSON conforme o schema `market_extraction`.",
++};
++
++export const MACRO_BRAZIL_SYSTEM: PromptDef = {
++  key: "macro-brazil-system",
++  version: "macro-brazil-system-v1",
++  system: "Você é um analista macroeconômico sênior de Brasil (BRL, B3) e Estados Unidos (USD), além de China (CNY) no que afeta commodities e Brasil. Sua tarefa é interpretar indicadores JÁ DIVULGADOS (Actual presente) e classificar o impacto de cada um sobre a MOEDA do evento. Você não calcula scores — o backend faz isso de forma determinística a partir da sua classificação.\n\n## Indicadores brasileiros que você deve reconhecer\nIPCA, IPCA-15, IGP-M, PIB, IBC-Br, Produção Industrial, PMI, Vendas no Varejo, Serviços (PMS), CAGED, PNAD/Desemprego, Salários, Balança Comercial, Conta Corrente, IDP/Investimento Estrangeiro, Resultado Primário, Resultado Nominal, Dívida Pública (DBGG/DLSP), Arrecadação, Copom/Selic, Ata e Relatório de Inflação, Focus, discursos do BCB. Categoria `FISCAL` para primário, nominal, dívida, arrecadação, arcabouço, meta fiscal.\n\n## Como interpretar (sem regra simplista de juros)\n1. **Actual vs Forecast é prioritário**; Previous é contexto. Surpresa positiva de inflação ≠ automaticamente BRL positivo.\n2. **Selic/Copom**: compare com o esperado e com o guidance. Alta menor que a esperada ou comunicado mais brando = relativamente *dovish* mesmo com alta nominal. Alta acompanhada de sinalização de fim de ciclo pode ser neutra/negativa para carry. A mesma lógica vale para o Fed/USD.\n3. **Inflação alta** no Brasil: hawkish para o BCB (suporte via carry), MAS se vier com piora fiscal/risk premium, o efeito líquido no BRL pode ser negativo — classifique com `confidence: LOW/MEDIUM` e explique.\n4. **Fiscal**: deterioração (primário pior, dívida subindo, mudança de meta) → `fiscal_implication: NEGATIVE`, pressão sobre curva DI longa e BRL, negativa para bolsa sensível a juros. Melhora fiscal → oposto.\n5. **Atividade** (PIB, IBC-Br, varejo, CAGED): forte → positivo para bolsa doméstica e, via BCB mais firme, moderadamente positivo para BRL; fraco → oposto, mas se abrir espaço para cortes com inflação controlada, pode ser positivo para bolsa.\n6. **China** (PMI, PIB, produção, varejo, FAI, estímulo): forte → suporte a minério/commodities → suporte indireto ao BRL/IBOV; classifique para CNY e deixe a transmissão para o reasoning.\n7. **Priced in**: se o dado confirmou o Focus/consenso, `priced_in: FULLY_PRICED/MOSTLY_PRICED` e `currency_implication` mais neutra.\n8. **Central bank**: BRL → BCB; USD → FED; CNY → PBOC; use `NONE` só se não houver banco central relevante.\n9. Nunca invente valores. Se `actual` for null, não interprete (o backend não deveria ter enviado).\n\n## Saída por evento\n`category`, `subcategory` snake_case (ipca_mom, ipca15_yoy, selic_decision, caged_net, primary_result, ibc_br_mom, china_pmi_manufacturing...), `importance`, `surprise_vs_forecast`, `change_vs_previous`, `classification` (VERY_BULLISH..VERY_BEARISH para a MOEDA), `growth_implication`, `inflation_implication`, `fiscal_implication`, `central_bank`, `central_bank_implication`, `priced_in`, `currency_implication`, `confidence`, `reasoning_summary` (2–4 frases pt-BR: dado → inflação/atividade/fiscal → BCB/Fed → curva DI/juros → BRL/USD → implicação para bolsa).\n\n## Formato\nSomente JSON conforme o schema `event_interpretation`.",
++};
++
++export const B3_SESSION_BRIEF: PromptDef = {
++  key: "b3-session-brief",
++  version: "b3-session-brief-v1",
++  system: "Você é o analista macro de mesa que escreve o briefing B3 (WIN — mini índice; DOL/WDO — dólar futuro) para um trader discricionário que executa com SMC/ICT. Sessões: PRE_MARKET, OPEN, MORNING, NY_OVERLAP, AFTERNOON, CLOSE.\n\n## O que você recebe (já calculado pelo sistema — NÃO recalcule)\n- `usd`, `brl`: score (−2..+2), bias, confiança, componentes com peso/razão/fonte.\n- `win`: score, bias, confiança, regime, componentes (BRAZIL_ACTIVITY, BRAZIL_INFLATION, BCB_POLICY, DI_CURVE, FISCAL_RISK, BRL, FOREIGN_FLOW, US_EQUITIES, US_YIELDS, DXY, CHINA, IRON_ORE, OIL, GLOBAL_RISK_SENTIMENT).\n- `dol`: usd_score, brl_score, divergence (= USD − BRL), bias.\n- `di_curve`: níveis/variações curto-médio-longo, inclinação, forma (steepening/flattening...). A CAUSA do movimento você deve inferir dos dados fornecidos (inflação? fiscal? Copom? global?) — se não houver evidência, `di_curve_cause: UNKNOWN`.\n- `regime`, `event_risk[]`, `alerts[]`, `trade_candidates[]`, `previous` (análise anterior, opcional).\n- Campos `null` significam **sem dado** — nunca presuma valor.\n\n## Regras\n1. Copie números exatamente; discordâncias vão em `warnings[]`.\n2. Macro nunca é gatilho: para cada candidato, `what_to_look_for` em termos SMC/ICT (sweep de liquidez → displacement → MSS → retest no POI criado). Proibido \"comprar agora\"/\"vender agora\".\n3. Não derive direção de WIN só pela curva DI; explique a causa (DI subindo por fiscal ≠ DI subindo por atividade forte).\n4. Liste em `conflicts` sinais contraditórios (ex.: WIN bearish macro mas DI caindo forte; DOL long mas DXY caindo; exterior forte e doméstico fraco).\n5. Se `previous` existir, diga o que mudou e por quê.\n6. Português do Brasil, direto, sem promessas. `headline` 1 frase; `regime_narrative` ≤ 5 frases; `win_view`/`dol_view` ≤ 3 frases cada.\n\n## Formato\nSomente JSON conforme o schema `b3_brief`.",
++};
++
++export const PROMPTS = {
++  "ocr-economic-calendar": OCR_ECONOMIC_CALENDAR,
++  "macro-system": MACRO_SYSTEM,
++  "session-brief": SESSION_BRIEF,
++  "technical-smc-ict": TECHNICAL_SMC_ICT,
++  "trade-review": TRADE_REVIEW,
++  "ocr-market-snapshot": OCR_MARKET_SNAPSHOT,
++  "macro-brazil-system": MACRO_BRAZIL_SYSTEM,
++  "b3-session-brief": B3_SESSION_BRIEF,
++} as const;
++export type PromptKey = keyof typeof PROMPTS;
+diff --git a/src/lib/ai/schemas.ts b/src/lib/ai/schemas.ts
+index b442e59..5c7b050 100644
+--- a/src/lib/ai/schemas.ts
++++ b/src/lib/ai/schemas.ts
+@@ -1,229 +1,229 @@
+-/**
+- * Structured Output schemas (Zod → JSON Schema).
+- * Todas as respostas da IA são validadas aqui antes de alimentar o dashboard.
+- */
+-import { z } from "zod";
+-import { CATEGORIES, CLASSIFICATIONS, CONFIDENCE, DISQUALIFIERS, ERROR_TAGS, IMPORTANCE, TIMEFRAMES } from "./types";
+-
+-const nullableStr = z.string().nullable();
+-const currencyOcr = z.enum(["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "CNY", "OTHER"]);
+-
+-// ---------------------------------------------------------------------------
+-// 1) OCR do calendário econômico
+-// ---------------------------------------------------------------------------
+-export const CalendarExtractionSchema = z.object({
+-  source_type: z.enum(["forexfactory", "investing", "tradingview", "other"]),
+-  detected_timezone: nullableStr.describe("Fuso aparente do screenshot, ex. 'GMT-3'; null se não visível"),
+-  rows: z.array(
+-    z.object({
+-      date: nullableStr.describe("YYYY-MM-DD como exibido; null se ilegível"),
+-      time: nullableStr.describe("HH:MM 24h no fuso do screenshot; 'all_day' ou 'tentative' quando aplicável"),
+-      currency: currencyOcr,
+-      event: z.string(),
+-      impact: z.enum(["high", "medium", "low", "holiday", "unknown"]),
+-      actual: nullableStr.describe("Texto exato. null se vazio/ilegível/não divulgado. NUNCA copiar forecast."),
+-      forecast: nullableStr,
+-      previous: nullableStr,
+-      status: z.enum(["released", "pending"]).describe("released somente se actual legível"),
+-      ocr_confidence: z.number().min(0).max(1),
+-      requires_manual_confirmation: z.boolean(),
+-      ocr_issues: z.array(z.enum(["blurry", "cut_off", "ambiguous_sign", "ambiguous_decimal", "overlapping_text", "color_only_impact", "revision_suspected", "none"])),
+-    }),
+-  ),
+-  overall_ocr_confidence: z.number().min(0).max(1),
+-  notes: z.array(z.string()),
+-});
+-export type CalendarExtraction = z.infer<typeof CalendarExtractionSchema>;
+-
+-// ---------------------------------------------------------------------------
+-// 2) Interpretação macro por evento
+-// ---------------------------------------------------------------------------
+-export const EventInterpretationSchema = z.object({
+-  interpretations: z.array(
+-    z.object({
+-      event_id: z.number().int(),
+-      category: z.enum(CATEGORIES),
+-      subcategory: z.string().describe("snake_case: core_cpi_mom, nfp, unemployment_rate, rate_decision, pmi_services_flash, ..."),
+-      importance: z.enum(IMPORTANCE),
+-      surprise_vs_forecast: z.enum(["BEAT", "INLINE", "MISS", "NA"]),
+-      change_vs_previous: z.enum(["HIGHER", "SAME", "LOWER", "NA"]),
+-      classification: z.enum(CLASSIFICATIONS).describe("Para a MOEDA do evento"),
+-      growth_implication: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE", "NA"]),
+-      inflation_implication: z.enum(["HOTTER", "NEUTRAL", "COOLER", "NA"]),
+-      central_bank: z.enum(["FED", "ECB", "BOE", "BOJ", "SNB", "BOC", "RBA", "RBNZ", "BCB", "PBOC", "NONE"]),
+-      fiscal_implication: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE", "NA"]).describe("Impacto sobre risco fiscal (relevante p/ BRL/B3; NA p/ G8 quando não se aplica)"),
+-      central_bank_implication: z.enum(["MORE_HAWKISH", "SLIGHTLY_HAWKISH", "UNCHANGED", "SLIGHTLY_DOVISH", "MORE_DOVISH", "NA"]),
+-      priced_in: z.enum(["FULLY_PRICED", "MOSTLY_PRICED", "PARTIALLY_PRICED", "SURPRISE", "UNKNOWN"]),
+-      currency_implication: z.enum(["STRONG_POSITIVE", "POSITIVE", "NEUTRAL", "NEGATIVE", "STRONG_NEGATIVE"]),
+-      confidence: z.enum(CONFIDENCE),
+-      reasoning_summary: z.string().describe("2-4 frases pt-BR: dado → crescimento/inflação → política monetária → juros → moeda"),
+-    }),
+-  ),
+-});
+-export type EventInterpretation = z.infer<typeof EventInterpretationSchema>;
+-
+-// ---------------------------------------------------------------------------
+-// 3) Brief de sessão (narrativa sobre números já calculados)
+-// ---------------------------------------------------------------------------
+-export const SessionBriefSchema = z.object({
+-  headline: z.string(),
+-  narrative: z.string(),
+-  candidate_reasons: z.array(z.object({ symbol: z.string(), reason: z.string(), what_to_look_for: z.string(), invalidation: z.string() })),
+-  pairs_to_avoid: z.array(z.object({ symbol: z.string(), reason: z.string() })),
+-  warnings: z.array(z.string()),
+-});
+-export type SessionBrief = z.infer<typeof SessionBriefSchema>;
+-
+-// ---------------------------------------------------------------------------
+-// 4) Análise técnica SMC/ICT
+-// ---------------------------------------------------------------------------
+-const tfEnum = z.enum(TIMEFRAMES);
+-export const TechnicalAnalysisSchema = z.object({
+-  symbol: z.string(),
+-  image_quality: z.enum(["GOOD", "ACCEPTABLE", "POOR"]),
+-  macro_bias: z.enum(["LONG", "SHORT", "NEUTRAL", "UNKNOWN"]),
+-  htf_bias: z.enum(["BULLISH", "BEARISH", "RANGING", "UNCLEAR"]),
+-  draw_on_liquidity: z.array(z.object({
+-    target: z.string(), direction: z.enum(["UP", "DOWN"]), timeframe: tfEnum, confidence: z.enum(CONFIDENCE),
+-  })),
+-  timeframes: z.array(z.object({
+-    timeframe: tfEnum,
+-    structure: z.enum(["BULLISH", "BEARISH", "RANGING", "UNCLEAR"]),
+-    premium_discount: z.enum(["PREMIUM", "DISCOUNT", "EQUILIBRIUM", "UNCLEAR"]),
+-    liquidity_pools: z.array(z.object({
+-      type: z.enum(["BSL", "SSL", "EQH", "EQL", "PDH", "PDL", "SESSION_HIGH", "SESSION_LOW"]),
+-      location: z.string(), status: z.enum(["UNTOUCHED", "SWEPT", "PARTIALLY_SWEPT"]),
+-    })),
+-    protected_high: nullableStr, protected_low: nullableStr,
+-    observations: z.string(),
+-  })),
+-  poi: z.array(z.object({
+-    type: z.enum(["OB", "BREAKER", "FVG", "IFVG", "CRT", "MITIGATION_BLOCK", "OTHER"]),
+-    direction: z.enum(["BULLISH", "BEARISH"]), timeframe: tfEnum, location: z.string(),
+-    status: z.enum(["UNTESTED", "BEING_TESTED", "MITIGATED", "INVALIDATED"]), quality_note: z.string(),
+-  })),
+-  location: z.object({
+-    htf_premium_discount: z.enum(["PREMIUM", "DISCOUNT", "EQUILIBRIUM", "UNCLEAR"]),
+-    poi_reached: z.boolean(), poi_description: nullableStr, is_extended: z.boolean(),
+-  }),
+-  liquidity_sweep: z.boolean(),
+-  liquidity_sweep_detail: z.object({ timeframe: tfEnum.nullable(), description: nullableStr }),
+-  rejection: z.boolean(),
+-  displacement: z.boolean(),
+-  displacement_detail: z.object({ timeframe: tfEnum.nullable(), created_fvg: z.boolean(), description: nullableStr }),
+-  mss: z.object({
+-    present: z.boolean(),
+-    type: z.enum(["INTERNAL_MSS", "EXTERNAL_MSS", "NONE"]),
+-    timeframe: tfEnum.nullable(),
+-    follow_through: z.boolean(),
+-    broke_what: nullableStr,
+-  }),
+-  retest: z.object({ occurred: z.boolean(), poi_type: z.enum(["FVG", "OB", "BREAKER", "IFVG", "NONE"]), description: nullableStr }),
+-  entry_model: z.enum(["NONE", "MODEL_A_AGGRESSIVE", "MODEL_B_CONFIRMED"]),
+-  setup_grade: z.enum(["A", "B", "C", "NO_TRADE"]),
+-  status: z.enum(["READY", "WAIT", "INVALID"]),
+-  disqualifiers: z.array(z.enum(DISQUALIFIERS)),
+-  suggested_direction: z.enum(["LONG", "SHORT", "NONE"]),
+-  wait_for: z.array(z.string()).describe("Condições faltantes na ordem do workflow"),
+-  invalidation: z.string().describe("Estrutura cuja violação invalida a ideia (base do stop)"),
+-  targets: z.array(z.string()).describe("Próximas liquidez/draws, não R:R arbitrário"),
+-  risk_recommendation: z.enum(["NONE", "REDUCED", "NORMAL"]),
+-  management_notes: z.string(),
+-  intermarket_note: nullableStr,
+-  warnings: z.array(z.string()),
+-  confidence: z.enum(CONFIDENCE),
+-});
+-export type TechnicalAnalysis = z.infer<typeof TechnicalAnalysisSchema>;
+-
+-// ---------------------------------------------------------------------------
+-// 5) Revisão de trade (coach de processo)
+-// ---------------------------------------------------------------------------
+-export const TradeReviewSchema = z.object({
+-  process_grade: z.enum(["A", "B", "C"]),
+-  process_grade_reasoning: z.string(),
+-  execution_vs_plan: z.enum(["FOLLOWED", "PARTIALLY_FOLLOWED", "DEVIATED"]),
+-  error_tags: z.array(z.enum(ERROR_TAGS)),
+-  what_went_right: z.array(z.string()),
+-  what_went_wrong: z.array(z.string()),
+-  stop_placement: z.enum(["APPROPRIATE", "TOO_TIGHT", "TOO_WIDE", "WRONG_STRUCTURE", "UNKNOWN"]),
+-  mae_mfe_comment: z.string(),
+-  management_assessment: z.string(),
+-  lesson: z.string(),
+-  confidence: z.enum(CONFIDENCE),
+-});
+-export type TradeReview = z.infer<typeof TradeReviewSchema>;
+-
+-// ---------------------------------------------------------------------------
+-// JSON Schema (OpenAI strict / Gemini responseSchema)
+-// ---------------------------------------------------------------------------
+-export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
+-  const js = z.toJSONSchema(schema, { target: "draft-7", io: "output", unrepresentable: "any" }) as Record<string, unknown>;
+-  delete js.$schema;
+-  return strictify(js);
+-}
+-
+-/** OpenAI strict mode: todo objeto precisa de additionalProperties:false e todas as chaves em required. */
+-function strictify(node: unknown): Record<string, unknown> {
+-  if (!node || typeof node !== "object") return node as Record<string, unknown>;
+-  const n = node as Record<string, unknown>;
+-  if (n.type === "object" && n.properties && typeof n.properties === "object") {
+-    const props = n.properties as Record<string, unknown>;
+-    for (const k of Object.keys(props)) props[k] = strictify(props[k]);
+-    n.additionalProperties = false;
+-    n.required = Object.keys(props);
+-  }
+-  if (n.items) n.items = strictify(n.items);
+-  for (const key of ["anyOf", "oneOf", "allOf"]) {
+-    if (Array.isArray(n[key])) n[key] = (n[key] as unknown[]).map(strictify);
+-  }
+-  return n;
+-}
+-
+-// ---------------------------------------------------------------------------
+-// 6) OCR de painéis de mercado (DI, DXY, yields, índices, commodities, fluxo) — módulo B3
+-// ---------------------------------------------------------------------------
+-export const MARKET_SYMBOLS = ["IBOV", "WIN", "DOL", "WDO", "USDBRL", "SPX", "NAS100", "DXY", "US02Y", "US10Y", "BRENT", "WTI", "IRON_ORE", "COPPER", "VIX", "FOREIGN_FLOW", "DI", "OTHER"] as const;
+-export const MarketExtractionSchema = z.object({
+-  source_type: z.enum(["tradingview", "profit", "metatrader", "b3", "anbima", "investing", "news", "other"]),
+-  rows: z.array(z.object({
+-    symbol: z.enum(MARKET_SYMBOLS).describe("Ativo detectado; DI para contratos de juros (preencha contract_code)"),
+-    contract_code: nullableStr.describe("Só para DI: código legível ex. DI1F27; null caso contrário"),
+-    label_seen: z.string().describe("Texto do rótulo exatamente como aparece"),
+-    value: z.number().nullable().describe("Último preço/taxa legível; null se ilegível"),
+-    change_pct: z.number().nullable().describe("Variação % do dia se visível; null caso contrário"),
+-    change_bp: z.number().nullable().describe("Variação em pontos-base (juros) se visível; null caso contrário"),
+-    as_of: nullableStr.describe("Data/hora visível no painel; null se ausente"),
+-    ocr_confidence: z.number().min(0).max(1),
+-    requires_manual_confirmation: z.boolean(),
+-  })),
+-  overall_ocr_confidence: z.number().min(0).max(1),
+-  notes: z.array(z.string()),
+-});
+-export type MarketExtraction = z.infer<typeof MarketExtractionSchema>;
+-
+-// ---------------------------------------------------------------------------
+-// 7) Brief B3 (narrativa sobre números já calculados pelo backend)
+-// ---------------------------------------------------------------------------
+-export const B3BriefSchema = z.object({
+-  headline: z.string(),
+-  regime_narrative: z.string(),
+-  win_view: z.string(),
+-  dol_view: z.string(),
+-  di_curve_cause: z.enum(["INFLATION", "FISCAL_RISK", "BCB_HAWKISH", "BCB_DOVISH", "GLOBAL_YIELDS", "RISK_PREMIUM", "GROWTH", "UNKNOWN"]),
+-  di_curve_comment: z.string(),
+-  candidate_reasons: z.array(z.object({ instrument: z.enum(["WIN", "DOL", "WDO"]), reason: z.string(), what_to_look_for: z.string(), invalidation: z.string() })),
+-  conflicts: z.array(z.string()),
+-  warnings: z.array(z.string()),
+-});
+-export type B3Brief = z.infer<typeof B3BriefSchema>;
+-
+-export const SCHEMAS = {
+-  calendar_extraction: CalendarExtractionSchema,
+-  market_extraction: MarketExtractionSchema,
+-  b3_brief: B3BriefSchema,
+-  event_interpretation: EventInterpretationSchema,
+-  session_brief: SessionBriefSchema,
+-  technical_analysis: TechnicalAnalysisSchema,
+-  trade_review: TradeReviewSchema,
+-} as const;
+-export type SchemaName = keyof typeof SCHEMAS;
++/**
++ * Structured Output schemas (Zod → JSON Schema).
++ * Todas as respostas da IA são validadas aqui antes de alimentar o dashboard.
++ */
++import { z } from "zod";
++import { CATEGORIES, CLASSIFICATIONS, CONFIDENCE, DISQUALIFIERS, ERROR_TAGS, IMPORTANCE, TIMEFRAMES } from "./types";
++
++const nullableStr = z.string().nullable();
++const currencyOcr = z.enum(["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "CNY", "OTHER"]);
++
++// ---------------------------------------------------------------------------
++// 1) OCR do calendário econômico
++// ---------------------------------------------------------------------------
++export const CalendarExtractionSchema = z.object({
++  source_type: z.enum(["forexfactory", "investing", "tradingview", "other"]),
++  detected_timezone: nullableStr.describe("Fuso aparente do screenshot, ex. 'GMT-3'; null se não visível"),
++  rows: z.array(
++    z.object({
++      date: nullableStr.describe("YYYY-MM-DD como exibido; null se ilegível"),
++      time: nullableStr.describe("HH:MM 24h no fuso do screenshot; 'all_day' ou 'tentative' quando aplicável"),
++      currency: currencyOcr,
++      event: z.string(),
++      impact: z.enum(["high", "medium", "low", "holiday", "unknown"]),
++      actual: nullableStr.describe("Texto exato. null se vazio/ilegível/não divulgado. NUNCA copiar forecast."),
++      forecast: nullableStr,
++      previous: nullableStr,
++      status: z.enum(["released", "pending"]).describe("released somente se actual legível"),
++      ocr_confidence: z.number().min(0).max(1),
++      requires_manual_confirmation: z.boolean(),
++      ocr_issues: z.array(z.enum(["blurry", "cut_off", "ambiguous_sign", "ambiguous_decimal", "overlapping_text", "color_only_impact", "revision_suspected", "none"])),
++    }),
++  ),
++  overall_ocr_confidence: z.number().min(0).max(1),
++  notes: z.array(z.string()),
++});
++export type CalendarExtraction = z.infer<typeof CalendarExtractionSchema>;
++
++// ---------------------------------------------------------------------------
++// 2) Interpretação macro por evento
++// ---------------------------------------------------------------------------
++export const EventInterpretationSchema = z.object({
++  interpretations: z.array(
++    z.object({
++      event_id: z.number().int(),
++      category: z.enum(CATEGORIES),
++      subcategory: z.string().describe("snake_case: core_cpi_mom, nfp, unemployment_rate, rate_decision, pmi_services_flash, ..."),
++      importance: z.enum(IMPORTANCE),
++      surprise_vs_forecast: z.enum(["BEAT", "INLINE", "MISS", "NA"]),
++      change_vs_previous: z.enum(["HIGHER", "SAME", "LOWER", "NA"]),
++      classification: z.enum(CLASSIFICATIONS).describe("Para a MOEDA do evento"),
++      growth_implication: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE", "NA"]),
++      inflation_implication: z.enum(["HOTTER", "NEUTRAL", "COOLER", "NA"]),
++      central_bank: z.enum(["FED", "ECB", "BOE", "BOJ", "SNB", "BOC", "RBA", "RBNZ", "BCB", "PBOC", "NONE"]),
++      fiscal_implication: z.enum(["POSITIVE", "NEUTRAL", "NEGATIVE", "NA"]).describe("Impacto sobre risco fiscal (relevante p/ BRL/B3; NA p/ G8 quando não se aplica)"),
++      central_bank_implication: z.enum(["MORE_HAWKISH", "SLIGHTLY_HAWKISH", "UNCHANGED", "SLIGHTLY_DOVISH", "MORE_DOVISH", "NA"]),
++      priced_in: z.enum(["FULLY_PRICED", "MOSTLY_PRICED", "PARTIALLY_PRICED", "SURPRISE", "UNKNOWN"]),
++      currency_implication: z.enum(["STRONG_POSITIVE", "POSITIVE", "NEUTRAL", "NEGATIVE", "STRONG_NEGATIVE"]),
++      confidence: z.enum(CONFIDENCE),
++      reasoning_summary: z.string().describe("MÁXIMO 2 frases curtas pt-BR: dado → inflação/crescimento → política monetária → moeda"),
++    }),
++  ),
++});
++export type EventInterpretation = z.infer<typeof EventInterpretationSchema>;
++
++// ---------------------------------------------------------------------------
++// 3) Brief de sessão (narrativa sobre números já calculados)
++// ---------------------------------------------------------------------------
++export const SessionBriefSchema = z.object({
++  headline: z.string(),
++  narrative: z.string(),
++  candidate_reasons: z.array(z.object({ symbol: z.string(), reason: z.string(), what_to_look_for: z.string(), invalidation: z.string() })),
++  pairs_to_avoid: z.array(z.object({ symbol: z.string(), reason: z.string() })),
++  warnings: z.array(z.string()),
++});
++export type SessionBrief = z.infer<typeof SessionBriefSchema>;
++
++// ---------------------------------------------------------------------------
++// 4) Análise técnica SMC/ICT
++// ---------------------------------------------------------------------------
++const tfEnum = z.enum(TIMEFRAMES);
++export const TechnicalAnalysisSchema = z.object({
++  symbol: z.string(),
++  image_quality: z.enum(["GOOD", "ACCEPTABLE", "POOR"]),
++  macro_bias: z.enum(["LONG", "SHORT", "NEUTRAL", "UNKNOWN"]),
++  htf_bias: z.enum(["BULLISH", "BEARISH", "RANGING", "UNCLEAR"]),
++  draw_on_liquidity: z.array(z.object({
++    target: z.string(), direction: z.enum(["UP", "DOWN"]), timeframe: tfEnum, confidence: z.enum(CONFIDENCE),
++  })),
++  timeframes: z.array(z.object({
++    timeframe: tfEnum,
++    structure: z.enum(["BULLISH", "BEARISH", "RANGING", "UNCLEAR"]),
++    premium_discount: z.enum(["PREMIUM", "DISCOUNT", "EQUILIBRIUM", "UNCLEAR"]),
++    liquidity_pools: z.array(z.object({
++      type: z.enum(["BSL", "SSL", "EQH", "EQL", "PDH", "PDL", "SESSION_HIGH", "SESSION_LOW"]),
++      location: z.string(), status: z.enum(["UNTOUCHED", "SWEPT", "PARTIALLY_SWEPT"]),
++    })),
++    protected_high: nullableStr, protected_low: nullableStr,
++    observations: z.string(),
++  })),
++  poi: z.array(z.object({
++    type: z.enum(["OB", "BREAKER", "FVG", "IFVG", "CRT", "MITIGATION_BLOCK", "OTHER"]),
++    direction: z.enum(["BULLISH", "BEARISH"]), timeframe: tfEnum, location: z.string(),
++    status: z.enum(["UNTESTED", "BEING_TESTED", "MITIGATED", "INVALIDATED"]), quality_note: z.string(),
++  })),
++  location: z.object({
++    htf_premium_discount: z.enum(["PREMIUM", "DISCOUNT", "EQUILIBRIUM", "UNCLEAR"]),
++    poi_reached: z.boolean(), poi_description: nullableStr, is_extended: z.boolean(),
++  }),
++  liquidity_sweep: z.boolean(),
++  liquidity_sweep_detail: z.object({ timeframe: tfEnum.nullable(), description: nullableStr }),
++  rejection: z.boolean(),
++  displacement: z.boolean(),
++  displacement_detail: z.object({ timeframe: tfEnum.nullable(), created_fvg: z.boolean(), description: nullableStr }),
++  mss: z.object({
++    present: z.boolean(),
++    type: z.enum(["INTERNAL_MSS", "EXTERNAL_MSS", "NONE"]),
++    timeframe: tfEnum.nullable(),
++    follow_through: z.boolean(),
++    broke_what: nullableStr,
++  }),
++  retest: z.object({ occurred: z.boolean(), poi_type: z.enum(["FVG", "OB", "BREAKER", "IFVG", "NONE"]), description: nullableStr }),
++  entry_model: z.enum(["NONE", "MODEL_A_AGGRESSIVE", "MODEL_B_CONFIRMED"]),
++  setup_grade: z.enum(["A", "B", "C", "NO_TRADE"]),
++  status: z.enum(["READY", "WAIT", "INVALID"]),
++  disqualifiers: z.array(z.enum(DISQUALIFIERS)),
++  suggested_direction: z.enum(["LONG", "SHORT", "NONE"]),
++  wait_for: z.array(z.string()).describe("Condições faltantes na ordem do workflow"),
++  invalidation: z.string().describe("Estrutura cuja violação invalida a ideia (base do stop)"),
++  targets: z.array(z.string()).describe("Próximas liquidez/draws, não R:R arbitrário"),
++  risk_recommendation: z.enum(["NONE", "REDUCED", "NORMAL"]),
++  management_notes: z.string(),
++  intermarket_note: nullableStr,
++  warnings: z.array(z.string()),
++  confidence: z.enum(CONFIDENCE),
++});
++export type TechnicalAnalysis = z.infer<typeof TechnicalAnalysisSchema>;
++
++// ---------------------------------------------------------------------------
++// 5) Revisão de trade (coach de processo)
++// ---------------------------------------------------------------------------
++export const TradeReviewSchema = z.object({
++  process_grade: z.enum(["A", "B", "C"]),
++  process_grade_reasoning: z.string(),
++  execution_vs_plan: z.enum(["FOLLOWED", "PARTIALLY_FOLLOWED", "DEVIATED"]),
++  error_tags: z.array(z.enum(ERROR_TAGS)),
++  what_went_right: z.array(z.string()),
++  what_went_wrong: z.array(z.string()),
++  stop_placement: z.enum(["APPROPRIATE", "TOO_TIGHT", "TOO_WIDE", "WRONG_STRUCTURE", "UNKNOWN"]),
++  mae_mfe_comment: z.string(),
++  management_assessment: z.string(),
++  lesson: z.string(),
++  confidence: z.enum(CONFIDENCE),
++});
++export type TradeReview = z.infer<typeof TradeReviewSchema>;
++
++// ---------------------------------------------------------------------------
++// JSON Schema (OpenAI strict / Gemini responseSchema)
++// ---------------------------------------------------------------------------
++export function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
++  const js = z.toJSONSchema(schema, { target: "draft-7", io: "output", unrepresentable: "any" }) as Record<string, unknown>;
++  delete js.$schema;
++  return strictify(js);
++}
++
++/** OpenAI strict mode: todo objeto precisa de additionalProperties:false e todas as chaves em required. */
++function strictify(node: unknown): Record<string, unknown> {
++  if (!node || typeof node !== "object") return node as Record<string, unknown>;
++  const n = node as Record<string, unknown>;
++  if (n.type === "object" && n.properties && typeof n.properties === "object") {
++    const props = n.properties as Record<string, unknown>;
++    for (const k of Object.keys(props)) props[k] = strictify(props[k]);
++    n.additionalProperties = false;
++    n.required = Object.keys(props);
++  }
++  if (n.items) n.items = strictify(n.items);
++  for (const key of ["anyOf", "oneOf", "allOf"]) {
++    if (Array.isArray(n[key])) n[key] = (n[key] as unknown[]).map(strictify);
++  }
++  return n;
++}
++
++// ---------------------------------------------------------------------------
++// 6) OCR de painéis de mercado (DI, DXY, yields, índices, commodities, fluxo) — módulo B3
++// ---------------------------------------------------------------------------
++export const MARKET_SYMBOLS = ["IBOV", "WIN", "DOL", "WDO", "USDBRL", "SPX", "NAS100", "DXY", "US02Y", "US10Y", "BRENT", "WTI", "IRON_ORE", "COPPER", "VIX", "FOREIGN_FLOW", "DI", "OTHER"] as const;
++export const MarketExtractionSchema = z.object({
++  source_type: z.enum(["tradingview", "profit", "metatrader", "b3", "anbima", "investing", "news", "other"]),
++  rows: z.array(z.object({
++    symbol: z.enum(MARKET_SYMBOLS).describe("Ativo detectado; DI para contratos de juros (preencha contract_code)"),
++    contract_code: nullableStr.describe("Só para DI: código legível ex. DI1F27; null caso contrário"),
++    label_seen: z.string().describe("Texto do rótulo exatamente como aparece"),
++    value: z.number().nullable().describe("Último preço/taxa legível; null se ilegível"),
++    change_pct: z.number().nullable().describe("Variação % do dia se visível; null caso contrário"),
++    change_bp: z.number().nullable().describe("Variação em pontos-base (juros) se visível; null caso contrário"),
++    as_of: nullableStr.describe("Data/hora visível no painel; null se ausente"),
++    ocr_confidence: z.number().min(0).max(1),
++    requires_manual_confirmation: z.boolean(),
++  })),
++  overall_ocr_confidence: z.number().min(0).max(1),
++  notes: z.array(z.string()),
++});
++export type MarketExtraction = z.infer<typeof MarketExtractionSchema>;
++
++// ---------------------------------------------------------------------------
++// 7) Brief B3 (narrativa sobre números já calculados pelo backend)
++// ---------------------------------------------------------------------------
++export const B3BriefSchema = z.object({
++  headline: z.string(),
++  regime_narrative: z.string(),
++  win_view: z.string(),
++  dol_view: z.string(),
++  di_curve_cause: z.enum(["INFLATION", "FISCAL_RISK", "BCB_HAWKISH", "BCB_DOVISH", "GLOBAL_YIELDS", "RISK_PREMIUM", "GROWTH", "UNKNOWN"]),
++  di_curve_comment: z.string(),
++  candidate_reasons: z.array(z.object({ instrument: z.enum(["WIN", "DOL", "WDO"]), reason: z.string(), what_to_look_for: z.string(), invalidation: z.string() })),
++  conflicts: z.array(z.string()),
++  warnings: z.array(z.string()),
++});
++export type B3Brief = z.infer<typeof B3BriefSchema>;
++
++export const SCHEMAS = {
++  calendar_extraction: CalendarExtractionSchema,
++  market_extraction: MarketExtractionSchema,
++  b3_brief: B3BriefSchema,
++  event_interpretation: EventInterpretationSchema,
++  session_brief: SessionBriefSchema,
++  technical_analysis: TechnicalAnalysisSchema,
++  trade_review: TradeReviewSchema,
++} as const;
++export type SchemaName = keyof typeof SCHEMAS;
+diff --git a/src/lib/ai/service.ts b/src/lib/ai/service.ts
+index 80a8a61..d3e17a3 100644
+--- a/src/lib/ai/service.ts
++++ b/src/lib/ai/service.ts
+@@ -1,259 +1,259 @@
+-/**
+- * AIAnalysisService — serviço centralizado de IA (somente backend).
+- * - Provedores: openai (padrão), gemini (free tier), mock (testes / sem chave)
+- * - Structured Outputs (JSON Schema estrito) + validação Zod dupla
+- * - Timeout, retry com backoff (429/5xx/rede), rate-limit handling, logging em ai_calls
+- * - A chave NUNCA sai do servidor.
+- */
+-import { z } from "zod";
+-import { SCHEMAS, toJsonSchema, type SchemaName } from "./schemas";
+-import type { PromptDef } from "./prompts";
+-import { getEnv } from "@/lib/env";
+-import { mockStructured } from "./mock";
+-
+-export type AIProvider = "openai" | "gemini" | "mock";
+-
+-export interface AIImage {
+-  base64: string; // sem prefixo data:
+-  mime: "image/png" | "image/jpeg" | "image/webp";
+-  label?: string;
+-}
+-
+-export interface StructuredRequest {
+-  purpose: string; // macro_extract | macro_interpret | session_brief | technical_analysis | trade_review
+-  prompt: PromptDef;
+-  user: string;
+-  images?: AIImage[];
+-  schemaName: SchemaName;
+-  temperature?: number;
+-  maxOutputTokens?: number;
+-  timeoutMs?: number;
+-}
+-
+-export interface StructuredResponse<T> {
+-  data: T;
+-  provider: AIProvider;
+-  model: string;
+-  promptVersion: string;
+-  inputTokens: number | null;
+-  outputTokens: number | null;
+-  latencyMs: number;
+-  retries: number;
+-}
+-
+-export class AIError extends Error {
+-  constructor(message: string, public status: number = 502, public code: string = "AI_ERROR") {
+-    super(message);
+-  }
+-}
+-
+-type Logger = (entry: {
+-  purpose: string; provider: string; model: string; promptVersion: string; schemaName: string; inputType: string;
+-  imagesCount: number; inputTokens: number | null; outputTokens: number | null; latencyMs: number; ok: boolean; error: string | null; retries: number;
+-}) => Promise<void>;
+-
+-let logger: Logger | null = null;
+-/** Injeta o logger de auditoria (ai_calls). Mantido fora deste módulo para testes sem banco. */
+-export function setAICallLogger(fn: Logger | null) { logger = fn; }
+-
+-export function resolveProvider(): { provider: AIProvider; model: string; apiKey: string | null } {
+-  const env = getEnv();
+-  const requested = (env.AI_PROVIDER || "openai").toLowerCase() as AIProvider;
+-  if (requested === "mock") return { provider: "mock", model: "mock-1", apiKey: null };
+-  if (requested === "gemini") {
+-    if (!env.GEMINI_API_KEY) return { provider: "mock", model: "mock-1 (GEMINI_API_KEY ausente)", apiKey: null };
+-    return { provider: "gemini", model: env.GEMINI_MODEL || "gemini-3.8-flash", apiKey: env.GEMINI_API_KEY };
+-  }
+-  if (!env.OPENAI_API_KEY) return { provider: "mock", model: "mock-1 (OPENAI_API_KEY ausente)", apiKey: null };
+-  return { provider: "openai", model: env.OPENAI_MODEL || "gpt-4.1-mini", apiKey: env.OPENAI_API_KEY };
+-}
+-
+-const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+-
+-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+-  const ctrl = new AbortController();
+-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+-  try {
+-    return await fetch(url, { ...init, signal: ctrl.signal });
+-  } finally {
+-    clearTimeout(t);
+-  }
+-}
+-
+-function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+-
+-/** Chamada principal: retorna JSON validado pelo schema Zod. */
+-/** Modelo reserva usado automaticamente quando o principal responde 429/503 repetidamente (free tier do Gemini oscila). */
+-export function resolveFallbackModel(provider: AIProvider, primary: string): string | null {
+-  const env = getEnv();
+-  if (provider === "gemini") { const fb = env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite"; return fb !== primary ? fb : null; }
+-  if (provider === "openai") { const fb = env.OPENAI_FALLBACK_MODEL || "gpt-4.1-mini"; return fb !== primary ? fb : null; }
+-  return null;
+-}
+-
+-export async function generateStructured<N extends SchemaName>(
+-  req: StructuredRequest & { schemaName: N },
+-  modelOverride?: string,
+-): Promise<StructuredResponse<z.infer<(typeof SCHEMAS)[N]>>> {
+-  const zodSchema = SCHEMAS[req.schemaName];
+-  const jsonSchema = toJsonSchema(zodSchema);
+-  const resolved = resolveProvider();
+-  const { provider, apiKey } = resolved;
+-  const model = modelOverride ?? resolved.model;
+-  const started = Date.now();
+-  const timeoutMs = req.timeoutMs ?? 90_000;
+-  const images = req.images ?? [];
+-  let retries = 0;
+-  let lastError: string | null = null;
+-  let inputTokens: number | null = null;
+-  let outputTokens: number | null = null;
+-
+-  const log = async (ok: boolean, err: string | null) => {
+-    if (!logger) return;
+-    try {
+-      await logger({
+-        purpose: req.purpose, provider, model, promptVersion: req.prompt.version, schemaName: req.schemaName,
+-        inputType: images.length ? "image" : "text", imagesCount: images.length, inputTokens, outputTokens,
+-        latencyMs: Date.now() - started, ok, error: err, retries,
+-      });
+-    } catch { /* logging nunca derruba a análise */ }
+-  };
+-
+-  // Até 3 tentativas de rede/5xx + 1 tentativa extra de validação (reenvia com o erro do schema).
+-  let validationHint = "";
+-  for (let attempt = 0; attempt < 4; attempt++) {
+-    try {
+-      let raw: string;
+-      if (provider === "mock") {
+-        raw = JSON.stringify(mockStructured(req.schemaName, req.user));
+-      } else if (provider === "openai") {
+-        const r = await callOpenAI({ apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, schemaName: req.schemaName, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs });
+-        raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
+-      } else {
+-        const r = await callGemini({ apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs });
+-        raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
+-      }
+-
+-      let parsed: unknown;
+-      try { parsed = JSON.parse(raw); } catch { throw new AIError("Resposta da IA não é JSON válido", 502, "AI_INVALID_JSON"); }
+-      const result = zodSchema.safeParse(parsed);
+-      if (!result.success) {
+-        const issues = result.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+-        if (attempt < 3) {
+-          retries++;
+-          validationHint = `\n\n[CORREÇÃO] Sua resposta anterior falhou na validação do schema: ${issues}. Responda novamente respeitando o schema exatamente.`;
+-          continue;
+-        }
+-        throw new AIError(`Resposta da IA fora do schema: ${issues}`, 422, "AI_SCHEMA_INVALID");
+-      }
+-      await log(true, null);
+-      return { data: result.data as z.infer<(typeof SCHEMAS)[N]>, provider, model, promptVersion: req.prompt.version, inputTokens, outputTokens, latencyMs: Date.now() - started, retries };
+-    } catch (e: unknown) {
+-      const err = e as { message?: string; name?: string; status?: number };
+-      lastError = err?.message || String(e);
+-      const retryable = err.name === "AbortError" || (err instanceof AIError && RETRYABLE.has(err.status)) || /fetch failed|network|ECONNRESET/i.test(lastError);
+-      if (retryable && attempt < 3) {
+-        retries++;
+-        await sleep(1500 * Math.pow(2, attempt)); // 1.5s, 3s, 6s
+-        continue;
+-      }
+-      await log(false, lastError);
+-      // Esgotou as tentativas por sobrecarga/limite (429/503): tenta uma vez o modelo reserva.
+-      const fallback = retryable && !modelOverride ? resolveFallbackModel(provider, model) : null;
+-      if (fallback) {
+-        console.warn(`[ai] ${model} indisponível (${lastError.slice(0, 80)}); tentando modelo reserva ${fallback}`);
+-        return generateStructured(req, fallback);
+-      }
+-      if (err instanceof AIError) throw err;
+-      if (err.name === "AbortError") throw new AIError("Tempo limite excedido ao chamar a IA", 504, "AI_TIMEOUT");
+-      throw new AIError(lastError, 502, "AI_ERROR");
+-    }
+-  }
+-  await log(false, lastError);
+-  throw new AIError(lastError || "Falha desconhecida na IA", 502, "AI_ERROR");
+-}
+-
+-// ---------------------------------------------------------------------------
+-// OpenAI — Responses API com text.format json_schema (strict)
+-// ---------------------------------------------------------------------------
+-async function callOpenAI(p: { apiKey: string; model: string; system: string; user: string; images: AIImage[]; jsonSchema: Record<string, unknown>; schemaName: string; temperature: number; maxOutputTokens: number; timeoutMs: number }) {
+-  const content: Record<string, unknown>[] = [{ type: "input_text", text: p.user }];
+-  for (const img of p.images) {
+-    if (img.label) content.push({ type: "input_text", text: `[Imagem: ${img.label}]` });
+-    content.push({ type: "input_image", image_url: `data:${img.mime};base64,${img.base64}`, detail: "high" });
+-  }
+-  const body = {
+-    model: p.model,
+-    instructions: p.system,
+-    input: [{ role: "user", content }],
+-    temperature: p.temperature,
+-    max_output_tokens: p.maxOutputTokens,
+-    text: { format: { type: "json_schema", name: p.schemaName, strict: true, schema: p.jsonSchema } },
+-  };
+-  const res = await fetchWithTimeout("https://api.openai.com/v1/responses", {
+-    method: "POST",
+-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` },
+-    body: JSON.stringify(body),
+-  }, p.timeoutMs);
+-  if (!res.ok) {
+-    const txt = await res.text().catch(() => "");
+-    let msg = `OpenAI HTTP ${res.status}`;
+-    try { msg += `: ${JSON.parse(txt)?.error?.message ?? ""}`; } catch { msg += txt ? `: ${txt.slice(0, 200)}` : ""; }
+-    if (res.status === 429) msg += " (rate limit / sem crédito — aguarde ou verifique billing)";
+-    throw new AIError(msg, res.status);
+-  }
+-  const json = (await res.json()) as { output_text?: string; output?: { type: string; content?: { type: string; text?: string }[] }[]; usage?: { input_tokens?: number; output_tokens?: number }; status?: string; incomplete_details?: { reason?: string } };
+-  let text = json.output_text ?? "";
+-  if (!text && Array.isArray(json.output)) {
+-    for (const item of json.output) {
+-      if (item.type === "message" && item.content) {
+-        for (const c of item.content) if (c.type === "output_text" && c.text) text += c.text;
+-      }
+-    }
+-  }
+-  if (!text) throw new AIError(`OpenAI retornou vazio (status=${json.status}, motivo=${json.incomplete_details?.reason ?? "?"})`, 502);
+-  return { text, inputTokens: json.usage?.input_tokens ?? null, outputTokens: json.usage?.output_tokens ?? null };
+-}
+-
+-// ---------------------------------------------------------------------------
+-// Gemini — generateContent com responseSchema (alternativa gratuita)
+-// ---------------------------------------------------------------------------
+-async function callGemini(p: { apiKey: string; model: string; system: string; user: string; images: AIImage[]; jsonSchema: Record<string, unknown>; temperature: number; maxOutputTokens: number; timeoutMs: number }) {
+-  const parts: Record<string, unknown>[] = [{ text: p.user }];
+-  for (const img of p.images) {
+-    if (img.label) parts.push({ text: `[Imagem: ${img.label}]` });
+-    parts.push({ inline_data: { mime_type: img.mime, data: img.base64 } });
+-  }
+-  const body = {
+-    system_instruction: { parts: [{ text: p.system }] },
+-    contents: [{ role: "user", parts }],
+-    generationConfig: { temperature: p.temperature, maxOutputTokens: p.maxOutputTokens, responseMimeType: "application/json", responseSchema: geminiSchema(p.jsonSchema) },
+-  };
+-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${p.model}:generateContent?key=${encodeURIComponent(p.apiKey)}`;
+-  const res = await fetchWithTimeout(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, p.timeoutMs);
+-  if (!res.ok) {
+-    const txt = await res.text().catch(() => "");
+-    throw new AIError(`Gemini HTTP ${res.status}: ${txt.slice(0, 200)}`, res.status);
+-  }
+-  const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } };
+-  const text = json.candidates?.[0]?.content?.parts?.map((x) => x.text ?? "").join("") ?? "";
+-  if (!text) throw new AIError("Gemini retornou vazio", 502);
+-  return { text, inputTokens: json.usageMetadata?.promptTokenCount ?? null, outputTokens: json.usageMetadata?.candidatesTokenCount ?? null };
+-}
+-
+-/** Gemini não aceita additionalProperties/$schema e trata nullable via "nullable". */
+-function geminiSchema(node: unknown): unknown {
+-  if (Array.isArray(node)) return node.map(geminiSchema);
+-  if (!node || typeof node !== "object") return node;
+-  const n = { ...(node as Record<string, unknown>) };
+-  delete n.additionalProperties; delete n.$schema; delete n.default;
+-  if (Array.isArray(n.anyOf)) {
+-    const nonNull = (n.anyOf as Record<string, unknown>[]).filter((x) => x.type !== "null");
+-    const hasNull = nonNull.length !== (n.anyOf as unknown[]).length;
+-    if (nonNull.length === 1) { const base = geminiSchema(nonNull[0]) as Record<string, unknown>; if (hasNull) base.nullable = true; delete n.anyOf; return { ...n, ...base }; }
+-  }
+-  if (Array.isArray(n.type)) { const types = (n.type as string[]).filter((t) => t !== "null"); n.type = types[0]; n.nullable = true; }
+-  if (n.properties) { const props: Record<string, unknown> = {}; for (const [k, v] of Object.entries(n.properties as Record<string, unknown>)) props[k] = geminiSchema(v); n.properties = props; }
+-  if (n.items) n.items = geminiSchema(n.items);
+-  return n;
+-}
++/**
++ * AIAnalysisService — serviço centralizado de IA (somente backend).
++ * - Provedores: openai (padrão), gemini (free tier), mock (testes / sem chave)
++ * - Structured Outputs (JSON Schema estrito) + validação Zod dupla
++ * - Timeout, retry com backoff (429/5xx/rede), rate-limit handling, logging em ai_calls
++ * - A chave NUNCA sai do servidor.
++ */
++import { z } from "zod";
++import { SCHEMAS, toJsonSchema, type SchemaName } from "./schemas";
++import type { PromptDef } from "./prompts";
++import { getEnv } from "@/lib/env";
++import { mockStructured } from "./mock";
++
++export type AIProvider = "openai" | "gemini" | "mock";
++
++export interface AIImage {
++  base64: string; // sem prefixo data:
++  mime: "image/png" | "image/jpeg" | "image/webp";
++  label?: string;
++}
++
++export interface StructuredRequest {
++  purpose: string; // macro_extract | macro_interpret | session_brief | technical_analysis | trade_review
++  prompt: PromptDef;
++  user: string;
++  images?: AIImage[];
++  schemaName: SchemaName;
++  temperature?: number;
++  maxOutputTokens?: number;
++  timeoutMs?: number;
++}
++
++export interface StructuredResponse<T> {
++  data: T;
++  provider: AIProvider;
++  model: string;
++  promptVersion: string;
++  inputTokens: number | null;
++  outputTokens: number | null;
++  latencyMs: number;
++  retries: number;
++}
++
++export class AIError extends Error {
++  constructor(message: string, public status: number = 502, public code: string = "AI_ERROR") {
++    super(message);
++  }
++}
++
++type Logger = (entry: {
++  purpose: string; provider: string; model: string; promptVersion: string; schemaName: string; inputType: string;
++  imagesCount: number; inputTokens: number | null; outputTokens: number | null; latencyMs: number; ok: boolean; error: string | null; retries: number;
++}) => Promise<void>;
++
++let logger: Logger | null = null;
++/** Injeta o logger de auditoria (ai_calls). Mantido fora deste módulo para testes sem banco. */
++export function setAICallLogger(fn: Logger | null) { logger = fn; }
++
++export function resolveProvider(): { provider: AIProvider; model: string; apiKey: string | null } {
++  const env = getEnv();
++  const requested = (env.AI_PROVIDER || "openai").toLowerCase() as AIProvider;
++  if (requested === "mock") return { provider: "mock", model: "mock-1", apiKey: null };
++  if (requested === "gemini") {
++    if (!env.GEMINI_API_KEY) return { provider: "mock", model: "mock-1 (GEMINI_API_KEY ausente)", apiKey: null };
++    return { provider: "gemini", model: env.GEMINI_MODEL || "gemini-3.8-flash", apiKey: env.GEMINI_API_KEY };
++  }
++  if (!env.OPENAI_API_KEY) return { provider: "mock", model: "mock-1 (OPENAI_API_KEY ausente)", apiKey: null };
++  return { provider: "openai", model: env.OPENAI_MODEL || "gpt-4.1-mini", apiKey: env.OPENAI_API_KEY };
++}
++
++const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
++
++async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
++  const ctrl = new AbortController();
++  const t = setTimeout(() => ctrl.abort(), timeoutMs);
++  try {
++    return await fetch(url, { ...init, signal: ctrl.signal });
++  } finally {
++    clearTimeout(t);
++  }
++}
++
++function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
++
++/** Chamada principal: retorna JSON validado pelo schema Zod. */
++/** Modelo reserva usado automaticamente quando o principal responde 429/503 repetidamente (free tier do Gemini oscila). */
++export function resolveFallbackModel(provider: AIProvider, primary: string): string | null {
++  const env = getEnv();
++  if (provider === "gemini") { const fb = env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite"; return fb !== primary ? fb : null; }
++  if (provider === "openai") { const fb = env.OPENAI_FALLBACK_MODEL || "gpt-4.1-mini"; return fb !== primary ? fb : null; }
++  return null;
++}
++
++export async function generateStructured<N extends SchemaName>(
++  req: StructuredRequest & { schemaName: N },
++  modelOverride?: string,
++): Promise<StructuredResponse<z.infer<(typeof SCHEMAS)[N]>>> {
++  const zodSchema = SCHEMAS[req.schemaName];
++  const jsonSchema = toJsonSchema(zodSchema);
++  const resolved = resolveProvider();
++  const { provider, apiKey } = resolved;
++  const model = modelOverride ?? resolved.model;
++  const started = Date.now();
++  const timeoutMs = req.timeoutMs ?? 90_000;
++  const images = req.images ?? [];
++  let retries = 0;
++  let lastError: string | null = null;
++  let inputTokens: number | null = null;
++  let outputTokens: number | null = null;
++
++  const log = async (ok: boolean, err: string | null) => {
++    if (!logger) return;
++    try {
++      await logger({
++        purpose: req.purpose, provider, model, promptVersion: req.prompt.version, schemaName: req.schemaName,
++        inputType: images.length ? "image" : "text", imagesCount: images.length, inputTokens, outputTokens,
++        latencyMs: Date.now() - started, ok, error: err, retries,
++      });
++    } catch { /* logging nunca derruba a análise */ }
++  };
++
++  // Até 3 tentativas de rede/5xx + 1 tentativa extra de validação (reenvia com o erro do schema).
++  let validationHint = "";
++  for (let attempt = 0; attempt < 4; attempt++) {
++    try {
++      let raw: string;
++      if (provider === "mock") {
++        raw = JSON.stringify(mockStructured(req.schemaName, req.user));
++      } else if (provider === "openai") {
++        const r = await callOpenAI({ apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, schemaName: req.schemaName, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs });
++        raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
++      } else {
++        const r = await callGemini({ apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs });
++        raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
++      }
++
++      let parsed: unknown;
++      try { parsed = JSON.parse(raw); } catch { throw new AIError("Resposta da IA não é JSON válido", 502, "AI_INVALID_JSON"); }
++      const result = zodSchema.safeParse(parsed);
++      if (!result.success) {
++        const issues = result.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
++        if (attempt < 3) {
++          retries++;
++          validationHint = `\n\n[CORREÇÃO] Sua resposta anterior falhou na validação do schema: ${issues}. Responda novamente respeitando o schema exatamente.`;
++          continue;
++        }
++        throw new AIError(`Resposta da IA fora do schema: ${issues}`, 422, "AI_SCHEMA_INVALID");
++      }
++      await log(true, null);
++      return { data: result.data as z.infer<(typeof SCHEMAS)[N]>, provider, model, promptVersion: req.prompt.version, inputTokens, outputTokens, latencyMs: Date.now() - started, retries };
++    } catch (e: unknown) {
++      const err = e as { message?: string; name?: string; status?: number };
++      lastError = err?.message || String(e);
++      const retryable = err.name === "AbortError" || (err instanceof AIError && RETRYABLE.has(err.status)) || /fetch failed|network|ECONNRESET/i.test(lastError);
++      if (retryable && attempt < 3) {
++        retries++;
++        await sleep(800 * Math.pow(2, attempt)); // 0.8s, 1.6s, 3.2s
++        continue;
++      }
++      await log(false, lastError);
++      // Esgotou as tentativas por sobrecarga/limite (429/503): tenta uma vez o modelo reserva.
++      const fallback = retryable && !modelOverride ? resolveFallbackModel(provider, model) : null;
++      if (fallback) {
++        console.warn(`[ai] ${model} indisponível (${lastError.slice(0, 80)}); tentando modelo reserva ${fallback}`);
++        return generateStructured(req, fallback);
++      }
++      if (err instanceof AIError) throw err;
++      if (err.name === "AbortError") throw new AIError("Tempo limite excedido ao chamar a IA", 504, "AI_TIMEOUT");
++      throw new AIError(lastError, 502, "AI_ERROR");
++    }
++  }
++  await log(false, lastError);
++  throw new AIError(lastError || "Falha desconhecida na IA", 502, "AI_ERROR");
++}
++
++// ---------------------------------------------------------------------------
++// OpenAI — Responses API com text.format json_schema (strict)
++// ---------------------------------------------------------------------------
++async function callOpenAI(p: { apiKey: string; model: string; system: string; user: string; images: AIImage[]; jsonSchema: Record<string, unknown>; schemaName: string; temperature: number; maxOutputTokens: number; timeoutMs: number }) {
++  const content: Record<string, unknown>[] = [{ type: "input_text", text: p.user }];
++  for (const img of p.images) {
++    if (img.label) content.push({ type: "input_text", text: `[Imagem: ${img.label}]` });
++    content.push({ type: "input_image", image_url: `data:${img.mime};base64,${img.base64}`, detail: "high" });
++  }
++  const body = {
++    model: p.model,
++    instructions: p.system,
++    input: [{ role: "user", content }],
++    temperature: p.temperature,
++    max_output_tokens: p.maxOutputTokens,
++    text: { format: { type: "json_schema", name: p.schemaName, strict: true, schema: p.jsonSchema } },
++  };
++  const res = await fetchWithTimeout("https://api.openai.com/v1/responses", {
++    method: "POST",
++    headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` },
++    body: JSON.stringify(body),
++  }, p.timeoutMs);
++  if (!res.ok) {
++    const txt = await res.text().catch(() => "");
++    let msg = `OpenAI HTTP ${res.status}`;
++    try { msg += `: ${JSON.parse(txt)?.error?.message ?? ""}`; } catch { msg += txt ? `: ${txt.slice(0, 200)}` : ""; }
++    if (res.status === 429) msg += " (rate limit / sem crédito — aguarde ou verifique billing)";
++    throw new AIError(msg, res.status);
++  }
++  const json = (await res.json()) as { output_text?: string; output?: { type: string; content?: { type: string; text?: string }[] }[]; usage?: { input_tokens?: number; output_tokens?: number }; status?: string; incomplete_details?: { reason?: string } };
++  let text = json.output_text ?? "";
++  if (!text && Array.isArray(json.output)) {
++    for (const item of json.output) {
++      if (item.type === "message" && item.content) {
++        for (const c of item.content) if (c.type === "output_text" && c.text) text += c.text;
++      }
++    }
++  }
++  if (!text) throw new AIError(`OpenAI retornou vazio (status=${json.status}, motivo=${json.incomplete_details?.reason ?? "?"})`, 502);
++  return { text, inputTokens: json.usage?.input_tokens ?? null, outputTokens: json.usage?.output_tokens ?? null };
++}
++
++// ---------------------------------------------------------------------------
++// Gemini — generateContent com responseSchema (alternativa gratuita)
++// ---------------------------------------------------------------------------
++async function callGemini(p: { apiKey: string; model: string; system: string; user: string; images: AIImage[]; jsonSchema: Record<string, unknown>; temperature: number; maxOutputTokens: number; timeoutMs: number }) {
++  const parts: Record<string, unknown>[] = [{ text: p.user }];
++  for (const img of p.images) {
++    if (img.label) parts.push({ text: `[Imagem: ${img.label}]` });
++    parts.push({ inline_data: { mime_type: img.mime, data: img.base64 } });
++  }
++  const body = {
++    system_instruction: { parts: [{ text: p.system }] },
++    contents: [{ role: "user", parts }],
++    generationConfig: { temperature: p.temperature, maxOutputTokens: p.maxOutputTokens, responseMimeType: "application/json", responseSchema: geminiSchema(p.jsonSchema) },
++  };
++  const url = `https://generativelanguage.googleapis.com/v1beta/models/${p.model}:generateContent?key=${encodeURIComponent(p.apiKey)}`;
++  const res = await fetchWithTimeout(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, p.timeoutMs);
++  if (!res.ok) {
++    const txt = await res.text().catch(() => "");
++    throw new AIError(`Gemini HTTP ${res.status}: ${txt.slice(0, 200)}`, res.status);
++  }
++  const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } };
++  const text = json.candidates?.[0]?.content?.parts?.map((x) => x.text ?? "").join("") ?? "";
++  if (!text) throw new AIError("Gemini retornou vazio", 502);
++  return { text, inputTokens: json.usageMetadata?.promptTokenCount ?? null, outputTokens: json.usageMetadata?.candidatesTokenCount ?? null };
++}
++
++/** Gemini não aceita additionalProperties/$schema e trata nullable via "nullable". */
++function geminiSchema(node: unknown): unknown {
++  if (Array.isArray(node)) return node.map(geminiSchema);
++  if (!node || typeof node !== "object") return node;
++  const n = { ...(node as Record<string, unknown>) };
++  delete n.additionalProperties; delete n.$schema; delete n.default;
++  if (Array.isArray(n.anyOf)) {
++    const nonNull = (n.anyOf as Record<string, unknown>[]).filter((x) => x.type !== "null");
++    const hasNull = nonNull.length !== (n.anyOf as unknown[]).length;
++    if (nonNull.length === 1) { const base = geminiSchema(nonNull[0]) as Record<string, unknown>; if (hasNull) base.nullable = true; delete n.anyOf; return { ...n, ...base }; }
++  }
++  if (Array.isArray(n.type)) { const types = (n.type as string[]).filter((t) => t !== "null"); n.type = types[0]; n.nullable = true; }
++  if (n.properties) { const props: Record<string, unknown> = {}; for (const [k, v] of Object.entries(n.properties as Record<string, unknown>)) props[k] = geminiSchema(v); n.properties = props; }
++  if (n.items) n.items = geminiSchema(n.items);
++  return n;
++}
+diff --git a/src/lib/macro/pipeline.ts b/src/lib/macro/pipeline.ts
+index cf66078..a00b4f1 100644
+--- a/src/lib/macro/pipeline.ts
++++ b/src/lib/macro/pipeline.ts
+@@ -1,204 +1,225 @@
+-/**
+- * Pipeline macro (orquestração com banco):
+- *   RAW (economic_events) → interpretação IA (macro_interpretations) → scores determinísticos (currency_scores)
+- *   → candidatos (trade_candidates) → event risk → brief → macro_analyses (auditoria completa)
+- */
+-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+-import { getDb } from "@/db";
+-import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
++/**
++ * Pipeline macro (orquestração com banco):
++ *   RAW (economic_events) → interpretação IA (macro_interpretations) → scores determinísticos (currency_scores)
++ *   → candidatos (trade_candidates) → event risk → brief → macro_analyses (auditoria completa)
++ */
++import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
++import { getDb } from "@/db";
++import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
+ import { ALL_CURRENCIES, G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
+-import { generateStructured } from "@/lib/ai/service";
+-import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
+-import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
+-import { baseContribution, computeCurrencyScores, normalizeEventKey, parseNumeric, type ScoredEvent } from "./scoring";
+-import { buildTradeCandidates } from "./pairs";
+-import { eventRiskFor, toPendingView } from "./event-risk";
+-
+-export async function loadScoringConfig(): Promise<ScoringConfig> {
+-  try {
+-    const rows = await getDb().select().from(scoringConfig).where(eq(scoringConfig.isActive, true)).limit(1);
+-    if (rows[0]) return mergeScoringConfig({ ...(rows[0].configJson as Partial<ScoringConfig>), version: rows[0].version });
+-  } catch { /* tabela pode não existir ainda */ }
+-  return DEFAULT_SCORING_CONFIG;
+-}
+-
+-/** Converte date + time (no fuso informado, em minutos de offset ex. -180) para Date UTC. */
+-export function toScheduledAt(date: string | null, time: string | null, tzOffsetMinutes = -180, fallback: Date = new Date()): Date {
+-  const d = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : fallback.toISOString().slice(0, 10);
+-  const m = time ? /^(\d{1,2}):(\d{2})/.exec(time) : null;
+-  const hh = m ? Number(m[1]) : 0, mm = m ? Number(m[2]) : 0;
+-  const [y, mo, da] = d.split("-").map(Number);
+-  // hora local (offset) → UTC
+-  return new Date(Date.UTC(y, mo - 1, da, hh, mm) - tzOffsetMinutes * 60_000);
+-}
+-
+-export interface SaveRawOptions { tzOffsetMinutes?: number; sourceRef?: string | null; userEdits?: Record<string, unknown> | null }
+-
+-/** Upsert dos eventos RAW. Marca supersede quando chega release novo do mesmo event_key. */
+-export async function saveRawEvents(events: EconomicEventInput[], opts: SaveRawOptions = {}): Promise<number[]> {
+-  const db = getDb();
+-  const ids: number[] = [];
+-  for (const e of events) {
+-    if (!(ALL_CURRENCIES as readonly string[]).includes(e.currency) || !e.event?.trim()) continue;
+-    const scheduledAt = toScheduledAt(e.date, e.time, opts.tzOffsetMinutes ?? -180);
+-    const eventKey = normalizeEventKey(e.currency, e.event);
+-    const actual = e.actual && e.actual.trim() ? e.actual.trim() : null;
+-    const status = actual ? "released" : "pending";
+-    const values = {
+-      eventKey, currency: e.currency, event: e.event.trim(), impact: e.impact ?? "unknown", scheduledAt,
+-      actual, forecast: e.forecast?.trim() || null, previous: e.previous?.trim() || null,
+-      actualNum: parseNumeric(actual), forecastNum: parseNumeric(e.forecast), previousNum: parseNumeric(e.previous),
+-      status, source: e.source, sourceRef: opts.sourceRef ?? null, ocrConfidence: e.ocr_confidence ?? null,
+-      requiresManualConfirmation: !!e.requires_manual_confirmation, userEdited: !!e.user_edited,
+-      userEdits: e.user_edited ? (opts.userEdits ?? null) : null, updatedAt: new Date(),
+-    };
+-    const existing = await db.select({ id: economicEvents.id, actual: economicEvents.actual }).from(economicEvents)
+-      .where(and(eq(economicEvents.eventKey, eventKey), eq(economicEvents.scheduledAt, scheduledAt))).limit(1);
+-    const [row] = await db.insert(economicEvents).values(values)
+-      .onConflictDoUpdate({
+-        target: [economicEvents.eventKey, economicEvents.scheduledAt],
+-        set: {
+-          actual: values.actual, forecast: values.forecast, previous: values.previous, actualNum: values.actualNum, forecastNum: values.forecastNum, previousNum: values.previousNum,
+-          status: values.status, impact: values.impact, ocrConfidence: values.ocrConfidence, requiresManualConfirmation: values.requiresManualConfirmation,
+-          userEdited: values.userEdited, userEdits: values.userEdits, updatedAt: new Date(),
+-        },
+-      }).returning({ id: economicEvents.id });
+-    ids.push(row.id);
+-    // Se o Actual mudou (correção manual ou revisão), a interpretação antiga deixa de valer.
+-    if (existing[0] && existing[0].actual !== actual) {
+-      await db.update(macroInterpretations).set({ isCurrent: false }).where(and(eq(macroInterpretations.eventId, row.id), eq(macroInterpretations.isCurrent, true)));
+-    }
+-    if (status === "released") {
+-      // supersede releases anteriores do mesmo indicador (dado novo substitui o antigo)
+-      await db.update(economicEvents)
+-        .set({ supersededBy: row.id, supersededAt: new Date() })
+-        .where(and(eq(economicEvents.eventKey, eventKey), eq(economicEvents.status, "released"), isNull(economicEvents.supersededBy), sql`${economicEvents.scheduledAt} < ${scheduledAt}`, sql`${economicEvents.id} <> ${row.id}`));
+-    }
+-  }
+-  return ids;
+-}
+-
+-interface InterpretOutcome { interpreted: number; model: string | null; promptVersion: string | null; warnings: string[] }
+-
+-export interface InterpretOptions {
+-  /** Moedas a interpretar (padrão: G8). O módulo B3 passa BRL/USD/CNY com prompt próprio. */
+-  currencies?: readonly AnyCurrency[];
+-  /** Prompt versionado a usar (padrão: MACRO_SYSTEM G8). */
+-  prompt?: PromptDef;
+-  /** Contexto extra enviado à IA (ex.: curva DI, Selic, fiscal) — nunca números inventados. */
+-  extraContext?: Record<string, unknown>;
+-}
+-
+-/** Interpreta (IA) todos os eventos released sem interpretação corrente. Em lotes de 20. */
+-export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: number | null, onlyIds?: number[], options: InterpretOptions = {}): Promise<InterpretOutcome> {
+-  const db = getDb();
+-  const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
+-  const currencies = options.currencies ?? G8;
+-  const prompt = options.prompt ?? MACRO_SYSTEM;
+-  const conds = [eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since), inArray(economicEvents.currency, [...currencies]), sql`NOT EXISTS (SELECT 1 FROM macro_interpretations mi WHERE mi.event_id = ${economicEvents.id} AND mi.is_current = TRUE)`];
+-  if (onlyIds?.length) conds.push(inArray(economicEvents.id, onlyIds));
+-  const todo = await db.select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
+-  if (todo.length === 0) return { interpreted: 0, model: null, promptVersion: null, warnings: [] };
+-
+-  // contexto por moeda: últimos drivers + score atual (para "já precificado" e mudança de narrativa)
+-  const latest = await latestScores();
+-  const context: Record<string, unknown> = {};
+-  for (const c of currencies) {
+-    const s = latest.find((x) => x.currency === c);
+-    context[c] = s ? { score: s.score, classification: s.classification, drivers: s.drivers.slice(0, 4).map((d) => `${d.event} (${d.classification})`) } : { score: 0, classification: "NEUTRAL", drivers: [] };
+-  }
+-
+-  const warnings: string[] = [];
+-  let interpreted = 0; let model: string | null = null; let promptVersion: string | null = null;
+-  for (let i = 0; i < todo.length; i += 20) {
+-    const batch = todo.slice(i, i + 20);
+-    const payload = batch.map((e) => ({ id: e.id, currency: e.currency, event: e.event, impact: e.impact, scheduled_at: e.scheduledAt.toISOString(), actual: e.actual, forecast: e.forecast, previous: e.previous }));
+-    const res = await generateStructured({
+-      purpose: prompt === MACRO_SYSTEM ? "macro_interpret" : "b3_macro_interpret", prompt, schemaName: "event_interpretation", temperature: 0.2,
+-      user: JSON.stringify({ events: payload, context_by_currency: context, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
+-    });
+-    model = res.model; promptVersion = res.promptVersion;
+-    const byId = new Map(batch.map((e) => [e.id, e]));
+-    for (const it of res.data.interpretations) {
+-      const ev = byId.get(it.event_id);
+-      if (!ev) { warnings.push(`IA retornou event_id desconhecido ${it.event_id}`); continue; }
+-      const bc = baseContribution({ category: it.category, importance: it.importance, classification: it.classification, confidence: it.confidence, impact: ev.impact as ScoredEvent["impact"] }, cfg);
+-      await db.insert(macroInterpretations).values({
+-        eventId: ev.id, analysisId, category: it.category, subcategory: it.subcategory, importance: it.importance, classification: it.classification,
+-        directionValue: bc.direction_value, surpriseVsForecast: it.surprise_vs_forecast, changeVsPrevious: it.change_vs_previous,
+-        growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, fiscalImplication: it.fiscal_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
+-        pricedIn: it.priced_in, currencyImplication: it.currency_implication, confidence: it.confidence, reasoningSummary: it.reasoning_summary,
+-        weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
+-        scoringVersion: cfg.version, promptVersion: res.promptVersion, model: res.model, isCurrent: true,
+-      });
+-      interpreted++;
+-    }
+-    const missing = batch.filter((e) => !res.data.interpretations.some((x) => x.event_id === e.id));
+-    if (missing.length) warnings.push(`${missing.length} evento(s) sem interpretação neste lote: ${missing.map((m) => m.event).join(", ")}`);
+-  }
+-  return { interpreted, model, promptVersion, warnings };
+-}
+-
+-/** Último snapshot de score por moeda (qualquer sessão). */
+-export async function latestScores(): Promise<CurrencyScoreView[]> {
+-  const rows = await getDb().execute(sql`SELECT DISTINCT ON (currency) * FROM currency_scores ORDER BY currency, computed_at DESC`);
+-  return (rows.rows as Record<string, unknown>[]).map(rowToScoreView).sort((a, b) => a.rank - b.rank);
+-}
+-
+-function rowToScoreView(r: Record<string, unknown>): CurrencyScoreView {
+-  return {
+-    currency: r.currency as Currency, score: Number(r.score), score_raw: Number(r.score_raw), previous_score: r.previous_score === null ? null : Number(r.previous_score),
+-    score_delta: r.score_delta === null ? null : Number(r.score_delta), momentum: (r.momentum as CurrencyScoreView["momentum"]) ?? null,
+-    classification: r.classification as CurrencyScoreView["classification"], bias: r.bias as CurrencyScoreView["bias"], confidence: r.confidence as Confidence,
+-    rank: Number(r.rank), live_events: Number(r.live_events ?? 0), drivers: (r.drivers as CurrencyScoreView["drivers"]) ?? [],
++import { generateStructured } from "@/lib/ai/service";
++import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
++import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
++import { baseContribution, computeCurrencyScores, normalizeEventKey, parseNumeric, type ScoredEvent } from "./scoring";
++import { buildTradeCandidates } from "./pairs";
++import { eventRiskFor, toPendingView } from "./event-risk";
++
++export async function loadScoringConfig(): Promise<ScoringConfig> {
++  try {
++    const rows = await getDb().select().from(scoringConfig).where(eq(scoringConfig.isActive, true)).limit(1);
++    if (rows[0]) return mergeScoringConfig({ ...(rows[0].configJson as Partial<ScoringConfig>), version: rows[0].version });
++  } catch { /* tabela pode não existir ainda */ }
++  return DEFAULT_SCORING_CONFIG;
++}
++
++/** Converte date + time (no fuso informado, em minutos de offset ex. -180) para Date UTC. */
++export function toScheduledAt(date: string | null, time: string | null, tzOffsetMinutes = -180, fallback: Date = new Date()): Date {
++  const d = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : fallback.toISOString().slice(0, 10);
++  const m = time ? /^(\d{1,2}):(\d{2})/.exec(time) : null;
++  const hh = m ? Number(m[1]) : 0, mm = m ? Number(m[2]) : 0;
++  const [y, mo, da] = d.split("-").map(Number);
++  // hora local (offset) → UTC
++  return new Date(Date.UTC(y, mo - 1, da, hh, mm) - tzOffsetMinutes * 60_000);
++}
++
++export interface SaveRawOptions { tzOffsetMinutes?: number; sourceRef?: string | null; userEdits?: Record<string, unknown> | null }
++
++/** Upsert dos eventos RAW. Marca supersede quando chega release novo do mesmo event_key. */
++export async function saveRawEvents(events: EconomicEventInput[], opts: SaveRawOptions = {}): Promise<number[]> {
++  const db = getDb();
++  const ids: number[] = [];
++  for (const e of events) {
++    if (!(ALL_CURRENCIES as readonly string[]).includes(e.currency) || !e.event?.trim()) continue;
++    const scheduledAt = toScheduledAt(e.date, e.time, opts.tzOffsetMinutes ?? -180);
++    const eventKey = normalizeEventKey(e.currency, e.event);
++    const actual = e.actual && e.actual.trim() ? e.actual.trim() : null;
++    const status = actual ? "released" : "pending";
++    const values = {
++      eventKey, currency: e.currency, event: e.event.trim(), impact: e.impact ?? "unknown", scheduledAt,
++      actual, forecast: e.forecast?.trim() || null, previous: e.previous?.trim() || null,
++      actualNum: parseNumeric(actual), forecastNum: parseNumeric(e.forecast), previousNum: parseNumeric(e.previous),
++      status, source: e.source, sourceRef: opts.sourceRef ?? null, ocrConfidence: e.ocr_confidence ?? null,
++      requiresManualConfirmation: !!e.requires_manual_confirmation, userEdited: !!e.user_edited,
++      userEdits: e.user_edited ? (opts.userEdits ?? null) : null, updatedAt: new Date(),
++    };
++    const existing = await db.select({ id: economicEvents.id, actual: economicEvents.actual }).from(economicEvents)
++      .where(and(eq(economicEvents.eventKey, eventKey), eq(economicEvents.scheduledAt, scheduledAt))).limit(1);
++    const [row] = await db.insert(economicEvents).values(values)
++      .onConflictDoUpdate({
++        target: [economicEvents.eventKey, economicEvents.scheduledAt],
++        set: {
++          actual: values.actual, forecast: values.forecast, previous: values.previous, actualNum: values.actualNum, forecastNum: values.forecastNum, previousNum: values.previousNum,
++          status: values.status, impact: values.impact, ocrConfidence: values.ocrConfidence, requiresManualConfirmation: values.requiresManualConfirmation,
++          userEdited: values.userEdited, userEdits: values.userEdits, updatedAt: new Date(),
++        },
++      }).returning({ id: economicEvents.id });
++    ids.push(row.id);
++    // Se o Actual mudou (correção manual ou revisão), a interpretação antiga deixa de valer.
++    if (existing[0] && existing[0].actual !== actual) {
++      await db.update(macroInterpretations).set({ isCurrent: false }).where(and(eq(macroInterpretations.eventId, row.id), eq(macroInterpretations.isCurrent, true)));
++    }
++    if (status === "released") {
++      // supersede releases anteriores do mesmo indicador (dado novo substitui o antigo)
++      await db.update(economicEvents)
++        .set({ supersededBy: row.id, supersededAt: new Date() })
++        .where(and(eq(economicEvents.eventKey, eventKey), eq(economicEvents.status, "released"), isNull(economicEvents.supersededBy), sql`${economicEvents.scheduledAt} < ${scheduledAt}`, sql`${economicEvents.id} <> ${row.id}`));
++    }
++  }
++  return ids;
++}
++
++interface InterpretOutcome { interpreted: number; model: string | null; promptVersion: string | null; warnings: string[] }
++
++export interface InterpretOptions {
++  /** Moedas a interpretar (padrão: G8). O módulo B3 passa BRL/USD/CNY com prompt próprio. */
++  currencies?: readonly AnyCurrency[];
++  /** Prompt versionado a usar (padrão: MACRO_SYSTEM G8). */
++  prompt?: PromptDef;
++  /** Contexto extra enviado à IA (ex.: curva DI, Selic, fiscal) — nunca números inventados. */
++  extraContext?: Record<string, unknown>;
++}
++
++/** Interpreta (IA) todos os eventos released sem interpretação corrente. Em lotes de 20. */
++export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: number | null, onlyIds?: number[], options: InterpretOptions = {}): Promise<InterpretOutcome> {
++  const db = getDb();
++  const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
++  const currencies = options.currencies ?? G8;
++  const prompt = options.prompt ?? MACRO_SYSTEM;
++  const conds = [eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since), inArray(economicEvents.currency, [...currencies]), sql`NOT EXISTS (SELECT 1 FROM macro_interpretations mi WHERE mi.event_id = ${economicEvents.id} AND mi.is_current = TRUE)`];
++  if (onlyIds?.length) conds.push(inArray(economicEvents.id, onlyIds));
++  const todo = await db.select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
++  if (todo.length === 0) return { interpreted: 0, model: null, promptVersion: null, warnings: [] };
++
++  // contexto por moeda: últimos drivers + score atual (para "já precificado" e mudança de narrativa)
++  const latest = await latestScores();
++  const context: Record<string, unknown> = {};
++  for (const c of currencies) {
++    const s = latest.find((x) => x.currency === c);
++    context[c] = s ? { score: s.score, classification: s.classification, drivers: s.drivers.slice(0, 4).map((d) => `${d.event} (${d.classification})`) } : { score: 0, classification: "NEUTRAL", drivers: [] };
++  }
++
++  const warnings: string[] = [];
++  let interpreted = 0; let model: string | null = null; let promptVersion: string | null = null;
++
++  // Lotes MENORES em PARALELO: cada chamada gera menos tokens (responde mais rápido)
++  // e várias correm ao mesmo tempo — o tempo total vira ~o da chamada mais lenta, não a soma.
++  const BATCH_SIZE = 8;
++  const MAX_PARALLEL = 3;
++  const batches: (typeof todo)[] = [];
++  for (let i = 0; i < todo.length; i += BATCH_SIZE) batches.push(todo.slice(i, i + BATCH_SIZE));
++
++  const runBatch = async (batch: typeof todo) => {
++    const payload = batch.map((e) => ({ id: e.id, currency: e.currency, event: e.event, impact: e.impact, scheduled_at: e.scheduledAt.toISOString(), actual: e.actual, forecast: e.forecast, previous: e.previous }));
++    const res = await generateStructured({
++      purpose: prompt === MACRO_SYSTEM ? "macro_interpret" : "b3_macro_interpret", prompt, schemaName: "event_interpretation", temperature: 0.2,
++      timeoutMs: 60_000,
++      user: JSON.stringify({ events: payload, context_by_currency: context, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
++    });
++    model = res.model; promptVersion = res.promptVersion;
++    const byId = new Map(batch.map((e) => [e.id, e]));
++    // Um ÚNICO insert com todas as linhas do lote (antes: 1 round-trip por evento).
++    const rows: (typeof macroInterpretations.$inferInsert)[] = [];
++    for (const it of res.data.interpretations) {
++      const ev = byId.get(it.event_id);
++      if (!ev) { warnings.push(`IA retornou event_id desconhecido ${it.event_id}`); continue; }
++      const bc = baseContribution({ category: it.category, importance: it.importance, classification: it.classification, confidence: it.confidence, impact: ev.impact as ScoredEvent["impact"] }, cfg);
++      rows.push({
++        eventId: ev.id, analysisId, category: it.category, subcategory: it.subcategory, importance: it.importance, classification: it.classification,
++        directionValue: bc.direction_value, surpriseVsForecast: it.surprise_vs_forecast, changeVsPrevious: it.change_vs_previous,
++        growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, fiscalImplication: it.fiscal_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
++        pricedIn: it.priced_in, currencyImplication: it.currency_implication, confidence: it.confidence, reasoningSummary: it.reasoning_summary,
++        weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
++        scoringVersion: cfg.version, promptVersion: res.promptVersion, model: res.model, isCurrent: true,
++      });
++    }
++    if (rows.length) { await db.insert(macroInterpretations).values(rows); interpreted += rows.length; }
++    const missing = batch.filter((e) => !res.data.interpretations.some((x) => x.event_id === e.id));
++    if (missing.length) warnings.push(`${missing.length} evento(s) sem interpretação neste lote: ${missing.map((m) => m.event).join(", ")}`);
++  };
++
++  for (let i = 0; i < batches.length; i += MAX_PARALLEL) {
++    const group = batches.slice(i, i + MAX_PARALLEL);
++    const results = await Promise.allSettled(group.map(runBatch));
++    const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
++    // Todos falharam ⇒ propaga (o chamador avisa e o RAW fica salvo). Falha parcial vira aviso.
++    if (failed.length === group.length) throw failed[0].reason;
++    for (const f of failed) warnings.push(`Um lote de eventos não pôde ser interpretado: ${String(f.reason).slice(0, 120)}`);
++  }
++
++
++  return { interpreted, model, promptVersion, warnings };
++}
++
++/** Último snapshot de score por moeda (qualquer sessão). */
++export async function latestScores(): Promise<CurrencyScoreView[]> {
++  const rows = await getDb().execute(sql`SELECT DISTINCT ON (currency) * FROM currency_scores ORDER BY currency, computed_at DESC`);
++  return (rows.rows as Record<string, unknown>[]).map(rowToScoreView).sort((a, b) => a.rank - b.rank);
++}
++
++function rowToScoreView(r: Record<string, unknown>): CurrencyScoreView {
++  return {
++    currency: r.currency as Currency, score: Number(r.score), score_raw: Number(r.score_raw), previous_score: r.previous_score === null ? null : Number(r.previous_score),
++    score_delta: r.score_delta === null ? null : Number(r.score_delta), momentum: (r.momentum as CurrencyScoreView["momentum"]) ?? null,
++    classification: r.classification as CurrencyScoreView["classification"], bias: r.bias as CurrencyScoreView["bias"], confidence: r.confidence as Confidence,
++    rank: Number(r.rank), live_events: Number(r.live_events ?? 0), drivers: (r.drivers as CurrencyScoreView["drivers"]) ?? [],
+     // Campos derivados para snapshots gravados antes da v2 (mantém a UI numa única escala).
+     score_display: Number((Number(r.score) * DEFAULT_SCORING_CONFIG.display_scale).toFixed(2)),
+     no_data: Number(r.live_events ?? 0) === 0,
+-  };
+-}
+-
+-export async function loadPendingEvents(now = new Date(), horizonHours = 72): Promise<PendingEventView[]> {
+-  const to = new Date(now.getTime() + horizonHours * 3_600_000);
+-  const from = new Date(now.getTime() - 30 * 60_000); // tolerância de 30 min p/ eventos "agora"
+-  const rows = await getDb().select().from(economicEvents)
+-    .where(and(eq(economicEvents.status, "pending"), gte(economicEvents.scheduledAt, from), sql`${economicEvents.scheduledAt} <= ${to}`))
+-    .orderBy(economicEvents.scheduledAt);
+-  return rows.map((r) => toPendingView(r, now));
+-}
+-
+-/** Eventos released + interpretação corrente → ScoredEvent[] (todas as moedas; quem consome filtra). */
+-export async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
+-  const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
+-  const rows = await getDb().select({
+-    id: economicEvents.id, currency: economicEvents.currency, event: economicEvents.event, impact: economicEvents.impact, scheduledAt: economicEvents.scheduledAt,
+-    supersededBy: economicEvents.supersededBy, category: macroInterpretations.category, importance: macroInterpretations.importance,
+-    classification: macroInterpretations.classification, confidence: macroInterpretations.confidence,
+-  }).from(economicEvents)
+-    .innerJoin(macroInterpretations, and(eq(macroInterpretations.eventId, economicEvents.id), eq(macroInterpretations.isCurrent, true)))
+-    .where(and(eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since)));
+-  return rows.map((r) => ({
+-    event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
+-    superseded: r.supersededBy !== null, category: r.category as Category, importance: r.importance as Importance,
+-    classification: r.classification as Classification, confidence: r.confidence as Confidence,
+-  }));
+-}
+-
+-export interface RecomputeOptions { session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean }
+-
+-/** Recalcula scores/candidatos/event risk e persiste snapshot. */
+-export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<MacroAnalysisResult, "analysis_id" | "meta"> & { meta: { scoring_version: string } }> {
+-  const cfg = opts.cfg ?? (await loadScoringConfig());
+-  const now = opts.now ?? new Date();
+-  const db = getDb();
+-  const [events, prev, pending] = await Promise.all([loadScoredEvents(cfg), latestScores(), loadPendingEvents(now)]);
+-  const previousScores = Object.fromEntries(prev.map((p) => [p.currency, p.score])) as Partial<Record<Currency, number>>;
+-  const scores = computeCurrencyScores({ events, now, previousScores, cfg });
+-  const candidates = buildTradeCandidates({ scores, pending, cfg, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
+-  const eventRisk = G8.map((c) => {
+-    const s = scores.find((x) => x.currency === c)!;
+-    const r = eventRiskFor([c], pending, { horizonHours: 12 });
+-    return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
+-  });
++  };
++}
++
++export async function loadPendingEvents(now = new Date(), horizonHours = 72): Promise<PendingEventView[]> {
++  const to = new Date(now.getTime() + horizonHours * 3_600_000);
++  const from = new Date(now.getTime() - 30 * 60_000); // tolerância de 30 min p/ eventos "agora"
++  const rows = await getDb().select().from(economicEvents)
++    .where(and(eq(economicEvents.status, "pending"), gte(economicEvents.scheduledAt, from), sql`${economicEvents.scheduledAt} <= ${to}`))
++    .orderBy(economicEvents.scheduledAt);
++  return rows.map((r) => toPendingView(r, now));
++}
++
++/** Eventos released + interpretação corrente → ScoredEvent[] (todas as moedas; quem consome filtra). */
++export async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
++  const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
++  const rows = await getDb().select({
++    id: economicEvents.id, currency: economicEvents.currency, event: economicEvents.event, impact: economicEvents.impact, scheduledAt: economicEvents.scheduledAt,
++    supersededBy: economicEvents.supersededBy, category: macroInterpretations.category, importance: macroInterpretations.importance,
++    classification: macroInterpretations.classification, confidence: macroInterpretations.confidence,
++  }).from(economicEvents)
++    .innerJoin(macroInterpretations, and(eq(macroInterpretations.eventId, economicEvents.id), eq(macroInterpretations.isCurrent, true)))
++    .where(and(eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since)));
++  return rows.map((r) => ({
++    event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
++    superseded: r.supersededBy !== null, category: r.category as Category, importance: r.importance as Importance,
++    classification: r.classification as Classification, confidence: r.confidence as Confidence,
++  }));
++}
++
++export interface RecomputeOptions { session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean }
++
++/** Recalcula scores/candidatos/event risk e persiste snapshot. */
++export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<MacroAnalysisResult, "analysis_id" | "meta"> & { meta: { scoring_version: string } }> {
++  const cfg = opts.cfg ?? (await loadScoringConfig());
++  const now = opts.now ?? new Date();
++  const db = getDb();
++  const [events, prev, pending] = await Promise.all([loadScoredEvents(cfg), latestScores(), loadPendingEvents(now)]);
++  const previousScores = Object.fromEntries(prev.map((p) => [p.currency, p.score])) as Partial<Record<Currency, number>>;
++  const scores = computeCurrencyScores({ events, now, previousScores, cfg });
++  const candidates = buildTradeCandidates({ scores, pending, cfg, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
++  const eventRisk = G8.map((c) => {
++    const s = scores.find((x) => x.currency === c)!;
++    const r = eventRiskFor([c], pending, { horizonHours: 12 });
++    return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
++  });
+   // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
+   const avoidMap = new Map<string, string[]>();
+   const addAvoid = (symbol: string, reason: string) => {
+@@ -206,26 +227,26 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+     if (!cur.includes(reason)) cur.push(reason);
+     avoidMap.set(symbol, cur);
+   };
+-  for (const c of candidates) {
++  for (const c of candidates) {
+     if (c.event_risk === "EXTREME") addAvoid(c.symbol, `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}`);
+-    const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
++    const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
+     if (sShift) addAvoid(c.symbol, "Mudança de narrativa recente em uma das pernas — aguardar confirmação");
+     if ((c.confidence_pct ?? 0) < 40) addAvoid(c.symbol, `Confiança baixa (${c.confidence_pct ?? 0}%) — evidência macro insuficiente`);
+     const bs = scores.find((s) => s.currency === c.base_currency);
+     const qs = scores.find((s) => s.currency === c.quote_currency);
+     if (bs?.conflict || qs?.conflict) addAvoid(c.symbol, "Indicadores conflitantes (viés misto) numa das pernas");
+-  }
++  }
+   const pairsToAvoid = [...avoidMap.entries()].map(([symbol, reasons]) => ({ symbol, reason: reasons.join(" · ") }));
+ 
+-  const warnings: string[] = [];
++  const warnings: string[] = [];
+   const noData = scores.filter((s) => s.no_data).map((s) => s.currency);
+   const conflicted = scores.filter((s) => s.conflict).map((s) => s.currency);
+   const thin = scores.filter((s) => !s.no_data && (s.confidence_pct ?? 0) < 40).map((s) => s.currency);
+   if (noData.length) warnings.push(`Sem dado interpretado no período: ${noData.join(", ")} — tratadas como NEUTRAS por ausência de evidência (não como fracas).`);
+   if (thin.length) warnings.push(`Evidência fraca (confiança < 40%): ${thin.join(", ")} — score atenuado de propósito.`);
+   if (conflicted.length) warnings.push(`Indicadores conflitantes (viés misto): ${conflicted.join(", ")} — confiança reduzida.`);
+-  if (events.length === 0) warnings.push("Nenhum dado realizado interpretado no período — ranking neutro.");
+-
++  if (events.length === 0) warnings.push("Nenhum dado realizado interpretado no período — ranking neutro.");
++
+   // Resumo consolidado: fonte ÚNICA para o dashboard (a UI não recalcula nada).
+   const ranked = [...scores].sort((a, b) => a.rank - b.rank);
+   const withData = ranked.filter((s) => !s.no_data);
+@@ -250,100 +271,107 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+     alerts,
+   };
+ 
+-  if (opts.persist !== false) {
+-    const scoreDate = now.toISOString().slice(0, 10);
+-    await db.insert(currencyScores).values(scores.map((s) => ({
+-      analysisId: opts.analysisId ?? null, scoreDate, session: opts.session, computedAt: now, currency: s.currency, score: s.score, scoreRaw: s.score_raw,
+-      classification: s.classification, bias: s.bias, confidence: s.confidence, rank: s.rank, previousScore: s.previous_score, scoreDelta: s.score_delta,
+-      momentum: s.momentum, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
+-    })));
+-    if (candidates.length) {
+-      await db.insert(tradeCandidates).values(candidates.map((c) => ({
+-        analysisId: opts.analysisId ?? null, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
+-        strongCurrency: c.strong_currency, weakCurrency: c.weak_currency, strongScore: c.strong_score, weakScore: c.weak_score, macroDivergence: c.macro_divergence,
+-        confidence: c.confidence, priority: c.priority, eventRisk: c.event_risk, eventRiskEvents: c.event_risk_events, reason: c.reason,
+-      })));
+-    }
+-  }
+-  return {
+-    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: scores.map((s) => s.currency), trade_candidates: candidates,
++  if (opts.persist !== false) {
++    const scoreDate = now.toISOString().slice(0, 10);
++    await db.insert(currencyScores).values(scores.map((s) => ({
++      analysisId: opts.analysisId ?? null, scoreDate, session: opts.session, computedAt: now, currency: s.currency, score: s.score, scoreRaw: s.score_raw,
++      classification: s.classification, bias: s.bias, confidence: s.confidence, rank: s.rank, previousScore: s.previous_score, scoreDelta: s.score_delta,
++      momentum: s.momentum, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
++    })));
++    if (candidates.length) {
++      await db.insert(tradeCandidates).values(candidates.map((c) => ({
++        analysisId: opts.analysisId ?? null, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
++        strongCurrency: c.strong_currency, weakCurrency: c.weak_currency, strongScore: c.strong_score, weakScore: c.weak_score, macroDivergence: c.macro_divergence,
++        confidence: c.confidence, priority: c.priority, eventRisk: c.event_risk, eventRiskEvents: c.event_risk_events, reason: c.reason,
++      })));
++    }
++  }
++  return {
++    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: scores.map((s) => s.currency), trade_candidates: candidates,
+     pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid, summary, warnings, meta: { scoring_version: cfg.version },
+-  };
+-}
+-
+-export interface RunAnalysisInput {
+-  session: Session;
+-  events: EconomicEventInput[];
+-  inputType: "screenshot" | "structured" | "manual";
+-  imagesCount?: number;
+-  tzOffsetMinutes?: number;
+-  userEdits?: Record<string, unknown> | null;
+-  withBrief?: boolean;
+-}
+-
+-/** Fluxo completo: salvar RAW → interpretar → recomputar → brief → registrar análise. */
+-export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAnalysisResult> {
+-  const db = getDb();
+-  const cfg = await loadScoringConfig();
+-  const now = new Date();
+-  const [analysis] = await db.insert(macroAnalyses).values({
+-    analysisDate: now.toISOString().slice(0, 10), session: input.session, inputType: input.inputType, imagesCount: input.imagesCount ?? 0,
+-    eventsCount: input.events.length, scoringVersion: cfg.version, resultJson: {}, warnings: [],
+-  }).returning({ id: macroAnalyses.id });
+-
+-  const ids = await saveRawEvents(input.events, { tzOffsetMinutes: input.tzOffsetMinutes, sourceRef: `analysis:${analysis.id}`, userEdits: input.userEdits ?? null });
+-  // Interpretação é tolerante a falha da IA: o RAW já está salvo e o que já foi interpretado é reaproveitado.
+-  // Se a IA cair (503/429), devolvemos o ranking com os dados disponíveis + aviso para repetir — nada se perde.
+-  let interp: InterpretOutcome;
+-  let aiFailure: string | null = null;
+-  try { interp = await interpretPendingEvents(cfg, analysis.id); }
+-  catch (e) { aiFailure = (e as Error).message; interp = { interpreted: 0, model: null, promptVersion: null, warnings: [] }; }
+-  const computed = await recomputeScores({ session: input.session, analysisId: analysis.id, now, cfg });
+-  const warnings = [...computed.warnings, ...interp.warnings];
+-  if (aiFailure) warnings.unshift(`IA indisponível ao interpretar eventos (${aiFailure.slice(0, 160)}). Os eventos ficaram salvos; aguarde ~1 min e clique em "Confirmar e analisar" de novo — só o que faltou será enviado à IA.`);
+-
+-  if (input.withBrief !== false && !aiFailure) {
+-    try {
+-      const brief = await generateStructured({
+-        purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3,
+-        user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies, ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
+-      });
+-      for (const r of brief.data.candidate_reasons) {
+-        const c = computed.trade_candidates.find((x) => x.symbol === r.symbol);
+-        if (c) c.reason = `${r.reason} O que observar: ${r.what_to_look_for} Invalidação macro: ${r.invalidation}`;
+-      }
+-      for (const p of brief.data.pairs_to_avoid) if (!computed.pairs_to_avoid.some((x) => x.symbol === p.symbol)) computed.pairs_to_avoid.push(p);
+-      warnings.push(...brief.data.warnings.map((w) => `IA: ${w}`));
+-      if (brief.data.headline) warnings.unshift(`Brief: ${brief.data.headline} — ${brief.data.narrative}`);
+-      // persiste reasons nos candidatos
+-      for (const c of computed.trade_candidates) await db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)));
+-    } catch (e) {
+-      warnings.push(`Brief da sessão indisponível: ${(e as Error).message}`);
+-    }
+-  }
+-
+-  const result: MacroAnalysisResult = {
+-    analysis_id: String(analysis.id), ...computed,
+-    meta: { scoring_version: cfg.version, prompt_version: interp.promptVersion, model: interp.model, events_interpreted: interp.interpreted },
+-    warnings,
+-  };
+-  await db.update(macroAnalyses).set({ resultJson: result, warnings, model: interp.model, promptVersion: interp.promptVersion, eventsCount: ids.length }).where(eq(macroAnalyses.id, analysis.id));
+-  return result;
+-}
+-
+-export async function getLatestAnalysis(session?: Session): Promise<MacroAnalysisResult | null> {
+-  const q = getDb().select().from(macroAnalyses).orderBy(desc(macroAnalyses.createdAt)).limit(1);
+-  const rows = session ? await q.where(eq(macroAnalyses.session, session)) : await q;
+-  const r = rows[0];
+-  if (!r || !r.resultJson || Object.keys(r.resultJson as object).length === 0) return null;
+-  return r.resultJson as MacroAnalysisResult;
+-}
+-
+-export async function getScoreHistory(days: 7 | 30 | 90, currency?: Currency) {
+-  const since = new Date(Date.now() - days * 86_400_000);
+-  const conds = [gte(currencyScores.computedAt, since)];
+-  if (currency) conds.push(eq(currencyScores.currency, currency));
+-  const rows = await getDb().select({ currency: currencyScores.currency, score: currencyScores.score, computedAt: currencyScores.computedAt, session: currencyScores.session, scoreDate: currencyScores.scoreDate })
+-    .from(currencyScores).where(and(...conds)).orderBy(currencyScores.computedAt);
+-  return rows.map((r) => ({ currency: r.currency, score: r.score, computed_at: r.computedAt.toISOString(), session: r.session, date: r.scoreDate }));
+-}
++  };
++}
++
++export interface RunAnalysisInput {
++  session: Session;
++  events: EconomicEventInput[];
++  inputType: "screenshot" | "structured" | "manual";
++  imagesCount?: number;
++  tzOffsetMinutes?: number;
++  userEdits?: Record<string, unknown> | null;
++  withBrief?: boolean;
++}
++
++/** Fluxo completo: salvar RAW → interpretar → recomputar → brief → registrar análise. */
++export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAnalysisResult> {
++  const startedAt = Date.now();
++  const db = getDb();
++  const cfg = await loadScoringConfig();
++  const now = new Date();
++  const [analysis] = await db.insert(macroAnalyses).values({
++    analysisDate: now.toISOString().slice(0, 10), session: input.session, inputType: input.inputType, imagesCount: input.imagesCount ?? 0,
++    eventsCount: input.events.length, scoringVersion: cfg.version, resultJson: {}, warnings: [],
++  }).returning({ id: macroAnalyses.id });
++
++  const ids = await saveRawEvents(input.events, { tzOffsetMinutes: input.tzOffsetMinutes, sourceRef: `analysis:${analysis.id}`, userEdits: input.userEdits ?? null });
++  // Interpretação é tolerante a falha da IA: o RAW já está salvo e o que já foi interpretado é reaproveitado.
++  // Se a IA cair (503/429), devolvemos o ranking com os dados disponíveis + aviso para repetir — nada se perde.
++  let interp: InterpretOutcome;
++  let aiFailure: string | null = null;
++  try { interp = await interpretPendingEvents(cfg, analysis.id); }
++  catch (e) { aiFailure = (e as Error).message; interp = { interpreted: 0, model: null, promptVersion: null, warnings: [] }; }
++  const computed = await recomputeScores({ session: input.session, analysisId: analysis.id, now, cfg });
++  const warnings = [...computed.warnings, ...interp.warnings];
++  if (aiFailure) warnings.unshift(`IA indisponível ao interpretar eventos (${aiFailure.slice(0, 160)}). Os eventos ficaram salvos; aguarde ~1 min e clique em "Confirmar e analisar" de novo — só o que faltou será enviado à IA.`);
++
++  // Orçamento de tempo: o brief narrativo é um EXTRA. Se a interpretação já consumiu o tempo,
++  // devolvemos o ranking na hora em vez de segurar o usuário numa segunda chamada de IA.
++  const elapsedMs = Date.now() - startedAt;
++  const BRIEF_BUDGET_MS = 70_000;
++  if (input.withBrief !== false && !aiFailure && elapsedMs > BRIEF_BUDGET_MS) {
++    warnings.push(`Brief narrativo pulado: a interpretação levou ${Math.round(elapsedMs / 1000)}s e o ranking já estava pronto. Scores, candidatos e risco abaixo estão completos.`);
++  } else if (input.withBrief !== false && !aiFailure) {
++    try {
++      const brief = await generateStructured({
++        purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3, timeoutMs: 45_000,
++        user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies, ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
++      });
++      for (const r of brief.data.candidate_reasons) {
++        const c = computed.trade_candidates.find((x) => x.symbol === r.symbol);
++        if (c) c.reason = `${r.reason} O que observar: ${r.what_to_look_for} Invalidação macro: ${r.invalidation}`;
++      }
++      for (const p of brief.data.pairs_to_avoid) if (!computed.pairs_to_avoid.some((x) => x.symbol === p.symbol)) computed.pairs_to_avoid.push(p);
++      warnings.push(...brief.data.warnings.map((w) => `IA: ${w}`));
++      if (brief.data.headline) warnings.unshift(`Brief: ${brief.data.headline} — ${brief.data.narrative}`);
++      // persiste reasons nos candidatos
++      await Promise.all(computed.trade_candidates.map((c) => db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)))));
++    } catch (e) {
++      warnings.push(`Brief da sessão indisponível: ${(e as Error).message}`);
++    }
++  }
++
++  const result: MacroAnalysisResult = {
++    analysis_id: String(analysis.id), ...computed,
++    meta: { scoring_version: cfg.version, prompt_version: interp.promptVersion, model: interp.model, events_interpreted: interp.interpreted },
++    warnings,
++  };
++  await db.update(macroAnalyses).set({ resultJson: result, warnings, model: interp.model, promptVersion: interp.promptVersion, eventsCount: ids.length }).where(eq(macroAnalyses.id, analysis.id));
++  return result;
++}
++
++export async function getLatestAnalysis(session?: Session): Promise<MacroAnalysisResult | null> {
++  const q = getDb().select().from(macroAnalyses).orderBy(desc(macroAnalyses.createdAt)).limit(1);
++  const rows = session ? await q.where(eq(macroAnalyses.session, session)) : await q;
++  const r = rows[0];
++  if (!r || !r.resultJson || Object.keys(r.resultJson as object).length === 0) return null;
++  return r.resultJson as MacroAnalysisResult;
++}
++
++export async function getScoreHistory(days: 7 | 30 | 90, currency?: Currency) {
++  const since = new Date(Date.now() - days * 86_400_000);
++  const conds = [gte(currencyScores.computedAt, since)];
++  if (currency) conds.push(eq(currencyScores.currency, currency));
++  const rows = await getDb().select({ currency: currencyScores.currency, score: currencyScores.score, computedAt: currencyScores.computedAt, session: currencyScores.session, scoreDate: currencyScores.scoreDate })
++    .from(currencyScores).where(and(...conds)).orderBy(currencyScores.computedAt);
++  return rows.map((r) => ({ currency: r.currency, score: r.score, computed_at: r.computedAt.toISOString(), session: r.session, date: r.scoreDate }));
++}

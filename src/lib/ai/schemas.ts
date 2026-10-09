@@ -56,7 +56,7 @@ export const EventInterpretationSchema = z.object({
       priced_in: z.enum(["FULLY_PRICED", "MOSTLY_PRICED", "PARTIALLY_PRICED", "SURPRISE", "UNKNOWN"]),
       currency_implication: z.enum(["STRONG_POSITIVE", "POSITIVE", "NEUTRAL", "NEGATIVE", "STRONG_NEGATIVE"]),
       confidence: z.enum(CONFIDENCE),
-      reasoning_summary: z.string().describe("2-4 frases pt-BR: dado → crescimento/inflação → política monetária → juros → moeda"),
+      reasoning_summary: z.string().describe("MÁXIMO 2 frases curtas pt-BR: dado → inflação/crescimento → política monetária → moeda"),
     }),
   ),
 });

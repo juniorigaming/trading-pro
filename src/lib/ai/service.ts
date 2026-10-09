@@ -154,7 +154,7 @@ export async function generateStructured<N extends SchemaName>(
       const retryable = err.name === "AbortError" || (err instanceof AIError && RETRYABLE.has(err.status)) || /fetch failed|network|ECONNRESET/i.test(lastError);
       if (retryable && attempt < 3) {
         retries++;
-        await sleep(1500 * Math.pow(2, attempt)); // 1.5s, 3s, 6s
+        await sleep(800 * Math.pow(2, attempt)); // 0.8s, 1.6s, 3.2s
         continue;
       }
       await log(false, lastError);

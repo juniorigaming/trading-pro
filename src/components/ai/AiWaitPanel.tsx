@@ -24,8 +24,10 @@ export default function AiWaitPanel({
     return () => clearInterval(t);
   }, []);
 
-  // Avança uma etapa a cada ~4s, parando na última (a real conclusão troca a tela).
-  const activeStep = Math.min(Math.floor(elapsed / 4), steps.length - 1);
+  // Avança uma etapa a cada ~6s, parando na última (a conclusão real troca a tela).
+  const activeStep = Math.min(Math.floor(elapsed / 6), steps.length - 1);
+  // Passou do tempo típico: avisa honestamente em vez de deixar o usuário no escuro.
+  const slow = elapsed >= 75;
   // Progresso simulado: sobe rápido no início e desacelera, sem nunca chegar a 100%.
   const pct = Math.min(94, 10 + Math.round(84 * (1 - Math.exp(-elapsed / 14))));
 
@@ -95,8 +97,10 @@ export default function AiWaitPanel({
             ))}
           </ul>
 
-          <p className="text-[11px] text-text-muted mt-3">
-            {note ?? "Isso pode levar alguns segundos. Não feche nem atualize a página."}
+          <p className={`text-[11px] mt-3 ${slow ? "text-amber" : "text-text-muted"}`}>
+            {slow
+              ? "A IA está demorando mais que o normal (provedor sob carga). A análise continua rodando e seus eventos já estão salvos — não feche nem atualize a página."
+              : (note ?? "Isso pode levar alguns segundos. Não feche nem atualize a página.")}
           </p>
         </div>
       </div>

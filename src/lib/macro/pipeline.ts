@@ -110,20 +110,30 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
 
   const warnings: string[] = [];
   let interpreted = 0; let model: string | null = null; let promptVersion: string | null = null;
-  for (let i = 0; i < todo.length; i += 20) {
-    const batch = todo.slice(i, i + 20);
+
+  // Lotes MENORES em PARALELO: cada chamada gera menos tokens (responde mais rápido)
+  // e várias correm ao mesmo tempo — o tempo total vira ~o da chamada mais lenta, não a soma.
+  const BATCH_SIZE = 8;
+  const MAX_PARALLEL = 3;
+  const batches: (typeof todo)[] = [];
+  for (let i = 0; i < todo.length; i += BATCH_SIZE) batches.push(todo.slice(i, i + BATCH_SIZE));
+
+  const runBatch = async (batch: typeof todo) => {
     const payload = batch.map((e) => ({ id: e.id, currency: e.currency, event: e.event, impact: e.impact, scheduled_at: e.scheduledAt.toISOString(), actual: e.actual, forecast: e.forecast, previous: e.previous }));
     const res = await generateStructured({
       purpose: prompt === MACRO_SYSTEM ? "macro_interpret" : "b3_macro_interpret", prompt, schemaName: "event_interpretation", temperature: 0.2,
+      timeoutMs: 60_000,
       user: JSON.stringify({ events: payload, context_by_currency: context, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
     });
     model = res.model; promptVersion = res.promptVersion;
     const byId = new Map(batch.map((e) => [e.id, e]));
+    // Um ÚNICO insert com todas as linhas do lote (antes: 1 round-trip por evento).
+    const rows: (typeof macroInterpretations.$inferInsert)[] = [];
     for (const it of res.data.interpretations) {
       const ev = byId.get(it.event_id);
       if (!ev) { warnings.push(`IA retornou event_id desconhecido ${it.event_id}`); continue; }
       const bc = baseContribution({ category: it.category, importance: it.importance, classification: it.classification, confidence: it.confidence, impact: ev.impact as ScoredEvent["impact"] }, cfg);
-      await db.insert(macroInterpretations).values({
+      rows.push({
         eventId: ev.id, analysisId, category: it.category, subcategory: it.subcategory, importance: it.importance, classification: it.classification,
         directionValue: bc.direction_value, surpriseVsForecast: it.surprise_vs_forecast, changeVsPrevious: it.change_vs_previous,
         growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, fiscalImplication: it.fiscal_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
@@ -131,11 +141,22 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
         weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
         scoringVersion: cfg.version, promptVersion: res.promptVersion, model: res.model, isCurrent: true,
       });
-      interpreted++;
     }
+    if (rows.length) { await db.insert(macroInterpretations).values(rows); interpreted += rows.length; }
     const missing = batch.filter((e) => !res.data.interpretations.some((x) => x.event_id === e.id));
     if (missing.length) warnings.push(`${missing.length} evento(s) sem interpretação neste lote: ${missing.map((m) => m.event).join(", ")}`);
+  };
+
+  for (let i = 0; i < batches.length; i += MAX_PARALLEL) {
+    const group = batches.slice(i, i + MAX_PARALLEL);
+    const results = await Promise.allSettled(group.map(runBatch));
+    const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    // Todos falharam ⇒ propaga (o chamador avisa e o RAW fica salvo). Falha parcial vira aviso.
+    if (failed.length === group.length) throw failed[0].reason;
+    for (const f of failed) warnings.push(`Um lote de eventos não pôde ser interpretado: ${String(f.reason).slice(0, 120)}`);
   }
+
+
   return { interpreted, model, promptVersion, warnings };
 }
 
@@ -283,6 +304,7 @@ export interface RunAnalysisInput {
 
 /** Fluxo completo: salvar RAW → interpretar → recomputar → brief → registrar análise. */
 export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAnalysisResult> {
+  const startedAt = Date.now();
   const db = getDb();
   const cfg = await loadScoringConfig();
   const now = new Date();
@@ -302,10 +324,16 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
   const warnings = [...computed.warnings, ...interp.warnings];
   if (aiFailure) warnings.unshift(`IA indisponível ao interpretar eventos (${aiFailure.slice(0, 160)}). Os eventos ficaram salvos; aguarde ~1 min e clique em "Confirmar e analisar" de novo — só o que faltou será enviado à IA.`);
 
-  if (input.withBrief !== false && !aiFailure) {
+  // Orçamento de tempo: o brief narrativo é um EXTRA. Se a interpretação já consumiu o tempo,
+  // devolvemos o ranking na hora em vez de segurar o usuário numa segunda chamada de IA.
+  const elapsedMs = Date.now() - startedAt;
+  const BRIEF_BUDGET_MS = 70_000;
+  if (input.withBrief !== false && !aiFailure && elapsedMs > BRIEF_BUDGET_MS) {
+    warnings.push(`Brief narrativo pulado: a interpretação levou ${Math.round(elapsedMs / 1000)}s e o ranking já estava pronto. Scores, candidatos e risco abaixo estão completos.`);
+  } else if (input.withBrief !== false && !aiFailure) {
     try {
       const brief = await generateStructured({
-        purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3,
+        purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3, timeoutMs: 45_000,
         user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies, ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
       });
       for (const r of brief.data.candidate_reasons) {
@@ -316,7 +344,7 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
       warnings.push(...brief.data.warnings.map((w) => `IA: ${w}`));
       if (brief.data.headline) warnings.unshift(`Brief: ${brief.data.headline} — ${brief.data.narrative}`);
       // persiste reasons nos candidatos
-      for (const c of computed.trade_candidates) await db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)));
+      await Promise.all(computed.trade_candidates.map((c) => db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)))));
     } catch (e) {
       warnings.push(`Brief da sessão indisponível: ${(e as Error).message}`);
     }
