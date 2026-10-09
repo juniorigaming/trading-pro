@@ -6,7 +6,7 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
-import { ALL_CURRENCIES, G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type Importance, type MacroAnalysisResult, type PendingEventView, type Session } from "@/lib/ai/types";
+import { ALL_CURRENCIES, G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
 import { generateStructured } from "@/lib/ai/service";
 import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
 import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
@@ -151,6 +151,9 @@ function rowToScoreView(r: Record<string, unknown>): CurrencyScoreView {
     score_delta: r.score_delta === null ? null : Number(r.score_delta), momentum: (r.momentum as CurrencyScoreView["momentum"]) ?? null,
     classification: r.classification as CurrencyScoreView["classification"], bias: r.bias as CurrencyScoreView["bias"], confidence: r.confidence as Confidence,
     rank: Number(r.rank), live_events: Number(r.live_events ?? 0), drivers: (r.drivers as CurrencyScoreView["drivers"]) ?? [],
+    // Campos derivados para snapshots gravados antes da v2 (mantém a UI numa única escala).
+    score_display: Number((Number(r.score) * DEFAULT_SCORING_CONFIG.display_scale).toFixed(2)),
+    no_data: Number(r.live_events ?? 0) === 0,
   };
 }
 
@@ -196,16 +199,56 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
     const r = eventRiskFor([c], pending, { horizonHours: 12 });
     return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
   });
-  const pairsToAvoid: { symbol: string; reason: string }[] = [];
+  // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
+  const avoidMap = new Map<string, string[]>();
+  const addAvoid = (symbol: string, reason: string) => {
+    const cur = avoidMap.get(symbol) ?? [];
+    if (!cur.includes(reason)) cur.push(reason);
+    avoidMap.set(symbol, cur);
+  };
   for (const c of candidates) {
-    if (c.event_risk === "EXTREME") pairsToAvoid.push({ symbol: c.symbol, reason: `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}` });
+    if (c.event_risk === "EXTREME") addAvoid(c.symbol, `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}`);
     const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
-    if (sShift) pairsToAvoid.push({ symbol: c.symbol, reason: "Mudança de narrativa recente em uma das pernas — aguardar confirmação" });
+    if (sShift) addAvoid(c.symbol, "Mudança de narrativa recente em uma das pernas — aguardar confirmação");
+    if ((c.confidence_pct ?? 0) < 40) addAvoid(c.symbol, `Confiança baixa (${c.confidence_pct ?? 0}%) — evidência macro insuficiente`);
+    const bs = scores.find((s) => s.currency === c.base_currency);
+    const qs = scores.find((s) => s.currency === c.quote_currency);
+    if (bs?.conflict || qs?.conflict) addAvoid(c.symbol, "Indicadores conflitantes (viés misto) numa das pernas");
   }
+  const pairsToAvoid = [...avoidMap.entries()].map(([symbol, reasons]) => ({ symbol, reason: reasons.join(" · ") }));
+
   const warnings: string[] = [];
-  const lowSample = scores.filter((s) => s.live_events <= 1).map((s) => s.currency);
-  if (lowSample.length) warnings.push(`Amostra baixa (≤1 dado vivo): ${lowSample.join(", ")} — confiança limitada.`);
+  const noData = scores.filter((s) => s.no_data).map((s) => s.currency);
+  const conflicted = scores.filter((s) => s.conflict).map((s) => s.currency);
+  const thin = scores.filter((s) => !s.no_data && (s.confidence_pct ?? 0) < 40).map((s) => s.currency);
+  if (noData.length) warnings.push(`Sem dado interpretado no período: ${noData.join(", ")} — tratadas como NEUTRAS por ausência de evidência (não como fracas).`);
+  if (thin.length) warnings.push(`Evidência fraca (confiança < 40%): ${thin.join(", ")} — score atenuado de propósito.`);
+  if (conflicted.length) warnings.push(`Indicadores conflitantes (viés misto): ${conflicted.join(", ")} — confiança reduzida.`);
   if (events.length === 0) warnings.push("Nenhum dado realizado interpretado no período — ranking neutro.");
+
+  // Resumo consolidado: fonte ÚNICA para o dashboard (a UI não recalcula nada).
+  const ranked = [...scores].sort((a, b) => a.rank - b.rank);
+  const withData = ranked.filter((s) => !s.no_data);
+  const riskOrder: EventRiskLevel[] = ["LOW", "MEDIUM", "HIGH", "EXTREME"];
+  const overallRisk = eventRisk.reduce<EventRiskLevel>((acc, r) => (riskOrder.indexOf(r.level) > riskOrder.indexOf(acc) ? r.level : acc), "LOW");
+  const alerts: string[] = [];
+  for (const r of eventRisk) {
+    if (r.level === "EXTREME" || r.level === "HIGH") {
+      const ev = r.events[0];
+      alerts.push(`${r.currency}: risco ${r.level}${ev ? ` — ${ev.event} em ${ev.minutes_until < 60 ? `${ev.minutes_until}min` : `${(ev.minutes_until / 60).toFixed(1)}h`}` : ""}. O viés pode mudar após o dado.`);
+    }
+  }
+  for (const sc of scores) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
+  const summary: MacroSummaryView = {
+    strongest: withData[0] ? { currency: withData[0].currency, score: withData[0].score_display ?? withData[0].score, confidence_pct: withData[0].confidence_pct ?? 0 } : null,
+    weakest: withData.length > 1 ? { currency: withData[withData.length - 1].currency, score: withData[withData.length - 1].score_display ?? withData[withData.length - 1].score, confidence_pct: withData[withData.length - 1].confidence_pct ?? 0 } : null,
+    overall_risk: overallRisk,
+    no_data_currencies: noData,
+    conflicted_currencies: conflicted,
+    top_long: candidates.filter((c) => c.bias === "LONG").slice(0, 3),
+    top_short: candidates.filter((c) => c.bias === "SHORT").slice(0, 3),
+    alerts,
+  };
 
   if (opts.persist !== false) {
     const scoreDate = now.toISOString().slice(0, 10);
@@ -224,7 +267,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
   }
   return {
     date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: scores.map((s) => s.currency), trade_candidates: candidates,
-    pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid, warnings, meta: { scoring_version: cfg.version },
+    pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid, summary, warnings, meta: { scoring_version: cfg.version },
   };
 }
 

@@ -74,16 +74,38 @@ export function momentumFrom(score: number, previous: number | null, cfg: Scorin
   return "STABLE";
 }
 
-/** Confiança do score: nº de eventos vivos e concordância de direção entre eles. */
-export function confidenceFor(liveWeights: { w: number; dir: number }[]): Confidence {
-  if (liveWeights.length === 0) return "LOW";
-  const total = liveWeights.reduce((s, x) => s + x.w, 0);
-  if (total <= 0) return "LOW";
-  const signed = liveWeights.reduce((s, x) => s + x.w * Math.sign(x.dir), 0);
-  const agreement = Math.abs(signed) / total; // 1 = todos na mesma direção
-  if (liveWeights.length >= 3 && agreement >= 0.6) return "HIGH";
-  if (liveWeights.length >= 2 && agreement >= 0.4) return "MEDIUM";
-  if (liveWeights.length >= 1 && agreement >= 0.8 && liveWeights.length >= 2) return "MEDIUM";
+/**
+ * Confiança 0–100 do score de uma moeda. NÃO é probabilidade de alta/baixa:
+ * é a força da EVIDÊNCIA macro disponível. Combina:
+ *  - massa de evidência (peso total vivo, não quantidade de eventos);
+ *  - concordância de direção entre os eventos (conflito derruba a confiança);
+ *  - qualidade: fatia do peso vindo de evidência de alta importância/alto impacto.
+ */
+export function confidenceScore(live: { w: number; dir: number; primary: boolean }[]): { pct: number; agreement: number; mass: number; conflict: boolean } {
+  if (live.length === 0) return { pct: 0, agreement: 0, mass: 0, conflict: false };
+  const mass = live.reduce((s, x) => s + x.w, 0);
+  if (mass <= 0) return { pct: 0, agreement: 0, mass: 0, conflict: false };
+  const directional = live.filter((x) => x.dir !== 0);
+  const dirMass = directional.reduce((s, x) => s + x.w, 0);
+  const signed = directional.reduce((s, x) => s + x.w * Math.sign(x.dir), 0);
+  const agreement = dirMass > 0 ? Math.abs(signed) / dirMass : 0; // 1 = todos no mesmo sentido
+  const primaryMass = live.filter((x) => x.primary).reduce((s, x) => s + x.w, 0);
+  const quality = primaryMass / mass;
+
+  const massFactor = mass / (mass + 0.8);        // satura: muita evidência ⇒ ~1
+  const agreementFactor = 0.35 + 0.65 * agreement; // conflito total ⇒ 0.35
+  const qualityFactor = 0.7 + 0.3 * quality;       // só evidência fraca ⇒ 0.7
+
+  const pct = Math.round(100 * massFactor * agreementFactor * qualityFactor);
+  // Conflito relevante: direções opostas com peso material dos dois lados.
+  const conflict = directional.length >= 2 && agreement < 0.6;
+  return { pct: Math.max(0, Math.min(99, pct)), agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict };
+}
+
+/** Enum de confiança derivado do percentual (mantido para compatibilidade com o schema/banco). */
+export function confidenceEnum(pct: number): Confidence {
+  if (pct >= 65) return "HIGH";
+  if (pct >= 40) return "MEDIUM";
   return "LOW";
 }
 
@@ -103,7 +125,7 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
   for (const ccy of (input.currencies ?? G8) as readonly Currency[]) {
     const evs = input.events.filter((e) => e.currency === ccy && !e.superseded && e.impact !== "holiday");
     let num = 0, den = 0;
-    const live: { w: number; dir: number }[] = [];
+    const live: { w: number; dir: number; primary: boolean }[] = [];
     const drivers: CurrencyScoreView["drivers"] = [];
     for (const e of evs) {
       const bc = baseContribution(e, cfg);
@@ -113,24 +135,43 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
       if (w < cfg.min_weight_alive) continue;
       num += bc.direction_value * w;
       den += w;
-      live.push({ w, dir: bc.direction_value });
-      drivers.push({ event_id: e.event_id, event: e.event, classification: e.classification, weight: Number(w.toFixed(4)), released_at: e.released_at.toISOString() });
+      const primary = (e.importance === "HIGH" || e.importance === "MEDIUM_HIGH") && e.impact !== "low";
+      live.push({ w, dir: bc.direction_value, primary });
+      drivers.push({
+        event_id: e.event_id, event: e.event, classification: e.classification, weight: Number(w.toFixed(4)),
+        released_at: e.released_at.toISOString(),
+        contribution: Number((bc.direction_value * w).toFixed(4)),
+        category: e.category, importance: e.importance, primary,
+      });
     }
-    const raw = den > 0 ? num / den : 0; // já em −2..+2 (média ponderada de direction_value)
+    // Média ponderada das direções (−2..+2) ATENUADA pela massa de evidência.
+    // Sem isso, uma única leitura secundária produziria força plena ("event counting" invertido).
+    const weighted = den > 0 ? num / den : 0;
+    const evidenceFactor = den > 0 ? den / (den + cfg.evidence_k) : 0;
+    const raw = weighted * evidenceFactor;
     const score = Math.max(-cfg.clamp, Math.min(cfg.clamp, roundToStep(raw, cfg.score_step)));
+    const conf = confidenceScore(live);
     const previous = input.previousScores?.[ccy] ?? null;
-    drivers.sort((a, b) => b.weight - a.weight);
+    drivers.sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0) || b.weight - a.weight);
+    const noData = live.length === 0;
     out.push({
       currency: ccy, score, score_raw: Number(raw.toFixed(4)), previous_score: previous,
       score_delta: previous === null ? null : Number((score - previous).toFixed(4)),
       momentum: momentumFrom(score, previous, cfg),
-      classification: classifyScore(score, cfg), bias: biasFromScore(score, cfg), confidence: confidenceFor(live),
+      classification: noData ? "NEUTRAL" : classifyScore(score, cfg),
+      bias: noData ? "NEUTRAL" : biasFromScore(score, cfg),
+      confidence: confidenceEnum(conf.pct),
+      confidence_pct: conf.pct,
+      evidence_mass: conf.mass,
+      agreement: conf.agreement,
+      conflict: conf.conflict,
+      no_data: noData,
+      score_display: Number((score * cfg.display_scale).toFixed(2)),
       rank: 0, live_events: live.length, drivers: drivers.slice(0, 6),
     });
   }
   // ranking: score desc, desempate por score_raw, depois confiança
-  const confOrder = { HIGH: 0, MEDIUM: 1, LOW: 2 };
-  out.sort((a, b) => b.score - a.score || b.score_raw - a.score_raw || confOrder[a.confidence] - confOrder[b.confidence] || a.currency.localeCompare(b.currency));
+  out.sort((a, b) => b.score - a.score || b.score_raw - a.score_raw || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
   out.forEach((c, i) => (c.rank = i + 1));
   return out;
 }

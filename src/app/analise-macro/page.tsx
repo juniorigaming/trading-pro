@@ -3,11 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, ScanText, Sparkles, History, KeyRound, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import ImageDropzone from "@/components/ai/ImageDropzone";
 import AiWaitPanel from "@/components/ai/AiWaitPanel";
+import MacroSummary from "@/components/ai/MacroSummary";
 import OcrValidationTable, { type OcrRow } from "@/components/ai/OcrValidationTable";
 import G8Ranking from "@/components/ai/G8Ranking";
 import { CandidateList } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
-import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls, riskColor } from "@/components/ai/ui";
+import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
 import { apiFetch, getToken, setToken, uid, type LocalImage } from "@/lib/ai/client";
 import { SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
 import { useRouter } from "next/navigation";
@@ -171,8 +172,6 @@ export default function AnaliseMacroPage() {
 
       {tab === "nova" && step === "result" && result && (() => {
         const otherWarnings = result.warnings.filter((w) => !w.startsWith("Brief: "));
-        const risky = result.event_risk.filter((r) => r.level !== "LOW");
-        const top = [...result.currencies].sort((a, b) => a.rank - b.rank);
         return (
           <div className="space-y-4">
             {/* Resumo em uma linha */}
@@ -187,14 +186,9 @@ export default function AnaliseMacroPage() {
             </div>
             {showWarnings && <div className="space-y-1.5">{otherWarnings.map((w, i) => <Notice key={i} kind="warn">{w}</Notice>)}</div>}
 
-            {/* Leitura: forte vs fraca + brief curto */}
-            <div className="glass-card p-4 flex flex-wrap items-center gap-4">
-              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Mais forte</p><p className="text-xl font-extrabold text-emerald">{top[0].currency} <span className="text-sm">{top[0].score > 0 ? "+" : ""}{top[0].score.toFixed(2)}</span></p></div>
-              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Mais fraca</p><p className="text-xl font-extrabold text-rose">{top[7].currency} <span className="text-sm">{top[7].score > 0 ? "+" : ""}{top[7].score.toFixed(2)}</span></p></div>
-              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Candidatos</p><p className="text-xl font-extrabold text-text-primary">{result.trade_candidates.length}</p></div>
-              <div><p className="text-[10px] uppercase tracking-wider text-text-muted">Risco de eventos</p><p className="text-xl font-extrabold text-text-primary">{risky.length === 0 ? <span className="text-emerald">baixo</span> : risky.map((r) => <span key={r.currency} className={`inline-block mr-1 px-1.5 rounded text-xs border ${riskColor(r.level)}`}>{r.currency}</span>)}</p></div>
-              {brief && <p className="basis-full text-xs text-text-secondary leading-snug border-t border-border pt-3 mt-1">{brief.replace("Brief: ", "").split(" — ")[0]}</p>}
-            </div>
+            {/* Resumo macro consolidado (backend): forte/fraca, risco, Top 3 long/short, pares a evitar, alertas */}
+            <MacroSummary result={result} />
+            {brief && <p className="glass-card p-4 text-xs text-text-secondary leading-snug">{brief.replace("Brief: ", "").split(" — ")[0]}</p>}
 
             <div className="grid gap-4 xl:grid-cols-2">
               <Section title="Ranking G8" sub="Toque numa moeda para ver o que puxou o score"><G8Ranking scores={result.currencies} clean /></Section>

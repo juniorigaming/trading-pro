@@ -86,7 +86,27 @@ export interface CurrencyScoreView {
   confidence: Confidence;
   rank: number;
   live_events: number;
-  drivers: { event_id: number; event: string; classification: Classification; weight: number; released_at: string }[];
+  drivers: {
+    event_id: number; event: string; classification: Classification; weight: number; released_at: string;
+    /** direction_value × peso — quanto este evento empurrou o score (sinal = direção). */
+    contribution?: number;
+    category?: Category;
+    importance?: Importance;
+    /** evidência primária (alta importância e impacto não-baixo) */
+    primary?: boolean;
+  }[];
+  /** Confiança 0–100 da EVIDÊNCIA macro (não é probabilidade de alta/baixa). */
+  confidence_pct?: number;
+  /** Peso total vivo — massa de evidência (não é contagem de eventos). */
+  evidence_mass?: number;
+  /** 0–1: concordância de direção entre os eventos vivos. */
+  agreement?: number;
+  /** true quando há indicadores relevantes em direções opostas (viés misto). */
+  conflict?: boolean;
+  /** true quando não há nenhum dado vivo — moeda é NEUTRA por falta de dado, não fraca. */
+  no_data?: boolean;
+  /** Score na escala de apresentação (−5..+5). */
+  score_display?: number;
 }
 
 export interface TradeCandidateView {
@@ -102,7 +122,22 @@ export interface TradeCandidateView {
   event_risk: EventRiskLevel;
   event_risk_events: PendingEventView[];
   reason: string;
+  /** Força relativa na escala de apresentação (−5..+5): base − cotada. */
+  relative_strength?: number;
+  /** FORTE LONG · LONG · NEUTRO · SHORT · FORTE SHORT */
+  strength_class?: PairStrengthClass;
+  /** Confiança 0–100 do par (combina as duas pernas, a assimetria e o conflito). */
+  confidence_pct?: number;
+  base_currency?: Currency;
+  quote_currency?: Currency;
+  base_score?: number;
+  quote_score?: number;
+  /** Eventos pendentes capazes de invalidar o viés. */
+  invalidation_events?: string[];
 }
+
+export const PAIR_STRENGTH = ["FORTE LONG", "LONG", "NEUTRO", "SHORT", "FORTE SHORT"] as const;
+export type PairStrengthClass = (typeof PAIR_STRENGTH)[number];
 
 export interface PendingEventView {
   id: number;
@@ -125,6 +160,22 @@ export interface MacroAnalysisResult {
   pending_events: PendingEventView[];
   event_risk: { currency: Currency; current_bias: string; level: EventRiskLevel; events: PendingEventView[] }[];
   pairs_to_avoid: { symbol: string; reason: string }[];
+  /** Resumo macro consolidado (moeda mais forte/fraca, top 3 long/short, alertas). */
+  summary?: MacroSummaryView;
   warnings: string[];
   meta: { scoring_version: string; prompt_version: string | null; model: string | null; events_interpreted: number };
+}
+
+/** Resumo macro consolidado — fonte única para o dashboard (evita recalcular na UI). */
+export interface MacroSummaryView {
+  strongest: { currency: Currency; score: number; confidence_pct: number } | null;
+  weakest: { currency: Currency; score: number; confidence_pct: number } | null;
+  overall_risk: EventRiskLevel;
+  /** moedas sem nenhum dado vivo — neutras por ausência de dado, NÃO fracas */
+  no_data_currencies: Currency[];
+  /** moedas com indicadores conflitantes (viés misto) */
+  conflicted_currencies: Currency[];
+  top_long: TradeCandidateView[];
+  top_short: TradeCandidateView[];
+  alerts: string[];
 }

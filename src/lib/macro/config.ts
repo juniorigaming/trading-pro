@@ -28,10 +28,19 @@ export interface ScoringConfig {
   momentum_min_delta: number;
   pair_min_divergence: number;
   event_risk_hours: { intraday: number; overnight: number };
+  /**
+   * Massa de evidência mínima para o score atingir força plena (anti "1 evento = moeda forte").
+   * score = média_ponderada × massa/(massa + evidence_k). Com pouca evidência o score encolhe para 0.
+   */
+  evidence_k: number;
+  /** Multiplicador do score nativo (−2..+2) para a escala de apresentação (−5..+5). */
+  display_scale: number;
+  /** Bandas de força relativa do par, já na escala de apresentação (−5..+5). */
+  pair_bands: { neutral: number; weak: number; moderate: number; strong: number };
 }
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
-  version: "v1",
+  version: "v2-evidence",
   direction_value: { VERY_BULLISH: 2, BULLISH: 1, NEUTRAL: 0, BEARISH: -1, VERY_BEARISH: -2 },
   importance_weight: { HIGH: 1.0, MEDIUM_HIGH: 0.7, MEDIUM: 0.45, LOW: 0.25 },
   category_multiplier: {
@@ -48,8 +57,12 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   classification_thresholds: { very_strong: 1.5, strong: 1.0, moderately_strong: 0.5 },
   narrative_shift_min_delta: 1.0,
   momentum_min_delta: 0.25,
-  pair_min_divergence: 1.0,
+  // 0.4 nativo = 1.0 na escala de apresentação (−5..+5): abaixo disso o par é considerado neutro.
+  pair_min_divergence: 0.4,
   event_risk_hours: { intraday: 4, overnight: 14 },
+  evidence_k: 0.55,
+  display_scale: 2.5,
+  pair_bands: { neutral: 0.5, weak: 1.0, moderate: 1.5, strong: 2.5 },
 };
 
 /** Mescla config vinda do banco com os defaults (campos ausentes caem no default). */
@@ -66,5 +79,6 @@ export function mergeScoringConfig(partial: Partial<ScoringConfig> | null | unde
     half_life_days: { ...d.half_life_days, ...(partial.half_life_days ?? {}) },
     classification_thresholds: { ...d.classification_thresholds, ...(partial.classification_thresholds ?? {}) },
     event_risk_hours: { ...d.event_risk_hours, ...(partial.event_risk_hours ?? {}) },
+    pair_bands: { ...d.pair_bands, ...(partial.pair_bands ?? {}) },
   };
 }
