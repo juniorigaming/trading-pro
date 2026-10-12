@@ -6,6 +6,8 @@ const PGLITE_PKG = "@electric-sql/pglite";
 type Client = { exec: (q: string) => Promise<unknown>; query: (q: string) => Promise<{ rows: Record<string, unknown>[] }> };
 let clientRef: Client | null = null;
 vi.mock("@/db", async () => {
+  // sem o pacote opcional, o mock vira stub que falha se alguém tocar no banco (não vaza para outros arquivos)
+  if (!(await import(/* @vite-ignore */ PGLITE_PKG).then(() => true, () => false))) return { getDb: () => { throw new Error("PGlite ausente: teste e2e não deveria tocar no banco"); } };
   const { PGlite } = (await import(/* @vite-ignore */ PGLITE_PKG)) as { PGlite: new () => Client };
   const { drizzle } = await import("drizzle-orm/pglite");
   const { getTableConfig } = await import("drizzle-orm/pg-core");

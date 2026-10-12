@@ -15,7 +15,7 @@ import type { CurrencyScoreView } from "@/lib/ai/types";
 import type { TechnicalAnalysis } from "@/lib/ai/schemas";
 
 const now = new Date("2026-10-02T13:00:00Z");
-const ccy = (currency: string, score: number): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: 1, drivers: [] });
+const ccy = (currency: string, score: number): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, status: "EVALUATED", confidence_pct: null, score_display: null, excluded_events: [], previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: 1, drivers: [] });
 const rd = (symbol: string, change_pct: number | null, change_bp: number | null = null): MarketReading => ({ symbol, value: 100, change_pct, change_bp, direction: directionOf(change_pct, change_bp), captured_at: now.toISOString(), source: "manual", stale: false });
 
 function buildResult(withData: boolean): B3AnalysisResult {

@@ -4,6 +4,8 @@ import { describe, it, expect, beforeAll, vi } from "vitest";
 import { setEnvOverrides } from "@/lib/env";
 const PGLITE_PKG = "@electric-sql/pglite"; // import dinâmico por string: não quebra o typecheck quando o pacote (opcional) não está instalado
 vi.mock("@/db", async () => {
+  // sem o pacote opcional, o mock vira stub que falha se alguém tocar no banco (não vaza para outros arquivos)
+  if (!(await import(/* @vite-ignore */ PGLITE_PKG).then(() => true, () => false))) return { getDb: () => { throw new Error("PGlite ausente: teste e2e não deveria tocar no banco"); } };
   const { PGlite } = (await import(/* @vite-ignore */ PGLITE_PKG)) as { PGlite: new () => { exec: (q: string) => Promise<unknown> } };
   const { drizzle } = await import("drizzle-orm/pglite");
   const { readFileSync } = await import("node:fs");

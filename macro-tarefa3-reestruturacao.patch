@@ -1,0 +1,2275 @@
+diff --git a/src/app/analise-macro/page.tsx b/src/app/analise-macro/page.tsx
+index e13038a..5cb6ad1 100644
+--- a/src/app/analise-macro/page.tsx
++++ b/src/app/analise-macro/page.tsx
+@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
+ import { BrainCircuit, ScanText, Sparkles, History, KeyRound, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+ import ImageDropzone from "@/components/ai/ImageDropzone";
+ import AiWaitPanel from "@/components/ai/AiWaitPanel";
++import AuditPanel from "@/components/ai/AuditPanel";
+ import MacroSummary from "@/components/ai/MacroSummary";
+ import OcrValidationTable, { type OcrRow } from "@/components/ai/OcrValidationTable";
+ import G8Ranking from "@/components/ai/G8Ranking";
+@@ -36,6 +37,9 @@ export default function AnaliseMacroPage() {
+   const [withBrief, setWithBrief] = useState(true);
+   const [showWarnings, setShowWarnings] = useState(false);
+   const [showEvents, setShowEvents] = useState(false);
++  const [auditMode, setAuditMode] = useState(false);
++  const [extractionAudit, setExtractionAudit] = useState<unknown>(null);
++  const [extractionRejected, setExtractionRejected] = useState(0);
+ 
+   useEffect(() => { const id = setTimeout(() => setTok(getToken()), 0); return () => clearTimeout(id); }, []);
+   const loadHistory = useCallback(() => { apiFetch<AnalysisListItem[]>("/api/macro/analyses?limit=30").then(setHistory).catch((e) => setErr(e.message)); }, []);
+@@ -48,7 +52,8 @@ export default function AnaliseMacroPage() {
+       images.forEach((i) => fd.append("images", i.file, i.file.name));
+       fd.append("timezone", `${Intl.DateTimeFormat().resolvedOptions().timeZone} (GMT${-new Date().getTimezoneOffset() / 60})`);
+       fd.append("referenceDate", new Date().toISOString().slice(0, 10));
+-      const r = await apiFetch<{ events: EconomicEventInput[]; meta: Record<string, unknown> }>("/api/ai/macro/extract", { method: "POST", body: fd });
++      const r = await apiFetch<{ events: EconomicEventInput[]; meta: Record<string, unknown>; audit?: { rejected?: unknown[] } & Record<string, unknown> }>("/api/ai/macro/extract", { method: "POST", body: fd });
++      setExtractionAudit(r.audit ?? null); setExtractionRejected(r.audit?.rejected?.length ?? 0);
+       setRows(r.events.map((e) => ({ ...e, _id: uid(), _confirmed: !e.requires_manual_confirmation, _original: { actual: e.actual, forecast: e.forecast, previous: e.previous, event: e.event } })));
+       setOcrMeta(r.meta); setStep("validate");
+     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
+@@ -57,12 +62,12 @@ export default function AnaliseMacroPage() {
+   const analyze = async () => {
+     const unconfirmed = rows.filter((r) => r.requires_manual_confirmation && !r._confirmed).length;
+     if (unconfirmed > 0 && !confirm(`${unconfirmed} evento(s) de baixa confiança ainda não confirmados. Continuar mesmo assim?`)) return;
+-    setErr(null); setBusy("Salvando RAW → interpretando eventos → recalculando scores G8..."); setBusyKind("analyze");
++    setErr(null); setBusy("Salvando RAW → classificando por regra → recalculando scores da análise → checando consistência..."); setBusyKind("analyze");
+     try {
+       const userEdits: Record<string, unknown> = {};
+       for (const r of rows) if (r.user_edited) userEdits[`${r.currency}|${r.event}`] = { from: r._original ?? null, to: { actual: r.actual, forecast: r.forecast, previous: r.previous, event: r.event } };
+       const events = rows.filter((r) => r.event.trim()).map(({ _id, _confirmed, _original, ...e }) => { void _id; void _confirmed; void _original; return e; });
+-      const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief }) });
++      const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief, extraction: extractionAudit }) });
+       setResult(r); setStep("result");
+     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
+   };
+@@ -164,6 +169,7 @@ export default function AnaliseMacroPage() {
+         <Section title="2. Validar leitura do OCR" sub={ocrMeta ? `${String(ocrMeta.provider ?? "")} · ${String(ocrMeta.model ?? "")} · ${String(ocrMeta.promptVersion ?? ocrMeta.prompt_version ?? "")} · fuso detectado: ${String(ocrMeta.detectedTimezone ?? "n/d")}${ocrMeta.notes ? ` · ${String(ocrMeta.notes)}` : ""}` : "Entrada manual"} right={<Btn variant="ghost" onClick={reset}>Recomeçar</Btn>}>
+           <OcrValidationTable rows={rows} onChange={setRows} />
+           <div className="flex flex-wrap items-center gap-3 mt-4">
++            {extractionRejected > 0 && <p className="text-[11px] text-amber mb-2">{extractionRejected} linha(s) foram rejeitadas pela validação do código (moeda/evento/valor não constam no texto transcrito ou não foram confirmadas na imagem). Veja no modo auditoria após analisar.</p>}
+             <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Aguarde, analisando as informações..."><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
+             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
+           </div>
+@@ -182,10 +188,19 @@ export default function AnaliseMacroPage() {
+               {otherWarnings.length > 0 && (
+                 <button onClick={() => setShowWarnings((v) => !v)} className="inline-flex items-center gap-1 text-amber font-bold"><AlertTriangle size={12} />{otherWarnings.length} aviso{otherWarnings.length > 1 ? "s" : ""}{showWarnings ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
+               )}
+-              <div className="ml-auto flex gap-2"><Btn variant="ghost" onClick={() => router.push("/ranking-g8")}>Ranking completo</Btn><Btn variant="ghost" onClick={reset}>Nova análise</Btn></div>
++              <div className="ml-auto flex gap-2"><Btn variant={auditMode ? "primary" : "ghost"} onClick={() => setAuditMode((v) => !v)}>{auditMode ? "Fechar auditoria" : "Modo auditoria"}</Btn><Btn variant="ghost" onClick={() => router.push("/ranking-g8")}>Ranking completo</Btn><Btn variant="ghost" onClick={reset}>Nova análise</Btn></div>
+             </div>
+             {showWarnings && <div className="space-y-1.5">{otherWarnings.map((w, i) => <Notice key={i} kind="warn">{w}</Notice>)}</div>}
+ 
++            {result.analysis_status === "ANALISE_INSUFICIENTE" && (
++              <div className="glass-card p-4 border border-rose/50">
++                <p className="text-sm font-extrabold text-rose mb-1">ANÁLISE INSUFICIENTE</p>
++                <p className="text-xs text-text-secondary mb-2">A validação de consistência falhou, então este resultado <b>não</b> é apresentado como ranking confiável. Nenhuma moeda recebeu score sem evidência.</p>
++                <ul className="space-y-0.5">{(result.audit?.checks ?? []).filter((c) => !c.passed).map((c) => <li key={c.id} className="text-[11px] text-text-muted">• {c.label}: {c.detail}</li>)}</ul>
++              </div>
++            )}
++            {auditMode && result.audit && <Section title="Modo auditoria" sub="Do screenshot ao ranking: cada etapa, cada rejeição e cada score"><AuditPanel result={result} previews={images.map((i) => ({ id: i.id, previewUrl: i.previewUrl, name: i.label }))} /></Section>}
++            {result.analysis_status !== "ANALISE_INSUFICIENTE" && <>
+             {/* Resumo macro consolidado (backend): forte/fraca, risco, Top 3 long/short, pares a evitar, alertas */}
+             <MacroSummary result={result} />
+             {brief && <p className="glass-card p-4 text-xs text-text-secondary leading-snug">{brief.replace("Brief: ", "").split(" — ")[0]}</p>}
+@@ -199,6 +214,7 @@ export default function AnaliseMacroPage() {
+               <span>Eventos pendentes e risco por moeda <span className="text-text-muted font-normal">({result.pending_events.length} pendentes)</span></span>{showEvents ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+             </button>
+             {showEvents && <Section title="Event Risk" sub="Calculado por perna do par a partir dos eventos pendentes informados"><EventRiskPanel eventRisk={result.event_risk} pending={result.pending_events} pairsToAvoid={result.pairs_to_avoid} /></Section>}
++            </>}
+           </div>
+         );
+       })()}
+diff --git a/src/app/api/ai/macro/analyze/route.ts b/src/app/api/ai/macro/analyze/route.ts
+index a1c89d2..d5dffb6 100644
+--- a/src/app/api/ai/macro/analyze/route.ts
++++ b/src/app/api/ai/macro/analyze/route.ts
+@@ -17,7 +17,7 @@ const EventSchema = z.object({
+ const BodySchema = z.object({
+   session: z.enum(SESSIONS), events: z.array(EventSchema).max(300),
+   inputType: z.enum(["screenshot", "structured", "manual"]).default("screenshot"), imagesCount: z.number().int().min(0).max(20).optional(),
+-  tzOffsetMinutes: z.number().int().min(-840).max(840).optional(), userEdits: z.record(z.string(), z.unknown()).nullable().optional(), withBrief: z.boolean().optional(),
++  tzOffsetMinutes: z.number().int().min(-840).max(840).optional(), userEdits: z.record(z.string(), z.unknown()).nullable().optional(), withBrief: z.boolean().optional(), extraction: z.any().nullable().optional(),
+ });
+ 
+ export async function POST(request: Request) {
+diff --git a/src/app/api/ai/macro/extract/route.ts b/src/app/api/ai/macro/extract/route.ts
+index 524390d..d9556a7 100644
+--- a/src/app/api/ai/macro/extract/route.ts
++++ b/src/app/api/ai/macro/extract/route.ts
+@@ -1,4 +1,4 @@
+-/** POST multipart: images[] (+ timezone, referenceDate) → OCR estruturado. NÃO salva nada (vai para validação humana). */
++/** POST multipart: images[] (+ timezone, referenceDate) → extração + validação + verificação visual. NÃO salva nada (vai para validação humana). */
+ import { authorize, errorResponse, json, readImages } from "@/lib/api-utils";
+ import { ensureAIAudit } from "@/lib/ai/audit";
+ import { getEconomicDataProvider } from "@/lib/macro/economic-data-provider";
+@@ -18,7 +18,7 @@ export async function POST(request: Request) {
+     const ccyParam = String(form.get("currencies") ?? "").split(",").map((c) => c.trim().toUpperCase()).filter((c) => (ALL_CURRENCIES as readonly string[]).includes(c)) as AnyCurrency[];
+     const provider = getEconomicDataProvider("screenshot_ai");
+     const result = await provider.extract({ images: images.map((i) => ({ base64: i.base64, mime: i.mime, label: i.name })), timezone, referenceDate, allowedCurrencies: ccyParam.length ? ccyParam : G8 });
+-    return json({ events: result.events, meta: { ...result.meta, imagesCount: images.length, sourceType: result.raw.source_type, detectedTimezone: result.raw.detected_timezone, notes: result.raw.notes } });
++    return json({ events: result.events, audit: result.audit, meta: { ...result.meta, imagesCount: images.length, sourceType: result.raw.source_type, detectedTimezone: result.raw.detected_timezone, notes: [...result.meta.notes, ...result.raw.notes] } });
+   } catch (e) { return errorResponse(e, "Falha ao extrair calendário"); }
+ }
+ 
+diff --git a/src/components/ai/AuditPanel.tsx b/src/components/ai/AuditPanel.tsx
+new file mode 100644
+index 0000000..2d2ef19
+--- /dev/null
++++ b/src/components/ai/AuditPanel.tsx
+@@ -0,0 +1,122 @@
++"use client";
++/** Modo auditoria: mostra, em ordem, tudo que levou ao ranking — para localizar exatamente onde uma divergência nasce. */
++import type { AnalysisAudit, MacroAnalysisResult } from "@/lib/ai/types";
++
++type Preview = { id: string; previewUrl: string; name?: string };
++
++function Block({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
++  return (
++    <div className="glass-card p-4">
++      <p className="text-xs font-extrabold text-text-primary mb-2"><span className="text-accent mr-1.5">{n}.</span>{title}</p>
++      {children}
++    </div>
++  );
++}
++
++const Pre = ({ value }: { value: unknown }) => (
++  <pre className="text-[10px] leading-snug text-text-secondary bg-surface-2 rounded-lg p-2 overflow-auto max-h-80 whitespace-pre-wrap break-all">{JSON.stringify(value, null, 2)}</pre>
++);
++
++export default function AuditPanel({ result, previews = [] }: { result: MacroAnalysisResult; previews?: Preview[] }) {
++  const audit: AnalysisAudit | undefined = result.audit;
++  const ex = audit?.extraction ?? null;
++  const ranked = result.currencies.filter((c) => c.status === "EVALUATED").sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
++  const insufficient = result.currencies.filter((c) => c.status !== "EVALUATED");
++
++  return (
++    <div className="space-y-3">
++      <div className="glass-card p-3 text-xs text-text-muted flex flex-wrap gap-x-4 gap-y-1">
++        <span>análise <b className="text-text-primary">#{result.analysis_id}</b></span>
++        <span>status <b className={result.analysis_status === "OK" ? "text-emerald" : "text-rose"}>{result.analysis_status ?? "OK"}</b></span>
++        <span>verificação visual <b className="text-text-primary">{ex?.visual_verification ?? "não se aplica"}</b></span>
++        <span>tabela de regras <b className="text-text-primary">{result.meta.scoring_version}</b></span>
++        <span>classificação <b className="text-text-primary">{result.meta.model ?? "—"}</b></span>
++      </div>
++
++      <Block n={1} title="Screenshot recebido">
++        {previews.length ? (
++          <div className="flex flex-wrap gap-2">{previews.map((p) => <img key={p.id} src={p.previewUrl} alt={p.name ?? "screenshot"} className="max-h-64 rounded-lg border border-border" />)}</div>
++        ) : <p className="text-xs text-text-muted">Imagem não disponível nesta sessão (análises do histórico mostram os dados extraídos abaixo).</p>}
++      </Block>
++
++      <Block n={2} title="Texto/OCR extraído (transcrição literal de cada linha aceita)">
++        {ex ? (
++          <ul className="space-y-1">{ex.accepted.map((a, i) => (
++            <li key={i} className="text-[11px] font-mono text-text-secondary bg-surface-2 rounded px-2 py-1 break-all">{a.raw_row_text ?? "—"}</li>
++          ))}</ul>
++        ) : <p className="text-xs text-text-muted">Sem extração por IA (entrada manual).</p>}
++      </Block>
++
++      <Block n={3} title="JSON bruto retornado pela IA">
++        {ex ? <details><summary className="text-xs text-text-muted cursor-pointer">ver JSON bruto ({ex.rows_received} linha(s) recebida(s))</summary><div className="mt-2"><Pre value={ex.raw_json} /></div></details> : <p className="text-xs text-text-muted">—</p>}
++      </Block>
++
++      <Block n={4} title="JSON validado (o que o código aceitou)">
++        {ex ? <details><summary className="text-xs text-text-muted cursor-pointer">ver JSON validado ({ex.accepted.length} evento(s))</summary><div className="mt-2"><Pre value={ex.accepted} /></div></details> : <p className="text-xs text-text-muted">—</p>}
++      </Block>
++
++      <Block n={5} title={`Eventos aceitos (${ex?.accepted.length ?? "—"})`}>
++        {ex && ex.accepted.length > 0 ? (
++          <div className="overflow-auto"><table className="w-full text-[11px]">
++            <thead className="text-text-muted text-left"><tr><th className="pr-2">moeda</th><th className="pr-2">horário</th><th className="pr-2">evento</th><th className="pr-2">atual</th><th className="pr-2">forecast</th><th className="pr-2">previous</th><th>conf.</th></tr></thead>
++            <tbody>{ex.accepted.map((a, i) => (
++              <tr key={i} className="border-t border-border"><td className="pr-2 font-bold">{a.currency}</td><td className="pr-2">{a.time ?? "—"}</td><td className="pr-2">{a.event}</td><td className="pr-2 tabular-nums">{a.actual ?? "—"}</td><td className="pr-2 tabular-nums">{a.forecast ?? "—"}</td><td className="pr-2 tabular-nums">{a.previous ?? "—"}</td><td className="tabular-nums">{a.confidence ?? "—"}</td></tr>
++            ))}</tbody>
++          </table></div>
++        ) : <p className="text-xs text-text-muted">Nenhum evento aceito pela extração.</p>}
++      </Block>
++
++      <Block n={6} title={`Eventos rejeitados (${(ex?.rejected.length ?? 0) + (ex?.values_discarded.length ?? 0)})`}>
++        {ex && (ex.rejected.length + ex.values_discarded.length) > 0 ? (
++          <ul className="space-y-1 text-[11px] text-text-secondary">
++            {ex.rejected.map((r, i) => <li key={`r${i}`}><b className="text-rose">{r.currency ?? "?"} {r.event ?? ""}</b> — <span className="text-text-muted">{r.reason}</span></li>)}
++            {ex.values_discarded.map((d, i) => <li key={`v${i}`}><b className="text-amber">{d.currency} {d.event}</b> · {d.field} “{d.value}” — <span className="text-text-muted">{d.reason}</span></li>)}
++          </ul>
++        ) : <p className="text-xs text-text-muted">Nada foi rejeitado.</p>}
++      </Block>
++
++      <Block n={7} title="Score individual por moeda — “Por que este score?”">
++        <div className="space-y-2">
++          {[...ranked, ...insufficient].map((c) => (
++            <details key={c.currency} className="rounded-lg border border-border px-3 py-2">
++              <summary className="text-xs cursor-pointer flex flex-wrap gap-x-3">
++                <b className="text-text-primary">{c.currency}</b>
++                <span className="tabular-nums">score: {c.score === null ? <b className="text-text-muted">null (sem evidência)</b> : <b>{c.score > 0 ? "+" : ""}{c.score}</b>}</span>
++                <span className="text-text-muted">confiança: {c.confidence_pct === null ? "INSUFFICIENT_EVIDENCE" : `${c.confidence} · ${c.confidence_pct}%`}</span>
++                <span className="text-text-muted">evidências: {c.live_events} · excluídas: {c.excluded_events?.length ?? 0}</span>
++              </summary>
++              <div className="mt-2 space-y-1.5">
++                {c.drivers.length === 0 && <p className="text-[11px] text-text-muted">Nenhum evento mensurado — sem score.</p>}
++                {c.drivers.map((d) => (
++                  <div key={d.event_id} className="text-[11px] bg-surface-2 rounded px-2 py-1 space-y-0.5">
++                    <p><b>{d.event}</b> → direção: <b>{d.direction ?? d.classification}</b> · regra: {d.rule_id ?? "—"} · fonte: {d.source ?? "—"}</p>
++                    <p className="text-text-muted tabular-nums">atual {d.actual ?? "—"} · {d.reference_basis === "FORECAST" ? "forecast" : d.reference_basis === "PREVIOUS" ? "previous" : "referência"} {d.reference_basis === "FORECAST" ? d.forecast ?? "—" : d.previous ?? "—"} · surpresa {d.surprise == null ? "—" : d.surprise.toFixed(2)} · peso {d.weight.toFixed(3)} · impacto/score {(d.contribution ?? 0).toFixed(3)}</p>
++                  </div>
++                ))}
++                {c.excluded_events?.map((e) => <p key={e.event_id} className="text-[11px] text-text-muted">não pontuou: {e.event} — {e.reason}</p>)}
++                <p className="text-[11px] text-text-secondary">Score final: <b>{c.score ?? "null"}</b>{c.score_display != null && <> · escala −5..+5: {c.score_display}</>}</p>
++              </div>
++            </details>
++          ))}
++        </div>
++      </Block>
++
++      <Block n={8} title="Score individual × score final">
++        <p className="text-xs text-text-secondary">Score final de cada moeda = média ponderada das contribuições medidas, atenuada pela massa de evidência. Moedas sem evidência ficam com <b>null</b> — nunca com 0.</p>
++      </Block>
++
++      <Block n={9} title="Ranking final">
++        {ranked.length ? (
++          <ol className="text-xs space-y-0.5 list-decimal list-inside">{ranked.map((c) => <li key={c.currency}><b>{c.currency}</b> {c.score! > 0 ? "+" : ""}{c.score}</li>)}</ol>
++        ) : <p className="text-xs text-text-muted">Nenhuma moeda com evidência suficiente — sem ranking.</p>}
++        {insufficient.length > 0 && <p className="text-[11px] text-text-muted mt-2">Sem evidência suficiente (fora do ranking): {insufficient.map((c) => c.currency).join(", ")}</p>}
++      </Block>
++
++      <Block n={10} title="Checagens de consistência">
++        <ul className="space-y-1">{(audit?.checks ?? []).map((c) => (
++          <li key={c.id} className="text-[11px] flex gap-2"><span className={c.passed ? "text-emerald font-bold" : "text-rose font-bold"}>{c.passed ? "OK" : "FALHOU"}</span><span className="text-text-secondary">{c.label}</span><span className="text-text-muted">— {c.detail}</span></li>
++        ))}</ul>
++      </Block>
++    </div>
++  );
++}
+diff --git a/src/components/ai/DashboardAiWidgets.tsx b/src/components/ai/DashboardAiWidgets.tsx
+index 963e4e3..12f1753 100644
+--- a/src/components/ai/DashboardAiWidgets.tsx
++++ b/src/components/ai/DashboardAiWidgets.tsx
+@@ -5,7 +5,7 @@ import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark, Bitcoin }
+ import type { PortfolioId } from "@/lib/portfolio";
+ import { apiFetch } from "@/lib/ai/client";
+ import { B3_SESSION_LABEL, type B3AnalysisResult } from "@/lib/b3/types";
+-import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView } from "@/lib/ai/types";
++import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView , EvaluatedCurrency } from "@/lib/ai/types";
+ import { Badge, DeltaArrow, fmtScore, riskColor, scoreBg, SESSION_LABEL } from "./ui";
+ import CurrencyExposure from "./CurrencyExposure";
+ 
+@@ -70,7 +70,7 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
+   if (unavailable) return (
+     <div className="glass-card p-4 mb-6 flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-sm text-text-secondary"><BrainCircuit size={18} className="text-accent" />Módulo IA ainda não configurado (rode a migration e defina as variáveis).</div><Link href="/analise-macro" className="text-xs font-bold text-accent inline-flex items-center gap-1">Abrir <ChevronRight size={14} /></Link></div>
+   );
+-  const sorted = scores ? [...scores].sort((a, b) => a.rank - b.rank) : [];
++  const sorted = scores ? (scores.filter((s) => s.status === "EVALUATED" && s.score !== null) as EvaluatedCurrency[]).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)) : [];
+   const top = sorted.slice(0, 3), bottom = sorted.slice(-3).reverse();
+   const risky = (latest?.event_risk ?? []).filter((r) => r.level === "HIGH" || r.level === "EXTREME");
+   const sessionLabel = latest ? (SESSION_LABEL[latest.session] ?? latest.session) : null;
+diff --git a/src/components/ai/G8Ranking.tsx b/src/components/ai/G8Ranking.tsx
+index 011d933..f633fa1 100644
+--- a/src/components/ai/G8Ranking.tsx
++++ b/src/components/ai/G8Ranking.tsx
+@@ -1,26 +1,48 @@
+-"use client";
+-import { useState } from "react";
+-import { ChevronDown, ChevronUp } from "lucide-react";
+-import type { CurrencyScoreView } from "@/lib/ai/types";
++"use client";
++import { useState } from "react";
++import { ChevronDown, ChevronUp } from "lucide-react";
++import type { CurrencyScoreView, EvaluatedCurrency, ScoreDriver } from "@/lib/ai/types";
+ import { Badge, DeltaArrow, classColor, scoreBg } from "./ui";
+ import { confColor, fmt5 } from "./MacroSummary";
+-
+-const MOMENTUM_LABEL: Record<string, string> = { STRENGTHENING: "fortalecendo", WEAKENING: "enfraquecendo", STABLE: "estável", NARRATIVE_SHIFT: "mudança de narrativa" };
+-const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Muito forte", STRONG: "Forte", MODERATELY_STRONG: "Mod. forte", NEUTRAL: "Neutro", MODERATELY_WEAK: "Mod. fraca", WEAK: "Fraca", VERY_WEAK: "Muito fraca" };
+-
+-/** Score na escala do dashboard (−5..+5). Vem pronto do backend; o fallback cobre snapshots antigos. */
+-export const display5 = (s: CurrencyScoreView) => s.score_display ?? Number((s.score * 2.5).toFixed(2));
+ 
+-/** compact = sem expandir drivers (widgets). clean = só rank, moeda, barra, score e seta (página de análise). */
+-export default function G8Ranking({ scores, compact = false, clean = false }: { scores: CurrencyScoreView[]; compact?: boolean; clean?: boolean }) {
+-  const [open, setOpen] = useState<string | null>(null);
+-  const sorted = [...scores].sort((a, b) => a.rank - b.rank);
+-  return (
+-    <div className="space-y-1.5">
+-      {sorted.map((s) => {
+-        const v = display5(s);
++const MOMENTUM_LABEL: Record<string, string> = { STRENGTHENING: "fortalecendo", WEAKENING: "enfraquecendo", STABLE: "estável", NARRATIVE_SHIFT: "mudança de narrativa" };
++const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Muito forte", STRONG: "Forte", MODERATELY_STRONG: "Mod. forte", NEUTRAL: "Neutro", MODERATELY_WEAK: "Mod. fraca", WEAK: "Fraca", VERY_WEAK: "Muito fraca" };
++const DIR_LABEL: Record<string, string> = { BULLISH: "alta da moeda", BEARISH: "baixa da moeda", NEUTRAL: "neutro (medido)" };
++
++/** Score na escala do dashboard (−5..+5). null ⇒ sem evidência (NUNCA 0). */
++export const display5 = (s: CurrencyScoreView): number | null => (s.score === null ? null : (s.score_display ?? Number((s.score * 2.5).toFixed(2))));
++
++function DriverDetail({ d }: { d: ScoreDriver }) {
++  const ref = d.reference_basis === "FORECAST" ? "forecast" : d.reference_basis === "PREVIOUS" ? "previous" : null;
++  return (
++    <li className="rounded-lg bg-surface px-2 py-1.5 space-y-0.5">
++      <div className="flex items-center justify-between gap-2">
++        <span className="truncate text-text-secondary font-semibold">{d.event}{d.primary && <span className="ml-1 text-[9px] uppercase text-accent font-bold">primário</span>}</span>
++        <span className={`tabular-nums font-bold ${(d.contribution ?? 0) >= 0 ? "text-emerald" : "text-rose"}`}>
++          {d.contribution != null ? `${d.contribution > 0 ? "+" : ""}${d.contribution.toFixed(3)}` : d.weight.toFixed(3)}
++        </span>
++      </div>
++      <p className="text-[10px] text-text-muted tabular-nums">
++        {d.actual ? `atual ${d.actual}` : "atual —"}{ref && <> · {ref} {d.reference_basis === "FORECAST" ? d.forecast : d.previous}</>}
++        {d.surprise != null && <> · surpresa {d.surprise > 0 ? "+" : ""}{d.surprise.toFixed(2)}</>}
++        {" · "}{d.direction ? DIR_LABEL[d.direction] : d.classification}
++        {" · peso "}{d.weight.toFixed(3)}{" · "}{new Date(d.released_at).toLocaleDateString("pt-BR")}
++      </p>
++      {d.explanation && <p className="text-[10px] text-text-muted leading-snug">{d.explanation}</p>}
++    </li>
++  );
++}
++
++/** compact = sem expandir drivers (widgets). clean = só rank, moeda, barra, score e seta (página de análise). */
++export default function G8Ranking({ scores, compact = false, clean = false }: { scores: CurrencyScoreView[]; compact?: boolean; clean?: boolean }) {
++  const [open, setOpen] = useState<string | null>(null);
++  const evaluated = scores.filter((s): s is EvaluatedCurrency => s.status === "EVALUATED" && s.score !== null).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
++  const insufficient = scores.filter((s) => s.status !== "EVALUATED").sort((a, b) => a.currency.localeCompare(b.currency));
++  return (
++    <div className="space-y-1.5">
++      {evaluated.map((s) => {
++        const v = display5(s) ?? 0;
+         const pct = s.confidence_pct ?? null;
+-        const noData = s.no_data ?? s.live_events === 0;
+         return (
+           <div key={s.currency} className="rounded-xl border border-border bg-surface-2/60">
+             <button onClick={() => !compact && setOpen(open === s.currency ? null : s.currency)} className="w-full flex items-center gap-3 px-3 py-2 text-left">
+@@ -35,7 +57,7 @@ export default function G8Ranking({ scores, compact = false, clean = false }: {
+                 {s.score_delta != null && Math.abs(s.score_delta) >= 0.01 && <><DeltaArrow delta={s.score_delta} />{fmt5(s.score_delta * 2.5)}</>}
+               </span>
+               {!compact && !clean && <>
+-                <span className={`hidden md:inline text-[11px] font-bold w-24 ${noData ? "text-text-muted" : classColor(s.classification)}`}>{noData ? "Sem dado" : (CLASS_LABEL[s.classification] ?? s.classification)}</span>
++                <span className={`hidden md:inline text-[11px] font-bold w-24 ${classColor(s.classification ?? "NEUTRAL")}`}>{s.classification ? (CLASS_LABEL[s.classification] ?? s.classification) : "—"}</span>
+                 <span className="hidden lg:inline text-[10px] text-text-muted w-32 truncate">{s.momentum ? MOMENTUM_LABEL[s.momentum] : "—"}</span>
+                 <Badge className={pct == null ? "border-border text-text-muted" : pct >= 65 ? "border-emerald/40 text-emerald" : pct >= 40 ? "border-amber/40 text-amber" : "border-border text-text-muted"}>
+                   {pct == null ? s.confidence : `${pct}%`}
+@@ -49,41 +71,37 @@ export default function G8Ranking({ scores, compact = false, clean = false }: {
+             </button>
+             {open === s.currency && (
+               <div className="px-3 pb-3 text-xs">
+-                {noData ? (
+-                  <p className="text-text-muted">Nenhum dado interpretado no período — <b className="text-text-secondary">neutra por ausência de evidência</b>, não por fraqueza. Poucos eventos ≠ moeda fraca.</p>
+-                ) : (
+-                  <>
+-                    <p className="text-text-muted mb-1">
+-                      Confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} · concordância {Math.round((s.agreement ?? 0) * 100)}%
+-                      {s.conflict && <span className="text-amber font-semibold"> · viés misto (indicadores contraditórios)</span>}
+-                      {" · "}anterior {s.previous_score == null ? "—" : fmt5(s.previous_score * 2.5)}
+-                    </p>
+-                    <p className="text-[10px] text-text-muted mb-2">Por que este score: soma ponderada das contribuições abaixo (importância × impacto × confiança × atualidade), atenuada quando a evidência é escassa.</p>
+-                    <ul className="space-y-1">
+-                      {s.drivers.map((d) => (
+-                        <li key={d.event_id} className="flex items-center justify-between gap-2 rounded-lg bg-surface px-2 py-1">
+-                          <span className="truncate text-text-secondary">
+-                            {d.event}
+-                            {d.primary && <span className="ml-1 text-[9px] uppercase text-accent font-bold">primário</span>}
+-                          </span>
+-                          <span className="flex items-center gap-2 shrink-0">
+-                            <span className={`font-bold ${classColor(d.classification)}`}>{d.classification}</span>
+-                            <span className={`tabular-nums font-semibold ${(d.contribution ?? 0) >= 0 ? "text-emerald" : "text-rose"}`}>
+-                              {d.contribution != null ? `${d.contribution > 0 ? "+" : ""}${d.contribution.toFixed(3)}` : `${d.weight.toFixed(3)}`}
+-                            </span>
+-                            <span className="text-text-muted">{new Date(d.released_at).toLocaleDateString("pt-BR")}</span>
+-                          </span>
+-                        </li>
+-                      ))}
+-                    </ul>
+-                  </>
++                <p className="text-text-muted mb-1">
++                  Score <b className="text-text-secondary">{fmt5(v)}</b> · confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} · concordância {Math.round((s.agreement ?? 0) * 100)}%
++                  {s.conflict && <span className="text-amber font-semibold"> · viés misto (indicadores contraditórios)</span>}
++                </p>
++                <p className="text-[10px] text-text-muted mb-2">Por que este score: soma ponderada das contribuições medidas (surpresa × importância × impacto × confiança × atualidade), atenuada quando a evidência é escassa.</p>
++                <ul className="space-y-1">{s.drivers.map((d) => <DriverDetail key={d.event_id} d={d} />)}</ul>
++                {s.excluded_events && s.excluded_events.length > 0 && (
++                  <div className="mt-2">
++                    <p className="text-[10px] font-semibold text-text-muted mb-1">Eventos desta análise que NÃO pontuaram:</p>
++                    <ul className="space-y-0.5">{s.excluded_events.map((e) => <li key={e.event_id} className="text-[10px] text-text-muted">{e.event} — {e.reason}</li>)}</ul>
++                  </div>
+                 )}
+               </div>
+             )}
+           </div>
+         );
+       })}
+-      {sorted.length === 0 && <p className="text-xs text-text-muted">Nenhum score calculado ainda. Rode uma Análise Macro.</p>}
+-    </div>
+-  );
+-}
++      {insufficient.length > 0 && (
++        <div className="rounded-xl border border-dashed border-border px-3 py-2">
++          <p className="text-[11px] font-bold text-text-muted mb-1">Sem evidência suficiente — sem score e sem posição no ranking</p>
++          <div className="flex flex-wrap gap-1.5">
++            {insufficient.map((s) => (
++              <span key={s.currency} className="text-[11px] font-semibold text-text-muted border border-border rounded-md px-2 py-0.5" title={s.excluded_events?.[0]?.reason ?? "Nenhuma divulgação com direção mensurável nesta análise."}>
++                {s.currency} · score —
++              </span>
++            ))}
++          </div>
++          <p className="text-[10px] text-text-muted mt-1">Ausência de dado não é fraqueza: estas moedas não foram medidas nesta análise.</p>
++        </div>
++      )}
++      {evaluated.length === 0 && insufficient.length === 0 && <p className="text-xs text-text-muted">Nenhum score calculado ainda. Rode uma Análise Macro.</p>}
++    </div>
++  );
++}
+diff --git a/src/components/ai/MacroSummary.tsx b/src/components/ai/MacroSummary.tsx
+index cb23dea..70ac2f9 100644
+--- a/src/components/ai/MacroSummary.tsx
++++ b/src/components/ai/MacroSummary.tsx
+@@ -72,7 +72,7 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
+         <div>
+           <p className="text-[10px] uppercase tracking-wider text-text-muted">Qualidade da amostra</p>
+           <p className="text-[11px] text-text-secondary mt-1 leading-snug">
+-            {s.no_data_currencies.length > 0 && <>Sem dado: <b className="text-text-primary">{s.no_data_currencies.join(", ")}</b> (neutras por ausência de evidência).<br /></>}
++            {s.no_data_currencies.length > 0 && <>Sem evidência suficiente: <b className="text-text-primary">{s.no_data_currencies.join(", ")}</b> (sem score — ausência de evidência não é fraqueza).<br /></>}
+             {s.conflicted_currencies.length > 0 && <>Viés misto: <b className="text-amber">{s.conflicted_currencies.join(", ")}</b>.</>}
+             {s.no_data_currencies.length === 0 && s.conflicted_currencies.length === 0 && <span className="text-emerald">Evidência consistente nas 8 moedas.</span>}
+           </p>
+diff --git a/src/lib/ai/mock.ts b/src/lib/ai/mock.ts
+index d601807..daabc2a 100644
+--- a/src/lib/ai/mock.ts
++++ b/src/lib/ai/mock.ts
+@@ -10,12 +10,14 @@ export function mockStructured(schema: SchemaName, user: string): unknown {
+       return {
+         source_type: "forexfactory", detected_timezone: "GMT-3",
+         rows: [
+-          { date: today(), time: "09:30", currency: "USD", event: "Core CPI m/m", impact: "high", actual: "0.4%", forecast: "0.3%", previous: "0.2%", status: "released", ocr_confidence: 0.96, requires_manual_confirmation: false, ocr_issues: ["none"] },
+-          { date: today(), time: "21:30", currency: "AUD", event: "Employment Change", impact: "high", actual: null, forecast: "25.0K", previous: "47.5K", status: "pending", ocr_confidence: 0.9, requires_manual_confirmation: false, ocr_issues: ["none"] },
+-          { date: today(), time: "05:00", currency: "EUR", event: "Flash Services PMI", impact: "medium", actual: "51.2", forecast: "50.6", previous: "50.5", status: "released", ocr_confidence: 0.62, requires_manual_confirmation: true, ocr_issues: ["blurry"] },
++          { date: today(), time: "09:30", currency: "USD", event: "Core CPI m/m", impact: "high", actual: "0.4%", forecast: "0.3%", previous: "0.2%", status: "released", ocr_confidence: 0.96, requires_manual_confirmation: false, ocr_issues: ["none"], raw_row_text: "transcrição de teste" },
++          { date: today(), time: "21:30", currency: "AUD", event: "Employment Change", impact: "high", actual: null, forecast: "25.0K", previous: "47.5K", status: "pending", ocr_confidence: 0.9, requires_manual_confirmation: false, ocr_issues: ["none"], raw_row_text: "transcrição de teste" },
++          { date: today(), time: "05:00", currency: "EUR", event: "Flash Services PMI", impact: "medium", actual: "51.2", forecast: "50.6", previous: "50.5", status: "released", ocr_confidence: 0.62, requires_manual_confirmation: true, ocr_issues: ["blurry"], raw_row_text: "transcrição de teste" },
+         ],
+         overall_ocr_confidence: 0.83, notes: ["Resposta MOCK — configure OPENAI_API_KEY para OCR real."],
+       };
++    case "calendar_visibility":
++      return { verdicts: [] };
+     case "event_interpretation": {
+       const ids = [...user.matchAll(/"id":\s*(\d+)/g)].map((m) => Number(m[1]));
+       const ccyByEvent = new Map<number, string>();
+diff --git a/src/lib/ai/prompts/index.ts b/src/lib/ai/prompts/index.ts
+index 2934f84..7381217 100644
+--- a/src/lib/ai/prompts/index.ts
++++ b/src/lib/ai/prompts/index.ts
+@@ -4,8 +4,14 @@ export interface PromptDef { key: string; version: string; system: string }
+ 
+ export const OCR_ECONOMIC_CALENDAR: PromptDef = {
+   key: "ocr-economic-calendar",
+-  version: "ocr-economic-calendar-v1",
+-  system: "Você é um extrator de dados de calendários econômicos (OCR estruturado). Sua ÚNICA tarefa é transcrever fielmente o que está visível nas imagens de calendário (Forex Factory ou similar). Você NÃO interpreta, NÃO opina, NÃO completa.\n\n## Regras invioláveis\n1. **Nunca invente valores.** Se Actual, Forecast ou Previous estiver vazio, cortado, borrado ou ambíguo → `null`, marque `requires_manual_confirmation: true` e descreva em `ocr_issues`.\n2. **Actual vazio = evento pendente** (`status: \"pending\"`). Jamais copie Forecast para Actual. Jamais marque `released` sem Actual legível.\n3. Transcreva os valores **como texto, exatamente como exibidos**: `\"2.4%\"`, `\"-0.1%\"`, `\"150K\"`, `\"<0.1%\"`, `\"1.25B\"`. Não converta unidades, não arredonde, não remova sinais.\n4. Sinal negativo: preste atenção especial. Se não tiver certeza se é `-0.1` ou `0.1`, retorne o valor com `ocr_confidence ≤ 0.5` e `ocr_issues: [\"ambiguous_sign\"]`.\n5. **Impacto** no Forex Factory é indicado por cor da pasta: vermelho = `HIGH`, laranja = `MEDIUM`, amarelo = `LOW`, cinza = `holiday`/sem impacto. Se a cor não estiver clara → `UNKNOWN` + `ocr_issues: [\"color_only_impact\"]`.\n6. **Data**: Forex Factory agrupa linhas por dia; linhas sem data própria herdam a data do cabeçalho de dia acima. Se não houver cabeçalho visível → `date: null`.\n7. **Hora**: use o horário exibido (fuso do screenshot), formato `HH:MM` 24h. \"All Day\", \"Tentative\", \"Day 1/2\" → use `\"all_day\"` ou `\"tentative\"`. Horário sem AM/PM visível → mantenha o exibido.\n8. **Moeda**: somente `USD EUR GBP JPY CHF CAD AUD NZD`; `CNY` quando aparecer; qualquer outra → `OTHER`. Linhas `OTHER` devem ser incluídas (o backend filtra).\n9. Valores entre parênteses ou com cor diferente podem indicar **revisão do Previous**. Transcreva o número visível e adicione `ocr_issues: [\"revision_suspected\"]` em notas se perceber revisão.\n10. Se a imagem contiver várias páginas/scrolls sobrepostos, **não duplique linhas**; se a mesma linha aparecer em duas imagens, inclua uma vez.\n11. `ocr_confidence` por linha: 0.95+ texto nítido; 0.7–0.9 pequeno/levemente borrado; < 0.6 incerto. `overall_ocr_confidence` = média ponderada. Qualquer linha < 0.7 → `requires_manual_confirmation: true`.\n12. Nome do evento: transcreva como exibido (ex.: `Core CPI m/m`, `Non-Farm Employment Change`, `FOMC Statement`, `BOJ Policy Rate`). Não traduza.\n\n## Saída\nRetorne SOMENTE o JSON conforme o schema `calendar_extraction`. Sem texto fora do JSON.",
++  version: "ocr-economic-calendar-v2",
++  system: "Você é um EXTRATOR de dados de calendário econômico (Forex Factory ou similar). Você NÃO interpreta, NÃO classifica, NÃO opina, NÃO completa, NÃO usa conhecimento externo.\n\n## Regra absoluta\nA IA NÃO PODE AFIRMAR QUE LEU UM DADO QUE NÃO ESTÁ PRESENTE NA IMAGEM.\n- Campo não visível ⇒ null.\n- Texto visível mas ilegível ⇒ \"UNREADABLE\" (no raw_row_text) e a linha inteira com ocr_confidence ≤ 0.4.\n- Dúvida sobre um campo ⇒ \"UNKNOWN\" no campo de impacto; nos demais, null.\n- NUNCA estime, arredonde, complete, copie Forecast para Actual, nem use valores de outras linhas.\n\n## Campos por linha (cada evento visível, uma vez)\n- date: YYYY-MM-DD se o cabeçalho do dia estiver visível; senão null. Linhas sem data própria herdam o cabeçalho de dia acima.\n- time: HH:MM 24h como exibido; \"all_day\" ou \"tentative\" quando exibido assim; null se ausente.\n- currency: USD EUR GBP JPY CHF CAD AUD NZD CNY BRL, ou OTHER para as demais.\n- event: nome EXATO como exibido (não traduza, não abrevie).\n- impact: high (vermelho) | medium (laranja) | low (amarelo) | holiday (cinza/feriado) | unknown.\n- actual / forecast / previous: texto exato como exibido (\"2.4%\", \"-0.1%\", \"150K\", \"<0.1%\", \"1.25B\"). Vazio ⇒ null.\n- status: \"released\" somente se ACTUAL estiver visível; senão \"pending\".\n- raw_row_text: a transcrição LITERAL da linha inteira como aparece (moeda, horário, evento, valores). Obrigatório. Esta é a prova de origem: o backend confere moeda, evento e valores contra este texto.\n- ocr_confidence: 0–1 da leitura desta linha (≥0.95 nítido; 0.7–0.9 pequeno/borrado; <0.6 incerto).\n- requires_manual_confirmation: true se houver qualquer dúvida.\n- ocr_issues: lista de problemas (blurry, cut_off, ambiguous_sign, color_only_impact, revision_suspected, none).\n\n## Duplicatas e escopo\n- Se a mesma linha aparecer em duas imagens/rolagens, inclua uma vez.\n- Inclua todas as moedas visíveis (o backend filtra o escopo). Não omita linhas.\n\n## Saída\nSomente o JSON conforme o schema calendar_extraction. Sem texto fora do JSON.",
++};
++
++export const OCR_VISIBILITY_CHECK: PromptDef = {
++  key: "ocr-visibility-check",
++  version: "ocr-visibility-check-v1",
++  system: "Você confere uma lista de linhas de calendário econômico CONTRA a imagem enviada. Para cada linha candidata (índice, moeda, evento, horário, valores), responda visible=true somente se essa linha (moeda + nome do evento) está realmente visível na imagem. Se não encontrar, visible=false. Não tente corrigir, não complete, não julgue o mercado. Em dúvida, visible=false.\n\nRegra absoluta: a IA NÃO PODE AFIRMAR QUE VIU UM DADO QUE NÃO ESTÁ NA IMAGEM.\n\nSaída: somente JSON conforme o schema calendar_visibility.",
+ };
+ 
+ export const MACRO_SYSTEM: PromptDef = {
+@@ -55,6 +61,7 @@ export const B3_SESSION_BRIEF: PromptDef = {
+ 
+ export const PROMPTS = {
+   "ocr-economic-calendar": OCR_ECONOMIC_CALENDAR,
++  "ocr-visibility-check": OCR_VISIBILITY_CHECK,
+   "macro-system": MACRO_SYSTEM,
+   "session-brief": SESSION_BRIEF,
+   "technical-smc-ict": TECHNICAL_SMC_ICT,
+diff --git a/src/lib/ai/schemas.ts b/src/lib/ai/schemas.ts
+index 5c7b050..71d4f2b 100644
+--- a/src/lib/ai/schemas.ts
++++ b/src/lib/ai/schemas.ts
+@@ -28,6 +28,8 @@ export const CalendarExtractionSchema = z.object({
+       ocr_confidence: z.number().min(0).max(1),
+       requires_manual_confirmation: z.boolean(),
+       ocr_issues: z.array(z.enum(["blurry", "cut_off", "ambiguous_sign", "ambiguous_decimal", "overlapping_text", "color_only_impact", "revision_suspected", "none"])),
++      /** Texto EXATO da linha como visível (cópia). Prova de origem: moeda, evento e valores precisam estar aqui. "UNREADABLE" se ilegível. */
++      raw_row_text: z.string().describe("Transcrição literal da linha inteira; 'UNREADABLE' se ilegível"),
+     }),
+   ),
+   overall_ocr_confidence: z.number().min(0).max(1),
+@@ -35,6 +37,16 @@ export const CalendarExtractionSchema = z.object({
+ });
+ export type CalendarExtraction = z.infer<typeof CalendarExtractionSchema>;
+ 
++/** 2ª chamada: a IA confirma, olhando a imagem, se cada linha candidata realmente aparece nela. */
++export const CalendarVisibilitySchema = z.object({
++  verdicts: z.array(z.object({
++    index: z.number().int().describe("índice da linha candidata, como enviado"),
++    visible: z.boolean().describe("true somente se a linha (moeda + evento) está visível na imagem"),
++    reason: z.string().describe("curto: onde na imagem a linha aparece, ou por que não aparece"),
++  })),
++});
++export type CalendarVisibility = z.infer<typeof CalendarVisibilitySchema>;
++
+ // ---------------------------------------------------------------------------
+ // 2) Interpretação macro por evento
+ // ---------------------------------------------------------------------------
+@@ -219,6 +231,7 @@ export type B3Brief = z.infer<typeof B3BriefSchema>;
+ 
+ export const SCHEMAS = {
+   calendar_extraction: CalendarExtractionSchema,
++  calendar_visibility: CalendarVisibilitySchema,
+   market_extraction: MarketExtractionSchema,
+   b3_brief: B3BriefSchema,
+   event_interpretation: EventInterpretationSchema,
+diff --git a/src/lib/ai/service.ts b/src/lib/ai/service.ts
+index d3e17a3..b6a0818 100644
+--- a/src/lib/ai/service.ts
++++ b/src/lib/ai/service.ts
+@@ -11,7 +11,8 @@ import type { PromptDef } from "./prompts";
+ import { getEnv } from "@/lib/env";
+ import { mockStructured } from "./mock";
+ 
+-export type AIProvider = "openai" | "gemini" | "mock";
++/** Provedores de IA. Toda a análise de dados (scores, ranking) é determinística; a IA só extrai (visão) e explica. */
++export type AIProvider = "openai" | "gemini" | "openrouter" | "groq" | "qwen" | "mock";
+ 
+ export interface AIImage {
+   base64: string; // sem prefixo data:
+@@ -56,7 +57,15 @@ let logger: Logger | null = null;
+ /** Injeta o logger de auditoria (ai_calls). Mantido fora deste módulo para testes sem banco. */
+ export function setAICallLogger(fn: Logger | null) { logger = fn; }
+ 
+-export function resolveProvider(): { provider: AIProvider; model: string; apiKey: string | null } {
++const OPENAI_COMPATIBLE: Record<string, { baseUrl: string; keyEnv: "OPENROUTER_API_KEY" | "GROQ_API_KEY" | "QWEN_API_KEY"; modelEnv: "OPENROUTER_MODEL" | "GROQ_MODEL" | "QWEN_MODEL"; defaultModel: string }> = {
++  // Qwen3.8 27B é um modelo visão-linguagem com endpoint gratuito no OpenRouter (qwen/qwen3.8-27b:free).
++  openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", modelEnv: "OPENROUTER_MODEL", defaultModel: "qwen/qwen3.8-27b:free" },
++  groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY", modelEnv: "GROQ_MODEL", defaultModel: "meta-llama/llama-4-scout-17b-16e-instruct" },
++  qwen: { baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", keyEnv: "QWEN_API_KEY", modelEnv: "QWEN_MODEL", defaultModel: "qwen3-vl-plus" },
++};
++
++/** Resolve o provedor. Sem chave do provedor pedido ⇒ "mock" (a extração de screenshot RECUSA mock — ver economic-data-provider). */
++export function resolveProvider(): { provider: AIProvider; model: string; apiKey: string | null; baseUrl?: string } {
+   const env = getEnv();
+   const requested = (env.AI_PROVIDER || "openai").toLowerCase() as AIProvider;
+   if (requested === "mock") return { provider: "mock", model: "mock-1", apiKey: null };
+@@ -64,10 +73,19 @@ export function resolveProvider(): { provider: AIProvider; model: string; apiKey
+     if (!env.GEMINI_API_KEY) return { provider: "mock", model: "mock-1 (GEMINI_API_KEY ausente)", apiKey: null };
+     return { provider: "gemini", model: env.GEMINI_MODEL || "gemini-3.8-flash", apiKey: env.GEMINI_API_KEY };
+   }
++  const compat = OPENAI_COMPATIBLE[requested];
++  if (compat) {
++    const key = env[compat.keyEnv];
++    if (!key) return { provider: "mock", model: `mock-1 (${compat.keyEnv} ausente)`, apiKey: null };
++    const base = requested === "qwen" && env.QWEN_BASE_URL ? env.QWEN_BASE_URL : compat.baseUrl;
++    return { provider: requested, model: env[compat.modelEnv] || compat.defaultModel, apiKey: key, baseUrl: base };
++  }
+   if (!env.OPENAI_API_KEY) return { provider: "mock", model: "mock-1 (OPENAI_API_KEY ausente)", apiKey: null };
+   return { provider: "openai", model: env.OPENAI_MODEL || "gpt-4.1-mini", apiKey: env.OPENAI_API_KEY };
+ }
+ 
++export function isRealProvider(p: AIProvider): boolean { return p !== "mock"; }
++
+ const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+ 
+ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+@@ -98,7 +116,7 @@ export async function generateStructured<N extends SchemaName>(
+   const zodSchema = SCHEMAS[req.schemaName];
+   const jsonSchema = toJsonSchema(zodSchema);
+   const resolved = resolveProvider();
+-  const { provider, apiKey } = resolved;
++  const { provider, apiKey, baseUrl } = resolved;
+   const model = modelOverride ?? resolved.model;
+   const started = Date.now();
+   const timeoutMs = req.timeoutMs ?? 90_000;
+@@ -126,6 +144,9 @@ export async function generateStructured<N extends SchemaName>(
+       let raw: string;
+       if (provider === "mock") {
+         raw = JSON.stringify(mockStructured(req.schemaName, req.user));
++      } else if (provider === "openrouter" || provider === "groq" || provider === "qwen") {
++        const r = await callOpenAICompatible({ baseUrl: baseUrl!, apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs, provider });
++        raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
+       } else if (provider === "openai") {
+         const r = await callOpenAI({ apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, schemaName: req.schemaName, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs });
+         raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
+@@ -257,3 +278,38 @@ function geminiSchema(node: unknown): unknown {
+   if (n.items) n.items = geminiSchema(n.items);
+   return n;
+ }
++
++// ---------------------------------------------------------------------------
++// OpenAI-compatible (OpenRouter, Groq, Qwen/DashScope) — Chat Completions com imagens.
++// O schema vai no prompt e a resposta é validada por Zod (com retry); json_object é o modo mais portável.
++// ---------------------------------------------------------------------------
++async function callOpenAICompatible(p: { baseUrl: string; apiKey: string; model: string; system: string; user: string; images: AIImage[]; jsonSchema: Record<string, unknown>; temperature: number; maxOutputTokens: number; timeoutMs: number; provider: string }) {
++  const content: Record<string, unknown>[] = [{ type: "text", text: p.user }];
++  for (const img of p.images) {
++    if (img.label) content.push({ type: "text", text: `[Imagem: ${img.label}]` });
++    content.push({ type: "image_url", image_url: { url: `data:${img.mime};base64,${img.base64}` } });
++  }
++  const system = `${p.system}\n\nResponda SOMENTE com um objeto JSON válido que respeite exatamente este JSON Schema (sem texto fora do JSON):\n${JSON.stringify(p.jsonSchema)}`;
++  const body = {
++    model: p.model,
++    messages: [{ role: "system", content: system }, { role: "user", content }],
++    temperature: p.temperature,
++    max_tokens: p.maxOutputTokens,
++    response_format: { type: "json_object" },
++  };
++  const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` };
++  if (p.provider === "openrouter") { headers["HTTP-Referer"] = "https://trading-pro.junior-a-b2704.workers.dev"; headers["X-Title"] = "Trading Pro"; }
++  const res = await fetchWithTimeout(`${p.baseUrl.replace(/\/$/, "")}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body) }, p.timeoutMs);
++  if (!res.ok) {
++    const txt = await res.text().catch(() => "");
++    let msg = `${p.provider} HTTP ${res.status}`;
++    try { msg += `: ${JSON.parse(txt)?.error?.message ?? ""}`; } catch { msg += txt ? `: ${txt.slice(0, 200)}` : ""; }
++    throw new AIError(msg, res.status);
++  }
++  const json = (await res.json()) as { choices?: { message?: { content?: string | null } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
++  let text = json.choices?.[0]?.message?.content ?? "";
++  // alguns modelos envolvem o JSON em cercas de código — remove antes de validar
++  text = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
++  if (!text) throw new AIError(`${p.provider} retornou vazio`, 502);
++  return { text, inputTokens: json.usage?.prompt_tokens ?? null, outputTokens: json.usage?.completion_tokens ?? null };
++}
+diff --git a/src/lib/ai/types.ts b/src/lib/ai/types.ts
+index f8f9420..70aa395 100644
+--- a/src/lib/ai/types.ts
++++ b/src/lib/ai/types.ts
+@@ -14,7 +14,8 @@ export const CENTRAL_BANKS: Record<Currency, string> = {
+   USD: "FED", EUR: "ECB", GBP: "BOE", JPY: "BOJ", CHF: "SNB", CAD: "BOC", AUD: "RBA", NZD: "RBNZ",
+ };
+ 
+-export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH"] as const;
++/** UNKNOWN = divulgação sem direção mensurável (fala sem texto, indicador fora da tabela, sem ATUAL/referência). Não pontua. */
++export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH", "UNKNOWN"] as const;
+ export type Classification = (typeof CLASSIFICATIONS)[number];
+ 
+ export const CATEGORIES = ["INFLATION", "EMPLOYMENT", "GROWTH", "ACTIVITY", "CENTRAL_BANK", "HOUSING", "CONSUMPTION", "SENTIMENT", "TRADE", "FISCAL", "OTHER"] as const;
+@@ -74,39 +75,58 @@ export interface EconomicEventInput {
+   user_edited?: boolean;
+ }
+ 
++/** Status explícito por moeda. INSUFFICIENT_EVIDENCE ⇒ score = null (NUNCA 0), sem posição no ranking. */
++export type CurrencyStatus = "EVALUATED" | "INSUFFICIENT_EVIDENCE";
++/** Moeda com evidência: score, rank e confiança são números (sem null). */
++export type EvaluatedCurrency = CurrencyScoreView & { score: number; rank: number; confidence_pct: number };
++
++/** Evidência usada no score (auditável). direction vem da tabela semântica (código), não da IA. */
++export interface ScoreDriver {
++  event_id: number; event: string; classification: Classification; weight: number; released_at: string;
++  /** direction_value × peso — quanto este evento empurrou o score (sinal = direção). */
++  contribution?: number;
++  category?: Category;
++  importance?: Importance;
++  /** evidência primária (alta importância e impacto não-baixo) */
++  primary?: boolean;
++  direction?: "BULLISH" | "BEARISH" | "NEUTRAL";
++  actual?: string | null; forecast?: string | null; previous?: string | null;
++  /** ATUAL − referência (forecast, ou previous com confiança rebaixada). */
++  surprise?: number | null;
++  reference_basis?: "FORECAST" | "PREVIOUS" | "NONE";
++  rule_id?: string | null;
++  explanation?: string;
++  source?: string;
++}
++
+ export interface CurrencyScoreView {
+   currency: Currency;
+-  score: number;
+-  score_raw: number;
++  status: CurrencyStatus;
++  /** Score nativo (−2..+2). NULL = sem evidência (ausência de dado ≠ zero = ausência de efeito). */
++  score: number | null;
++  score_raw: number | null;
+   previous_score: number | null;
+   score_delta: number | null;
+   momentum: Momentum | null;
+-  classification: ScoreClassification;
+-  bias: "BULLISH" | "NEUTRAL" | "BEARISH";
+-  confidence: Confidence;
+-  rank: number;
++  classification: ScoreClassification | null;
++  bias: "BULLISH" | "NEUTRAL" | "BEARISH" | null;
++  /** HIGH/MEDIUM/LOW da EVIDÊNCIA; INSUFFICIENT_EVIDENCE quando não há dado. Nunca mascara falta de evidência. */
++  confidence: Confidence | "INSUFFICIENT_EVIDENCE";
++  /** Posição no ranking — só para moedas EVALUATED. */
++  rank: number | null;
+   live_events: number;
+-  drivers: {
+-    event_id: number; event: string; classification: Classification; weight: number; released_at: string;
+-    /** direction_value × peso — quanto este evento empurrou o score (sinal = direção). */
+-    contribution?: number;
+-    category?: Category;
+-    importance?: Importance;
+-    /** evidência primária (alta importância e impacto não-baixo) */
+-    primary?: boolean;
+-  }[];
+-  /** Confiança 0–100 da EVIDÊNCIA macro (não é probabilidade de alta/baixa). */
+-  confidence_pct?: number;
++  drivers: ScoreDriver[];
++  /** Eventos desta análise que NÃO pontuaram, com o motivo (direção desconhecida, etc.). */
++  excluded_events?: { event_id: number; event: string; reason: string }[];
++  /** Confiança 0–100 da EVIDÊNCIA macro (não é probabilidade de alta/baixa). null se sem evidência. */
++  confidence_pct: number | null;
+   /** Peso total vivo — massa de evidência (não é contagem de eventos). */
+   evidence_mass?: number;
+-  /** 0–1: concordância de direção entre os eventos vivos. */
+   agreement?: number;
+-  /** true quando há indicadores relevantes em direções opostas (viés misto). */
+   conflict?: boolean;
+-  /** true quando não há nenhum dado vivo — moeda é NEUTRA por falta de dado, não fraca. */
+   no_data?: boolean;
+-  /** Score na escala de apresentação (−5..+5). */
+-  score_display?: number;
++  /** score × display_scale (−5..+5); null se sem evidência. */
++  score_display: number | null;
+ }
+ 
+ export interface TradeCandidateView {
+@@ -168,6 +188,10 @@ export interface MacroAnalysisResult {
+   summary?: MacroSummaryView;
+   warnings: string[];
+   meta: { scoring_version: string; prompt_version: string | null; model: string | null; events_interpreted: number };
++  /** OK = ranking confiável. ANALISE_INSUFICIENTE = a validação de consistência falhou (ver audit.checks). */
++  analysis_status?: "OK" | "ANALISE_INSUFICIENTE";
++  /** Auditoria completa: extração bruta, eventos aceitos/rejeitados, checagens de consistência. */
++  audit?: AnalysisAudit;
+ }
+ 
+ /** Resumo macro consolidado — fonte única para o dashboard (evita recalcular na UI). */
+@@ -183,3 +207,23 @@ export interface MacroSummaryView {
+   top_short: TradeCandidateView[];
+   alerts: string[];
+ }
++
++export interface AuditCheck { id: string; label: string; passed: boolean; detail: string }
++
++export interface AnalysisAudit {
++  analysis_id: string;
++  checks: AuditCheck[];
++  trusted: boolean;
++  /** Extração por IA (quando a análise veio de screenshot). JSON bruto + validação. */
++  extraction: {
++    provider: string | null; model: string | null;
++    raw_json: unknown;
++    rows_received: number;
++    accepted: { currency: string; event: string; time: string | null; actual: string | null; forecast: string | null; previous: string | null; confidence: number | null; raw_row_text: string | null }[];
++    rejected: { index: number; currency: string | null; event: string | null; reason: string }[];
++    values_discarded: { currency: string; event: string; field: "actual" | "forecast" | "previous"; value: string; reason: string }[];
++    visual_verification: "OK" | "REJECTED_SOME" | "UNAVAILABLE" | "SKIPPED";
++  } | null;
++  /** Por moeda: evidência e score final (espelha currencies, mas em formato de auditoria). */
++  scores: { currency: string; score: number | null; status: CurrencyStatus; evidence_count: number; excluded_count: number }[];
++}
+diff --git a/src/lib/b3/pipeline.ts b/src/lib/b3/pipeline.ts
+index b79796d..e13837f 100644
+--- a/src/lib/b3/pipeline.ts
++++ b/src/lib/b3/pipeline.ts
+@@ -6,7 +6,7 @@
+ import { and, desc, eq, gte, sql } from "drizzle-orm";
+ import { getDb } from "@/db";
+ import { b3MacroAnalyses, b3Scores, b3Settings, b3TradeCandidates, diCurveSnapshots, economicEvents, macroInterpretations, marketSnapshots } from "@/db/schema";
+-import type { CurrencyScoreView, EconomicEventInput } from "@/lib/ai/types";
++import type { CurrencyScoreView, Confidence, EconomicEventInput, ScoreClassification } from "@/lib/ai/types";
+ import { generateStructured } from "@/lib/ai/service";
+ import { B3_SESSION_BRIEF, MACRO_BRAZIL_SYSTEM } from "@/lib/ai/prompts";
+ import { computeCurrencyScores } from "@/lib/macro/scoring";
+@@ -171,13 +171,16 @@ export async function runB3Analysis(input: RunB3Input): Promise<B3AnalysisResult
+   const scored = await loadScoredEvents(scfg);
+   const prevG8 = await latestScores().catch(() => [] as CurrencyScoreView[]);
+   const prevB3: Awaited<ReturnType<typeof latestB3Scores>> = await latestB3Scores().catch(() => ({}));
+-  const ccyScores = computeCurrencyScores({ events: scored, now, cfg: scfg, currencies: ["USD", "BRL", "CNY"], previousScores: { USD: prevG8.find((p) => p.currency === "USD")?.score, BRL: prevB3.BRL?.score } });
++  // B3 ainda usa o motor com a convenção antiga (sem dado ⇒ 0) — pendência registrada; o G8 já usa null.
++  type B3Score = Omit<CurrencyScoreView, "score" | "score_raw" | "confidence" | "classification" | "bias"> & { score: number; score_raw: number; confidence: Confidence; classification: ScoreClassification; bias: "BULLISH" | "NEUTRAL" | "BEARISH" };
++  const b3Safe = (x: CurrencyScoreView): B3Score => ({ ...x, score: x.score ?? 0, score_raw: x.score_raw ?? 0, confidence: x.confidence === "INSUFFICIENT_EVIDENCE" ? "LOW" : x.confidence, classification: x.classification ?? "NEUTRAL", bias: x.bias ?? "NEUTRAL" });
++  const ccyScores = computeCurrencyScores({ events: scored, now, cfg: scfg, currencies: ["USD", "BRL", "CNY"], previousScores: { USD: prevG8.find((p) => p.currency === "USD")?.score, BRL: prevB3.BRL?.score } }).map(b3Safe);
+   const byCcy = (c: string) => ccyScores.find((x) => (x.currency as string) === c);
+   const usd = byCcy("USD")!;
+   const brlEv = byCcy("BRL")!;
+   const cny = byCcy("CNY") ?? null;
+   const g8usd = prevG8.find((p) => p.currency === "USD");
+-  const usdNote = g8usd && Math.abs(g8usd.score - usd.score) >= 0.25 ? `USD recalculado (${usd.score}) difere do último snapshot G8 (${g8usd.score}) por eventos novos — o Ranking G8 será atualizado na próxima análise G8.` : null;
++  const usdNote = g8usd && g8usd.score !== null && Math.abs(g8usd.score - usd.score) >= 0.25 ? `USD recalculado (${usd.score}) difere do último snapshot G8 (${g8usd.score}) por eventos novos — o Ranking G8 será atualizado na próxima análise G8.` : null;
+ 
+   // 3) Contexto: DI, fluxo, previous
+   const diRow = await loadLatestDi(now, cfg, evidence);
+diff --git a/src/lib/env.ts b/src/lib/env.ts
+index 7487595..c3a4f0a 100644
+--- a/src/lib/env.ts
++++ b/src/lib/env.ts
+@@ -11,12 +11,21 @@ export interface AppEnv {
+   GEMINI_API_KEY?: string;
+   GEMINI_MODEL?: string;
+   GEMINI_FALLBACK_MODEL?: string;
++  OPENROUTER_API_KEY?: string;
++  OPENROUTER_MODEL?: string;
++  GROQ_API_KEY?: string;
++  GROQ_MODEL?: string;
++  QWEN_API_KEY?: string;
++  QWEN_MODEL?: string;
++  QWEN_BASE_URL?: string;
++  /** "0" desliga a 2ª chamada de verificação visual (não recomendado). */
++  MACRO_VISUAL_VERIFY?: string;
+   OPENAI_FALLBACK_MODEL?: string;
+   APP_API_TOKEN?: string;
+   DATABASE_URL?: string;
+ }
+ 
+-const KEYS: (keyof AppEnv)[] = ["AI_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_FALLBACK_MODEL", "OPENAI_FALLBACK_MODEL", "APP_API_TOKEN", "DATABASE_URL"];
++const KEYS: (keyof AppEnv)[] = ["AI_PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "GROQ_API_KEY", "GROQ_MODEL", "QWEN_API_KEY", "QWEN_MODEL", "QWEN_BASE_URL", "MACRO_VISUAL_VERIFY", "OPENAI_API_KEY", "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_FALLBACK_MODEL", "OPENAI_FALLBACK_MODEL", "APP_API_TOKEN", "DATABASE_URL"];
+ 
+ let overrides: Partial<AppEnv> | null = null;
+ /** Para testes: sobrescreve o ambiente sem tocar em process.env. */
+diff --git a/src/lib/macro/config.ts b/src/lib/macro/config.ts
+index 8af2c9a..7cb02cc 100644
+--- a/src/lib/macro/config.ts
++++ b/src/lib/macro/config.ts
+@@ -43,7 +43,7 @@ export interface ScoringConfig {
+ 
+ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
+   version: "v2-evidence",
+-  direction_value: { VERY_BULLISH: 2, BULLISH: 1, NEUTRAL: 0, BEARISH: -1, VERY_BEARISH: -2 },
++  direction_value: { VERY_BULLISH: 2, BULLISH: 1, NEUTRAL: 0, BEARISH: -1, VERY_BEARISH: -2, UNKNOWN: 0 },
+   importance_weight: { HIGH: 1.0, MEDIUM_HIGH: 0.7, MEDIUM: 0.45, LOW: 0.25 },
+   category_multiplier: {
+     CENTRAL_BANK: 1.0, INFLATION: 0.95, EMPLOYMENT: 0.9, GROWTH: 0.75, ACTIVITY: 0.65, CONSUMPTION: 0.6,
+diff --git a/src/lib/macro/consistency.ts b/src/lib/macro/consistency.ts
+new file mode 100644
+index 0000000..e3ceab6
+--- /dev/null
++++ b/src/lib/macro/consistency.ts
+@@ -0,0 +1,71 @@
++/**
++ * Validação de CONSISTÊNCIA executada antes de mostrar o resultado.
++ * Qualquer NÃO ⇒ trusted = false ⇒ a UI mostra "ANÁLISE INSUFICIENTE" com o motivo, sem ranking.
++ */
++import type { AnalysisAudit, AuditCheck, CurrencyScoreView } from "@/lib/ai/types";
++import { valueAppearsInRow } from "./extraction-validation";
++
++export interface ConsistencyInput {
++  ranked: CurrencyScoreView[];
++  /** IDs dos eventos RAW gravados NESTA análise. Qualquer evidência fora deste conjunto é reutilização indevida. */
++  analysisEventIds: Set<number>;
++  /** Eventos liberados (com ATUAL) nesta análise. */
++  releasedCount: number;
++  /** Eventos liberados que receberam classificação nesta análise. Deve ser igual a releasedCount. */
++  classifiedCount: number;
++  inputType: "screenshot" | "structured" | "manual";
++  extraction: AnalysisAudit["extraction"];
++}
++
++export function runConsistencyChecks(i: ConsistencyInput): { trusted: boolean; checks: AuditCheck[] } {
++  const checks: AuditCheck[] = [];
++  const add = (id: string, label: string, passed: boolean, detail: string) => checks.push({ id, label, passed, detail });
++  const evaluated = i.ranked.filter((c) => c.status === "EVALUATED");
++  const insufficient = i.ranked.filter((c) => c.status !== "EVALUATED");
++
++  // 1. Só moedas com evidência recebem posição no ranking.
++  const badRank = i.ranked.filter((c) => (c.rank !== null) !== (c.status === "EVALUATED"));
++  add("ranking_only_evaluated", "Ranking contém apenas moedas com evidência", badRank.length === 0,
++    badRank.length === 0 ? `${evaluated.length} moeda(s) no ranking; ${insufficient.length} sem evidência fora dele.` : `Inconsistente em: ${badRank.map((c) => c.currency).join(", ")}`);
++
++  // 2. Toda moeda do ranking tem evidência e justificativa.
++  const unjustified = evaluated.filter((c) => c.score === null || c.live_events === 0 || c.drivers.length === 0);
++  add("every_score_justified", "Todo score possui evidência e justificativa", unjustified.length === 0,
++    unjustified.length === 0 ? "Todos os scores têm ao menos um evento mensurado." : `Sem justificativa: ${unjustified.map((c) => c.currency).join(", ")}`);
++
++  // 3. Moeda sem evidência não recebe 0 nem confiança.
++  const masked = insufficient.filter((c) => c.score !== null || c.confidence_pct !== null);
++  add("no_zero_substitution", "Moeda sem evidência não recebe 0 nem confiança", masked.length === 0,
++    masked.length === 0 ? `${insufficient.length} moeda(s) com score = null.` : `Mascaradas: ${masked.map((c) => c.currency).join(", ")}`);
++
++  // 4. Nenhum evento antigo reutilizado.
++  const foreign = i.ranked.flatMap((c) => c.drivers.filter((d) => !i.analysisEventIds.has(d.event_id)).map((d) => `${c.currency}:${d.event}`));
++  add("no_reused_events", "Nenhum evento de análise anterior foi reutilizado", foreign.length === 0,
++    foreign.length === 0 ? "Todas as evidências pertencem a esta análise." : `Eventos fora desta análise: ${foreign.slice(0, 5).join(", ")}`);
++
++  // 5. Eventos interpretados == eventos liberados aceitos.
++  add("interpreted_equals_extracted", "Eventos classificados = eventos liberados aceitos", i.classifiedCount === i.releasedCount,
++    `${i.classifiedCount} classificado(s) de ${i.releasedCount} liberado(s).`);
++
++  // 6. Valores usados existem no texto transcrito da própria linha.
++  if (i.extraction) {
++    const bad = i.extraction.accepted.filter((r) => r.raw_row_text && [r.actual, r.forecast, r.previous].some((v) => v && !valueAppearsInRow(v, r.raw_row_text!)));
++    add("values_traceable", "Todo valor usado aparece na linha transcrita", bad.length === 0,
++      bad.length === 0 ? `${i.extraction.accepted.length} linha(s) verificadas.` : `${bad.length} linha(s) com valor não rastreável.`);
++  } else {
++    add("values_traceable", "Todo valor usado aparece na linha transcrita", true, "Não se aplica (entrada manual/estruturada).");
++  }
++
++  // 7. Verificação visual (o evento está de fato no screenshot).
++  if (i.inputType === "screenshot") {
++    const v = i.extraction?.visual_verification ?? "UNAVAILABLE";
++    const ok = v === "OK" || v === "REJECTED_SOME";
++    add("visual_verification", "Eventos conferidos visualmente no screenshot", ok,
++      v === "OK" ? "Todos os eventos aceitos foram confirmados na imagem." : v === "REJECTED_SOME" ? "Alguns eventos foram removidos pela checagem visual." : "Checagem visual não concluída — eventos não confirmados na imagem.");
++  } else {
++    add("visual_verification", "Eventos conferidos visualmente no screenshot", true, "Não se aplica (entrada manual/estruturada).");
++  }
++
++  const trusted = checks.every((c) => c.passed);
++  return { trusted, checks };
++}
+diff --git a/src/lib/macro/economic-data-provider.ts b/src/lib/macro/economic-data-provider.ts
+index e5103b4..3479d76 100644
+--- a/src/lib/macro/economic-data-provider.ts
++++ b/src/lib/macro/economic-data-provider.ts
+@@ -1,19 +1,24 @@
+ /**
+- * EconomicDataProvider — abstração da ORIGEM dos dados do calendário.
++ * EconomicDataProvider — origem dos dados do calendário.
++ * Fluxo do screenshot (AI = extração; CÓDIGO = validação):
++ *   imagem → IA transcreve (JSON + raw_row_text) → código valida (moeda/evento/valores no texto da linha)
++ *          → IA confere cada linha contra a imagem (verificação visual) → código aceita só o confirmado.
+  * O restante do sistema só conhece EconomicEventInput[].
+- *  - ScreenshotAIProvider: OCR por IA com visão (v1)
+- *  - EconomicCalendarAPIProvider: API estruturada (futuro) — preferida quando configurada
+  */
+ import type { AIImage } from "@/lib/ai/service";
+-import { generateStructured } from "@/lib/ai/service";
+-import { OCR_ECONOMIC_CALENDAR } from "@/lib/ai/prompts";
++import { AIError, generateStructured, resolveProvider } from "@/lib/ai/service";
++import { OCR_ECONOMIC_CALENDAR, OCR_VISIBILITY_CHECK } from "@/lib/ai/prompts";
+ import type { CalendarExtraction } from "@/lib/ai/schemas";
+-import { G8, type AnyCurrency, type EconomicEventInput } from "@/lib/ai/types";
++import { G8, type AnalysisAudit, type AnyCurrency, type EconomicEventInput } from "@/lib/ai/types";
++import { validateExtractedRows, type RawExtractedRow } from "./extraction-validation";
++
++export type ExtractionAudit = NonNullable<AnalysisAudit["extraction"]>;
+ 
+ export interface ExtractionResult {
+   events: EconomicEventInput[];
+   raw: CalendarExtraction;
+-  meta: { provider: string; model: string; promptVersion: string; latencyMs: number; overallConfidence: number; ignoredRows: number };
++  meta: { provider: string; model: string; promptVersion: string; latencyMs: number; overallConfidence: number; ignoredRows: number; rejectedRows: number; discardedValues: number; visualVerification: ExtractionAudit["visual_verification"]; notes: string[] };
++  audit: ExtractionAudit;
+ }
+ 
+ export interface EconomicDataProvider {
+@@ -25,24 +30,70 @@ export class ScreenshotAIProvider implements EconomicDataProvider {
+   readonly name = "screenshot_ai";
+   async extract(input: { images?: AIImage[]; timezone?: string; referenceDate?: string; allowedCurrencies?: readonly AnyCurrency[] }): Promise<ExtractionResult> {
+     if (!input.images?.length) throw new Error("ScreenshotAIProvider requer ao menos uma imagem");
++    // Nunca extrair com o provedor "mock": ele inventa linhas. Sem IA configurada, a análise para aqui.
++    const resolved = resolveProvider();
++    if (resolved.provider === "mock") {
++      throw new AIError(`IA não configurada para leitura de screenshot (${resolved.model}). Defina AI_PROVIDER e a chave correspondente. Nenhum dado foi inventado.`, 503, "AI_NOT_CONFIGURED");
++    }
+     const allowed = (input.allowedCurrencies ?? G8) as readonly string[];
+     const res = await generateStructured({
+       purpose: "macro_extract", prompt: OCR_ECONOMIC_CALENDAR, schemaName: "calendar_extraction", images: input.images, temperature: 0,
+-      user: `Fuso esperado do screenshot: ${input.timezone ?? "America/Sao_Paulo (GMT-3)"}. Data de referência: ${input.referenceDate ?? new Date().toISOString().slice(0, 10)}. Extraia TODAS as linhas visíveis de todas as imagens, sem duplicar.`,
++      user: `Fuso esperado do screenshot: ${input.timezone ?? "America/Sao_Paulo (GMT-3)"}. Data de referência: ${input.referenceDate ?? new Date().toISOString().slice(0, 10)}. Extraia TODAS as linhas visíveis de todas as imagens, sem duplicar. Não interprete.`,
+     });
+-    const rows = res.data.rows;
+-    const events: EconomicEventInput[] = [];
+-    let ignored = 0;
+-    for (const r of rows) {
+-      if (!allowed.includes(r.currency)) { ignored++; continue; }
+-      const actual = r.status === "released" ? r.actual : null; // nunca tratar pendente como realizado
+-      events.push({
+-        date: r.date ?? input.referenceDate ?? null, time: r.time, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact,
+-        actual, forecast: r.forecast, previous: r.previous, source: "screenshot_ai",
+-        ocr_confidence: r.ocr_confidence, requires_manual_confirmation: r.requires_manual_confirmation || r.ocr_confidence < 0.7 || (r.status === "released" && !actual),
+-      });
++    const notes: string[] = [];
++
++    // 1) Validação determinística (código).
++    const v = validateExtractedRows(res.data.rows as RawExtractedRow[], { allowed });
++    let accepted = v.accepted;
++    const rejected: ExtractionAudit["rejected"] = v.rejected.map((r) => ({ index: r.index, currency: r.currency, event: r.event, reason: r.reason }));
++
++    // 2) Verificação visual (IA confere cada linha contra a imagem). Sem "visible: true" explícito ⇒ não aceita.
++    let visual: ExtractionAudit["visual_verification"] = "SKIPPED";
++    if (process.env.MACRO_VISUAL_VERIFY !== "0" && accepted.length) {
++      try {
++        const check = await generateStructured({
++          purpose: "macro_verify", prompt: OCR_VISIBILITY_CHECK, schemaName: "calendar_visibility", images: input.images, temperature: 0, timeoutMs: 60_000,
++          user: JSON.stringify({ candidates: accepted.map((a) => ({ index: a.index, currency: a.currency, event: a.event, time: a.time, actual: a.actual, forecast: a.forecast, previous: a.previous })) }),
++        });
++        const verdict = new Map(check.data.verdicts.map((x) => [x.index, x]));
++        const keep = [];
++        for (const a of accepted) {
++          const ver = verdict.get(a.index);
++          if (ver?.visible === true) keep.push(a);
++          else rejected.push({ index: a.index, currency: a.currency, event: a.event, reason: `não confirmada visualmente no screenshot${ver?.reason ? `: ${ver.reason}` : ""}` });
++        }
++        visual = rejected.some((r) => r.reason.startsWith("não confirmada")) ? "REJECTED_SOME" : "OK";
++        accepted = keep;
++      } catch (e) {
++        visual = "UNAVAILABLE";
++        notes.push(`Verificação visual não concluída (${(e as Error).message.slice(0, 120)}). Eventos NÃO confirmados na imagem — a análise fica insuficiente.`);
++      }
++    } else if (process.env.MACRO_VISUAL_VERIFY === "0") {
++      notes.push("Verificação visual desativada (MACRO_VISUAL_VERIFY=0). Análise marcada como insuficiente.");
+     }
+-    return { events, raw: res.data, meta: { provider: res.provider, model: res.model, promptVersion: res.promptVersion, latencyMs: res.latencyMs, overallConfidence: res.data.overall_ocr_confidence, ignoredRows: ignored } };
++
++    const noDate = accepted.filter((a) => !a.date).length;
++    if (noDate) notes.push(`${noDate} evento(s) sem data legível no screenshot — usada a data de referência.`);
++
++    const events: EconomicEventInput[] = accepted.map((a) => ({
++      date: a.date ?? input.referenceDate ?? null, time: a.time, currency: a.currency as AnyCurrency, event: a.event, impact: a.impact,
++      actual: a.actual, forecast: a.forecast, previous: a.previous, source: "screenshot_ai",
++      ocr_confidence: a.ocr_confidence, requires_manual_confirmation: a.requires_manual_confirmation,
++    }));
++
++    const audit: ExtractionAudit = {
++      provider: res.provider, model: res.model, raw_json: res.data, rows_received: res.data.rows.length,
++      accepted: accepted.map((a) => ({ currency: a.currency, event: a.event, time: a.time, actual: a.actual, forecast: a.forecast, previous: a.previous, confidence: a.ocr_confidence, raw_row_text: a.raw_row_text })),
++      rejected,
++      values_discarded: v.values_discarded.map((d) => ({ currency: d.currency, event: d.event, field: d.field, value: d.value, reason: d.reason })),
++      visual_verification: visual,
++    };
++
++    return {
++      events, raw: res.data,
++      meta: { provider: res.provider, model: res.model, promptVersion: res.promptVersion, latencyMs: res.latencyMs, overallConfidence: res.data.overall_ocr_confidence, ignoredRows: v.rejected.filter((r) => r.reason.startsWith("moeda fora do escopo")).length, rejectedRows: rejected.length, discardedValues: v.values_discarded.length, visualVerification: visual, notes },
++      audit,
++    };
+   }
+ }
+ 
+diff --git a/src/lib/macro/extraction-validation.ts b/src/lib/macro/extraction-validation.ts
+new file mode 100644
+index 0000000..97459a0
+--- /dev/null
++++ b/src/lib/macro/extraction-validation.ts
+@@ -0,0 +1,123 @@
++/**
++ * Validação DETERMINÍSTICA da extração feita pela IA (visão/OCR).
++ * A IA transcreve; o código confere. Nada que não esteja no texto transcrito da própria linha é aceito.
++ *
++ * Camadas:
++ *  1. escopo (moeda permitida) e formato (data/hora/impacto)
++ *  2. moeda e nome do evento precisam aparecer em raw_row_text (texto transcrito da linha)
++ *  3. cada valor (actual/forecast/previous) precisa aparecer em raw_row_text — senão vira null
++ *  4. leitura incerta (confiança OCR < mínimo) é rejeitada
++ *  5. duplicatas são removidas
++ *
++ * A checagem VISUAL (o valor está de fato na imagem?) é feita em economic-data-provider.ts por uma 2ª chamada.
++ */
++
++export interface RawExtractedRow {
++  date: string | null; time: string | null; currency: string; event: string;
++  impact: "high" | "medium" | "low" | "holiday" | "unknown";
++  actual: string | null; forecast: string | null; previous: string | null;
++  status: "released" | "pending";
++  ocr_confidence: number; requires_manual_confirmation: boolean; ocr_issues: string[];
++  raw_row_text: string;
++}
++
++export interface AcceptedRow {
++  index: number;
++  date: string | null; time: string | null; currency: string; event: string; impact: RawExtractedRow["impact"];
++  actual: string | null; forecast: string | null; previous: string | null;
++  ocr_confidence: number; raw_row_text: string;
++  requires_manual_confirmation: boolean;
++}
++
++export interface RejectedRow { index: number; currency: string | null; event: string | null; reason: string }
++export interface DiscardedValue { index: number; currency: string; event: string; field: "actual" | "forecast" | "previous"; value: string; reason: string }
++
++export interface ValidationResult {
++  accepted: AcceptedRow[];
++  rejected: RejectedRow[];
++  values_discarded: DiscardedValue[];
++}
++
++export const MIN_OCR_CONFIDENCE = 0.5;
++
++/** Normaliza para comparação: minúsculas, sem acento, sem pontuação/espaços. */
++export function norm(s: string): string {
++  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[−–]/g, "-");
++}
++
++/** Remove tudo que não é letra/dígito/sinal/ponto/%: "2.4 %" === "2.4%", "−0,1" === "-0,1". */
++function compact(s: string): string {
++  return norm(s).replace(/[^a-z0-9.,%+\-<>]/g, "");
++}
++
++/** Fração (0–1) dos tokens do nome do evento que aparecem no texto da linha. */
++export function eventTokenCoverage(event: string, rawRowText: string): number {
++  const tokens = norm(event).split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
++  if (tokens.length === 0) return 0;
++  const hay = new Set(norm(rawRowText).split(/[^a-z0-9]+/));
++  const hit = tokens.filter((t) => hay.has(t)).length;
++  return hit / tokens.length;
++}
++
++export function valueAppearsInRow(value: string, rawRowText: string): boolean {
++  const v = compact(value);
++  if (!v) return false;
++  return compact(rawRowText).includes(v);
++}
++
++function validTime(t: string | null): string | null {
++  if (!t) return null;
++  if (t === "all_day" || t === "tentative") return t;
++  return /^([01]?\d|2[0-3]):[0-5]\d$/.test(t) ? t : null;
++}
++
++function validDate(d: string | null): string | null {
++  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
++}
++
++export function validateExtractedRows(rows: RawExtractedRow[], opts: { allowed: readonly string[]; minConfidence?: number }): ValidationResult {
++  const minConf = opts.minConfidence ?? MIN_OCR_CONFIDENCE;
++  const accepted: AcceptedRow[] = [];
++  const rejected: RejectedRow[] = [];
++  const values_discarded: DiscardedValue[] = [];
++  const seen = new Set<string>();
++
++  rows.forEach((r, index) => {
++    const reject = (reason: string) => rejected.push({ index, currency: r.currency ?? null, event: r.event ?? null, reason });
++    const raw = (r.raw_row_text ?? "").trim();
++
++    if (!opts.allowed.includes(r.currency)) return reject(`moeda fora do escopo (${r.currency})`);
++    if (!raw || /^unreadable$/i.test(raw)) return reject("linha ilegível (raw_row_text vazio ou UNREADABLE)");
++    if (!norm(raw).split(/[^a-z0-9]+/).includes(norm(r.currency).toLowerCase())) return reject(`moeda ${r.currency} não aparece no texto transcrito da linha`);
++    if (!r.event || !r.event.trim()) return reject("evento sem nome");
++    const cov = eventTokenCoverage(r.event, raw);
++    if (cov < 0.8) return reject(`nome do evento "${r.event}" não consta no texto transcrito da linha (cobertura ${Math.round(cov * 100)}%)`);
++    if ((r.ocr_confidence ?? 0) < minConf) return reject(`leitura incerta (confiança OCR ${r.ocr_confidence})`);
++
++    const time = validTime(r.time);
++    const date = validDate(r.date);
++    const key = [r.currency, norm(r.event).replace(/\s+/g, " ").trim(), time ?? "", date ?? ""].join("|");
++    if (seen.has(key)) return reject("linha duplicada (mesmo evento, moeda e horário)");
++    seen.add(key);
++
++    const clean: Record<"actual" | "forecast" | "previous", string | null> = { actual: null, forecast: null, previous: null };
++    for (const field of ["actual", "forecast", "previous"] as const) {
++      const v = r[field];
++      if (v === null || v === undefined || v.trim() === "") continue;
++      if (valueAppearsInRow(v, raw)) clean[field] = v.trim();
++      else values_discarded.push({ index, currency: r.currency, event: r.event, field, value: v, reason: "valor não consta no texto transcrito da linha — descartado (não inventado)" });
++    }
++    // Sem ATUAL validado a linha é pendente: nunca tratar Forecast como resultado.
++    const pendingByCheck = clean.actual === null;
++    if (r.status === "released" && pendingByCheck) values_discarded.push({ index, currency: r.currency, event: r.event, field: "actual", value: String(r.actual), reason: "status released sem ATUAL validado — tratado como pendente" });
++
++    accepted.push({
++      index, date, time, currency: r.currency, event: r.event.trim(), impact: r.impact,
++      actual: clean.actual, forecast: clean.forecast, previous: clean.previous,
++      ocr_confidence: r.ocr_confidence, raw_row_text: raw,
++      requires_manual_confirmation: !!r.requires_manual_confirmation || (r.ocr_confidence ?? 0) < 0.7,
++    });
++  });
++
++  return { accepted, rejected, values_discarded };
++}
+diff --git a/src/lib/macro/indicators.ts b/src/lib/macro/indicators.ts
+new file mode 100644
+index 0000000..1e27d19
+--- /dev/null
++++ b/src/lib/macro/indicators.ts
+@@ -0,0 +1,143 @@
++/**
++ * Tabela semântica de indicadores — a DIREÇÃO de cada divulgação é decidida por CÓDIGO, não pela IA.
++ *
++ *  - surpresa = ATUAL − FORECAST (ou ATUAL − PREVIOUS, com confiança rebaixada, quando não há forecast)
++ *  - a regra diz se surpresa POSITIVA é BULLISH ou BEARISH para a moeda do evento
++ *  - |surpresa| abaixo do limiar = ruído ⇒ NEUTRAL (efeito zero MENSURADO)
++ *  - sem regra, sem ATUAL legível ou sem referência ⇒ UNKNOWN (não pontua)
++ *  - falas de diretores/bancos centrais sem texto ⇒ UNKNOWN (regra explícita do produto)
++ *
++ * Zero = "medido, sem efeito".  UNKNOWN = "não medido". Nunca tratar um como o outro.
++ */
++import type { Category, Classification, Confidence, Importance } from "@/lib/ai/types";
++import { parseNumeric } from "./scoring";
++
++export type Direction = "BULLISH" | "BEARISH" | "NEUTRAL" | "UNKNOWN";
++
++export interface IndicatorRule {
++  id: string;
++  pattern: RegExp;
++  category: Category;
++  /** Direção da MOEDA quando o ATUAL fica ACIMA da referência. */
++  above_is: "BULLISH" | "BEARISH";
++  /** Limiar: absoluto (mesma unidade do valor, ex.: 0.1 = 0,1 p.p.) ou relativo (fração de |referência|). */
++  threshold: number;
++  threshold_kind: "absolute" | "relative";
++  /** Confiança máxima quando a surpresa é calculada contra o FORECAST. */
++  reliability: Confidence;
++  /** Regra especial: evento de fala — nunca pontua sem texto. */
++  kind?: "indicator" | "speech";
++}
++
++/**
++ * Ordem importa: a primeira regra que casar vence.
++ * Revisar esta tabela é a alavanca para aumentar a cobertura — indicador fora dela fica UNKNOWN (honesto).
++ */
++export const INDICATOR_RULES: IndicatorRule[] = [
++  { id: "speech_no_text", kind: "speech", category: "CENTRAL_BANK", above_is: "BULLISH", threshold: 0, threshold_kind: "absolute", reliability: "LOW",
++    pattern: /\b(speaks?|speech|testifies|testify|testimony|press conference|conference|remarks|interview)\b/i },
++  { id: "rate_decision", category: "CENTRAL_BANK", above_is: "BULLISH", threshold: 0.01, threshold_kind: "absolute", reliability: "MEDIUM",
++    pattern: /\b(interest rate|rate decision|policy rate|cash rate|official bank rate|bank rate|official rate|overnight rate|monetary policy)\b/i },
++  { id: "jobless_claims", category: "EMPLOYMENT", above_is: "BEARISH", threshold: 0.02, threshold_kind: "relative", reliability: "MEDIUM",
++    pattern: /\b(jobless claims|unemployment claims|claimant count|continuing claims|initial claims)\b/i },
++  { id: "unemployment_rate", category: "EMPLOYMENT", above_is: "BEARISH", threshold: 0.1, threshold_kind: "absolute", reliability: "HIGH",
++    pattern: /\bunemployment\b|\bjobless rate\b/i },
++  { id: "payrolls", category: "EMPLOYMENT", above_is: "BULLISH", threshold: 20000, threshold_kind: "absolute", reliability: "HIGH",
++    pattern: /\b(non-?farm|nfp|payrolls?|employment change|adp)\b/i },
++  { id: "wages", category: "EMPLOYMENT", above_is: "BULLISH", threshold: 0.1, threshold_kind: "absolute", reliability: "MEDIUM",
++    pattern: /\b(average hourly earnings|average earnings|wage growth|wages?)\b/i },
++  { id: "inflation", category: "INFLATION", above_is: "BULLISH", threshold: 0.1, threshold_kind: "absolute", reliability: "HIGH",
++    pattern: /^(?!.*expectation)(?!.*(retail|import|export)).*\b(cpi|pce|hicp|ppi|rpi|inflation|trimmed mean|weighted median)\b/i },
++  { id: "gdp", category: "GROWTH", above_is: "BULLISH", threshold: 0.1, threshold_kind: "absolute", reliability: "HIGH",
++    pattern: /\b(gdp|gross domestic product)\b/i },
++  { id: "retail_sales", category: "CONSUMPTION", above_is: "BULLISH", threshold: 0.2, threshold_kind: "absolute", reliability: "HIGH",
++    pattern: /\bretail sales\b/i },
++  { id: "pmi_ism", category: "ACTIVITY", above_is: "BULLISH", threshold: 0.5, threshold_kind: "absolute", reliability: "MEDIUM",
++    pattern: /\b(pmi|ism)\b/i },
++  { id: "industrial_activity", category: "ACTIVITY", above_is: "BULLISH", threshold: 0.3, threshold_kind: "absolute", reliability: "MEDIUM",
++    pattern: /\b(industrial production|manufacturing production|factory orders|durable goods|capital goods)\b/i },
++  { id: "trade_balance", category: "TRADE", above_is: "BULLISH", threshold: 1e8, threshold_kind: "absolute", reliability: "MEDIUM",
++    pattern: /\b(trade balance|merchandise trade|balance of trade|trade surplus|current account)\b/i },
++  { id: "housing", category: "HOUSING", above_is: "BULLISH", threshold: 0.03, threshold_kind: "relative", reliability: "MEDIUM",
++    pattern: /\b(building permits|housing starts|home sales|house prices?|hpi)\b/i },
++  { id: "sentiment_confidence", category: "SENTIMENT", above_is: "BULLISH", threshold: 1, threshold_kind: "absolute", reliability: "LOW",
++    pattern: /\b(consumer (confidence|sentiment)|sentiment|confidence|michigan|zew|ifo|westpac|economy watchers)\b/i },
++];
++
++export function matchRule(eventName: string): IndicatorRule | null {
++  for (const r of INDICATOR_RULES) if (r.pattern.test(eventName)) return r;
++  return null;
++}
++
++export const IMPACT_TO_IMPORTANCE: Record<string, Importance> = { high: "HIGH", medium: "MEDIUM", low: "LOW", holiday: "LOW", unknown: "LOW" };
++
++export interface ReleaseClassification {
++  rule_id: string | null;
++  category: Category;
++  direction: Direction;
++  classification: Classification;
++  actual: number | null;
++  reference: number | null;
++  reference_basis: "FORECAST" | "PREVIOUS" | "NONE";
++  surprise: number | null;
++  threshold: number | null;
++  confidence: Confidence;
++  explanation: string;
++}
++
++const CLASS_FOR: Record<Exclude<Direction, "UNKNOWN">, (strong: boolean) => Classification> = {
++  BULLISH: (s) => (s ? "VERY_BULLISH" : "BULLISH"),
++  BEARISH: (s) => (s ? "VERY_BEARISH" : "BEARISH"),
++  NEUTRAL: () => "NEUTRAL",
++};
++
++const UNKNOWN_CLASS: Classification = "UNKNOWN";
++
++function unknown(rule: IndicatorRule | null, explanation: string, extra: Partial<ReleaseClassification> = {}): ReleaseClassification {
++  return {
++    rule_id: rule?.id ?? null, category: rule?.category ?? "OTHER", direction: "UNKNOWN", classification: UNKNOWN_CLASS,
++    actual: null, reference: null, reference_basis: "NONE", surprise: null, threshold: null, confidence: "LOW", explanation, ...extra,
++  };
++}
++
++/** Classifica UMA divulgação de forma determinística. Não usa conhecimento externo nem a IA. */
++export function classifyRelease(input: {
++  event: string; impact: string; actual: string | null; forecast: string | null; previous: string | null; ocrConfidence?: number | null;
++}): ReleaseClassification {
++  const rule = matchRule(input.event);
++  if (rule?.kind === "speech") {
++    return unknown(rule, "Evento relevante, mas sem evidência textual suficiente para determinar direção.");
++  }
++  if (!rule) return unknown(null, "Indicador fora da tabela semântica — direção não determinada (não pontua).");
++
++  const actual = parseNumeric(input.actual);
++  if (actual === null) return unknown(rule, "Sem valor ATUAL legível — não há surpresa a medir.", { category: rule.category });
++
++  const forecast = parseNumeric(input.forecast);
++  const previous = parseNumeric(input.previous);
++  let ref: number | null = null;
++  let basis: ReleaseClassification["reference_basis"] = "NONE";
++  if (forecast !== null) { ref = forecast; basis = "FORECAST"; }
++  else if (previous !== null) { ref = previous; basis = "PREVIOUS"; }
++  if (ref === null) return unknown(rule, "Sem FORECAST nem PREVIOUS — impossível medir surpresa.", { category: rule.category, actual });
++
++  const surprise = actual - ref;
++  const threshold = rule.threshold_kind === "relative" ? rule.threshold * Math.max(Math.abs(ref), 1) : rule.threshold;
++  // Confiança: limitada pela regra, rebaixada se a leitura OCR é incerta ou se a referência é o PREVIOUS.
++  let confidence: Confidence = basis === "FORECAST" ? rule.reliability : "LOW";
++  if ((input.ocrConfidence ?? 1) < 0.8) confidence = "LOW";
++
++  const base = { rule_id: rule.id, category: rule.category, actual, reference: ref, reference_basis: basis, surprise, threshold, confidence };
++  const refLabel = basis === "FORECAST" ? "forecast" : "previous";
++  const head = `${input.event}: atual ${input.actual} vs ${refLabel} ${input.forecast ?? input.previous}`;
++
++  if (Math.abs(surprise) < threshold) {
++    return { ...base, direction: "NEUTRAL", classification: CLASS_FOR.NEUTRAL(false),
++      explanation: `${head} → surpresa ${surprise.toFixed(2)} dentro do limiar (${threshold.toFixed(2)}) — efeito zero mensurado.` };
++  }
++  const above = surprise > 0;
++  const direction: Direction = above ? rule.above_is : rule.above_is === "BULLISH" ? "BEARISH" : "BULLISH";
++  const strong = Math.abs(surprise) >= 2 * threshold;
++  return { ...base, direction, classification: CLASS_FOR[direction as "BULLISH" | "BEARISH"](strong),
++    explanation: `${head} → surpresa ${surprise > 0 ? "+" : ""}${surprise.toFixed(2)} (limiar ${threshold.toFixed(2)}); ${above ? "acima" : "abaixo"} do ${refLabel} ⇒ ${direction === "BULLISH" ? "moeda mais forte" : "moeda mais fraca"} (regra ${rule.id}${basis === "PREVIOUS" ? ", referência PREVIOUS, confiança rebaixada" : ""}).` };
++}
+diff --git a/src/lib/macro/pairs.ts b/src/lib/macro/pairs.ts
+index 94ccf04..2afed26 100644
+--- a/src/lib/macro/pairs.ts
++++ b/src/lib/macro/pairs.ts
+@@ -2,7 +2,7 @@
+  * Matriz Forte × Fraca — divergência macro entre moedas e candidatos de pares.
+  * Macro define QUE par e QUAL direção — nunca é gatilho de entrada.
+  */
+-import { G8, type Confidence, type Currency, type CurrencyScoreView, type EventRiskLevel, type PairStrengthClass, type PendingEventView, type TradeCandidateView } from "@/lib/ai/types";
++import { G8, type Confidence, type Currency, type CurrencyScoreView, type EvaluatedCurrency, type EventRiskLevel, type PairStrengthClass, type PendingEventView, type TradeCandidateView } from "@/lib/ai/types";
+ import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
+ 
+ /** Ordem de prioridade de base nas convenções de mercado (EUR > GBP > AUD > NZD > USD > CAD > CHF > JPY). */
+@@ -92,7 +92,8 @@ export interface CandidateInput {
+ /** Gera candidatos ordenados pela maior assimetria macro (força relativa), com confiança e invalidação. */
+ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[] {
+   const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
+-  const byCcy = Object.fromEntries(input.scores.map((s) => [s.currency, s])) as Record<Currency, CurrencyScoreView>;
++  // Só moedas com evidência formam pares. Sem dado não há viés — nunca usar 0 como substituto.
++  const byCcy = Object.fromEntries(input.scores.filter((s) => s.status === "EVALUATED" && s.score !== null).map((s) => [s.currency, s])) as Record<Currency, EvaluatedCurrency>;
+   const list: TradeCandidateView[] = [];
+   for (const p of G8_PAIRS) {
+     const b = byCcy[p.base], q = byCcy[p.quote];
+diff --git a/src/lib/macro/pipeline.ts b/src/lib/macro/pipeline.ts
+index fec400c..21978e0 100644
+--- a/src/lib/macro/pipeline.ts
++++ b/src/lib/macro/pipeline.ts
+@@ -6,13 +6,14 @@
+ import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+ import { getDb } from "@/db";
+ import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
+-import { ALL_CURRENCIES, G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
++import { ALL_CURRENCIES, CENTRAL_BANKS, G8, type AnalysisAudit, type AnyCurrency, type AuditCheck, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
+ import { generateStructured } from "@/lib/ai/service";
+ import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
+ import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
+ import { baseContribution, computeCurrencyScores, normalizeEventKey, parseNumeric, type ScoredEvent } from "./scoring";
+ import { buildTradeCandidates } from "./pairs";
+ import { eventRiskFor, toPendingView } from "./event-risk";
++import { classifyRelease, IMPACT_TO_IMPORTANCE } from "./indicators";
+ 
+ export async function loadScoringConfig(): Promise<ScoringConfig> {
+   try {
+@@ -100,14 +101,6 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
+   const todo = await db.select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
+   if (todo.length === 0) return { interpreted: 0, model: null, promptVersion: null, warnings: [] };
+ 
+-  // contexto por moeda: últimos drivers + score atual (para "já precificado" e mudança de narrativa)
+-  const latest = await latestScores();
+-  const context: Record<string, unknown> = {};
+-  for (const c of currencies) {
+-    const s = latest.find((x) => x.currency === c);
+-    context[c] = s ? { score: s.score, classification: s.classification, drivers: s.drivers.slice(0, 4).map((d) => `${d.event} (${d.classification})`) } : { score: 0, classification: "NEUTRAL", drivers: [] };
+-  }
+-
+   const warnings: string[] = [];
+   let interpreted = 0; let model: string | null = null; let promptVersion: string | null = null;
+ 
+@@ -123,7 +116,7 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
+     const res = await generateStructured({
+       purpose: prompt === MACRO_SYSTEM ? "macro_interpret" : "b3_macro_interpret", prompt, schemaName: "event_interpretation", temperature: 0.2,
+       timeoutMs: 60_000,
+-      user: JSON.stringify({ events: payload, context_by_currency: context, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
++      user: JSON.stringify({ events: payload, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
+     });
+     model = res.model; promptVersion = res.promptVersion;
+     const byId = new Map(batch.map((e) => [e.id, e]));
+@@ -160,68 +153,86 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
+   return { interpreted, model, promptVersion, warnings };
+ }
+ 
+-/** Último snapshot de score por moeda (qualquer sessão). */
+-export async function latestScores(): Promise<CurrencyScoreView[]> {
+-  const rows = await getDb().execute(sql`SELECT DISTINCT ON (currency) * FROM currency_scores ORDER BY currency, computed_at DESC`);
+-  return (rows.rows as Record<string, unknown>[]).map(rowToScoreView).sort((a, b) => a.rank - b.rank);
+-}
+-
+-function rowToScoreView(r: Record<string, unknown>): CurrencyScoreView {
+-  return {
+-    currency: r.currency as Currency, score: Number(r.score), score_raw: Number(r.score_raw), previous_score: r.previous_score === null ? null : Number(r.previous_score),
+-    score_delta: r.score_delta === null ? null : Number(r.score_delta), momentum: (r.momentum as CurrencyScoreView["momentum"]) ?? null,
+-    classification: r.classification as CurrencyScoreView["classification"], bias: r.bias as CurrencyScoreView["bias"], confidence: r.confidence as Confidence,
+-    rank: Number(r.rank), live_events: Number(r.live_events ?? 0), drivers: (r.drivers as CurrencyScoreView["drivers"]) ?? [],
+-    // Campos derivados para snapshots gravados antes da v2 (mantém a UI numa única escala).
+-    score_display: Number((Number(r.score) * DEFAULT_SCORING_CONFIG.display_scale).toFixed(2)),
+-    no_data: Number(r.live_events ?? 0) === 0,
+-  };
+-}
+-
+-export async function loadPendingEvents(now = new Date(), horizonHours = 72): Promise<PendingEventView[]> {
++export async function loadPendingEvents(now = new Date(), horizonHours = 72, scope?: { analysisId?: number | null }): Promise<PendingEventView[]> {
+   const to = new Date(now.getTime() + horizonHours * 3_600_000);
+   const from = new Date(now.getTime() - 30 * 60_000); // tolerância de 30 min p/ eventos "agora"
+-  const rows = await getDb().select().from(economicEvents)
+-    .where(and(eq(economicEvents.status, "pending"), gte(economicEvents.scheduledAt, from), sql`${economicEvents.scheduledAt} <= ${to}`))
+-    .orderBy(economicEvents.scheduledAt);
++  const conds = [eq(economicEvents.status, "pending"), gte(economicEvents.scheduledAt, from), sql`${economicEvents.scheduledAt} <= ${to}`];
++  if (scope) {
++    if (!scope.analysisId) return [];
++    conds.push(eq(economicEvents.sourceRef, `analysis:${scope.analysisId}`));
++  }
++  const rows = await getDb().select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
+   return rows.map((r) => toPendingView(r, now));
+ }
+ 
+-/** Eventos released + interpretação corrente → ScoredEvent[] (todas as moedas; quem consome filtra). */
+-export async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
+-  const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
++/**
++ * Eventos liberados + classificação corrente → ScoredEvent[].
++ *  - scope undefined (B3): comportamento anterior, janela de max_age_days.
++ *  - scope.analysisId (G8): EXCLUSIVAMENTE os eventos daquela análise. Nada de análises antigas.
++ */
++export async function loadScoredEvents(cfg: ScoringConfig, scope?: { analysisId?: number | null }): Promise<ScoredEvent[]> {
++  if (scope && !scope.analysisId) return [];
++  const conds = [eq(economicEvents.status, "released")];
++  if (scope?.analysisId) conds.push(eq(macroInterpretations.analysisId, scope.analysisId));
++  else { const since = new Date(Date.now() - cfg.max_age_days * 86_400_000); conds.push(gte(economicEvents.scheduledAt, since)); }
+   const rows = await getDb().select({
+     id: economicEvents.id, currency: economicEvents.currency, event: economicEvents.event, impact: economicEvents.impact, scheduledAt: economicEvents.scheduledAt,
+-    supersededBy: economicEvents.supersededBy, category: macroInterpretations.category, importance: macroInterpretations.importance,
+-    classification: macroInterpretations.classification, confidence: macroInterpretations.confidence,
++    eventKey: economicEvents.eventKey, supersededBy: economicEvents.supersededBy, actual: economicEvents.actual, forecast: economicEvents.forecast, previous: economicEvents.previous,
++    source: economicEvents.source, category: macroInterpretations.category, importance: macroInterpretations.importance,
++    classification: macroInterpretations.classification, confidence: macroInterpretations.confidence, surpriseVsForecast: macroInterpretations.surpriseVsForecast,
++    ruleId: macroInterpretations.subcategory, explanation: macroInterpretations.reasoningSummary,
+   }).from(economicEvents)
+     .innerJoin(macroInterpretations, and(eq(macroInterpretations.eventId, economicEvents.id), eq(macroInterpretations.isCurrent, true)))
+-    .where(and(eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since)));
+-  return rows.map((r) => ({
+-    event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
+-    superseded: r.supersededBy !== null, category: r.category as Category, importance: r.importance as Importance,
+-    classification: r.classification as Classification, confidence: r.confidence as Confidence,
+-  }));
++    .where(and(...conds));
++
++  // Dentro de uma análise, a "supersede" é recalculada só entre seus próprios eventos (mesmo indicador, release mais recente vence).
++  const latestByKey = new Map<string, Date>();
++  if (scope?.analysisId) for (const r of rows) { const cur = latestByKey.get(r.eventKey); if (!cur || r.scheduledAt > cur) latestByKey.set(r.eventKey, r.scheduledAt); }
++
++  return rows.map((r) => {
++    const scoped = !!scope?.analysisId;
++    const superseded = scoped ? r.scheduledAt.getTime() < (latestByKey.get(r.eventKey)?.getTime() ?? 0) : r.supersededBy !== null;
++    return {
++      event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
++      superseded, category: r.category as Category, importance: r.importance as Importance,
++      classification: r.classification as Classification, confidence: r.confidence as Confidence,
++      actual: r.actual, forecast: r.forecast, previous: r.previous, source: r.source,
++      surprise: r.surpriseVsForecast === null ? null : Number(r.surpriseVsForecast),
++      reference_basis: r.forecast ? "FORECAST" : r.previous ? "PREVIOUS" : "NONE",
++      rule_id: r.ruleId, explanation: r.explanation,
++    };
++  });
+ }
+ 
+-export interface RecomputeOptions { session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean }
++export interface RecomputeOptions {
++  session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean;
++  /** IDs dos RAW desta análise (para checar que nenhuma evidência veio de outra). */
++  eventIds?: number[];
++  classifiedCount?: number; releasedCount?: number;
++  inputType?: "screenshot" | "structured" | "manual";
++  extraction?: AnalysisAudit["extraction"];
++}
++
++/** Recalcula scores/candidatos/risco a partir de UMA análise (padrão: a mais recente), aplica a checagem de consistência e persiste. */
++export interface RecomputeResult extends Omit<MacroAnalysisResult, "analysis_id" | "meta" | "analysis_status" | "audit"> {
++  meta: { scoring_version: string }; trusted: boolean; checks: AuditCheck[]; scopeId: number | null; audit: AnalysisAudit;
++}
+ 
+-/** Recalcula scores/candidatos/event risk e persiste snapshot. */
+-export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<MacroAnalysisResult, "analysis_id" | "meta"> & { meta: { scoring_version: string } }> {
++export async function recomputeScores(opts: RecomputeOptions): Promise<RecomputeResult> {
+   const cfg = opts.cfg ?? (await loadScoringConfig());
+   const now = opts.now ?? new Date();
+   const db = getDb();
+-  const [events, prev, pending] = await Promise.all([loadScoredEvents(cfg), latestScores(), loadPendingEvents(now)]);
+-  const previousScores = Object.fromEntries(prev.map((p) => [p.currency, p.score])) as Partial<Record<Currency, number>>;
+-  const scores = computeCurrencyScores({ events, now, previousScores, cfg });
++  const scopeId = opts.analysisId ?? (await latestAnalysisId());
++  const [events, pending] = await Promise.all([loadScoredEvents(cfg, { analysisId: scopeId }), loadPendingEvents(now, 72, { analysisId: scopeId })]);
++  const scores = computeCurrencyScores({ events, now, cfg });
+   const candidates = buildTradeCandidates({ scores, pending, cfg, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
+   const eventRisk = G8.map((c) => {
+     const s = scores.find((x) => x.currency === c)!;
+     const r = eventRiskFor([c], pending, { horizonHours: 12 });
+-    return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
++    return { currency: c, current_bias: s.bias ?? "NEUTRAL", level: r.level, events: r.events };
+   });
+   // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
+-  // REGRA DE OURO: um par que entra aqui NUNCA pode aparecer no Top 3 (ver summary abaixo).
++  // REGRA DE OURO: um par que entra aqui NUNCA pode aparecer no Top 3.
+   const avoidMap = new Map<string, string[]>();
+   const addAvoid = (symbol: string, reason: string) => {
+     const cur = avoidMap.get(symbol) ?? [];
+@@ -229,26 +240,35 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+     avoidMap.set(symbol, cur);
+   };
+   for (const c of candidates) {
+-    // Não elegível (confiança baixa, risco extremo ou viés misto) ⇒ só serve de alerta.
+     if (c.eligible === false && c.ineligible_reason) addAvoid(c.symbol, c.ineligible_reason);
+     if (c.event_risk === "EXTREME") addAvoid(c.symbol, `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}`);
+-    const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
+-    if (sShift) addAvoid(c.symbol, "Mudança de narrativa recente em uma das pernas — aguardar confirmação");
+   }
+   const pairsToAvoid = [...avoidMap.entries()].map(([symbol, reasons]) => ({ symbol, reason: reasons.join(" · ") }));
+ 
++  const evaluated = scores.filter((s) => s.status === "EVALUATED");
++  const insufficient = scores.filter((s) => s.status !== "EVALUATED").map((s) => s.currency);
++  const conflicted = evaluated.filter((s) => s.conflict).map((s) => s.currency);
++  const thin = evaluated.filter((s) => (s.confidence_pct ?? 0) < 40).map((s) => s.currency);
++
++  // Checagem de consistência — decide se o ranking pode ser apresentado.
++  const releasedCount = opts.releasedCount ?? events.length;
++  const classifiedCount = opts.classifiedCount ?? events.length;
++  const extraction = opts.extraction ?? null;
++  const { runConsistencyChecks } = await import("./consistency");
++  const { trusted, checks } = runConsistencyChecks({
++    ranked: scores, analysisEventIds: new Set(opts.eventIds ?? events.map((e) => e.event_id)), releasedCount, classifiedCount,
++    inputType: opts.inputType ?? "manual", extraction,
++  });
++
+   const warnings: string[] = [];
+-  const noData = scores.filter((s) => s.no_data).map((s) => s.currency);
+-  const conflicted = scores.filter((s) => s.conflict).map((s) => s.currency);
+-  const thin = scores.filter((s) => !s.no_data && (s.confidence_pct ?? 0) < 40).map((s) => s.currency);
+-  if (noData.length) warnings.push(`Sem dado interpretado no período: ${noData.join(", ")} — tratadas como NEUTRAS por ausência de evidência (não como fracas).`);
++  if (insufficient.length) warnings.push(`Sem evidência suficiente: ${insufficient.join(", ")} — não recebem score nem posição no ranking (nunca tratadas como 0).`);
+   if (thin.length) warnings.push(`Evidência fraca (confiança < 40%): ${thin.join(", ")} — score atenuado de propósito.`);
+   if (conflicted.length) warnings.push(`Indicadores conflitantes (viés misto): ${conflicted.join(", ")} — confiança reduzida.`);
+-  if (events.length === 0) warnings.push("Nenhum dado realizado interpretado no período — ranking neutro.");
++  if (events.length === 0) warnings.push("Nenhum evento com direção mensurável nesta análise — nenhum ranking pode ser gerado.");
++  for (const c of checks) if (!c.passed) warnings.push(`Consistência — ${c.label}: ${c.detail}`);
+ 
+-  // Resumo consolidado: fonte ÚNICA para o dashboard (a UI não recalcula nada).
+-  const ranked = [...scores].sort((a, b) => a.rank - b.rank);
+-  const withData = ranked.filter((s) => !s.no_data);
++  // Resumo consolidado: fonte ÚNICA para o dashboard. Se a análise não é confiável, não há destaques.
++  const ranked = [...evaluated].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+   const riskOrder: EventRiskLevel[] = ["LOW", "MEDIUM", "HIGH", "EXTREME"];
+   const overallRisk = eventRisk.reduce<EventRiskLevel>((acc, r) => (riskOrder.indexOf(r.level) > riskOrder.indexOf(acc) ? r.level : acc), "LOW");
+   const alerts: string[] = [];
+@@ -258,45 +278,91 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<Macr
+       alerts.push(`${r.currency}: risco ${r.level}${ev ? ` — ${ev.event} em ${ev.minutes_until < 60 ? `${ev.minutes_until}min` : `${(ev.minutes_until / 60).toFixed(1)}h`}` : ""}. O viés pode mudar após o dado.`);
+     }
+   }
+-  for (const sc of scores) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
++  for (const sc of evaluated) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
+   const presentable = candidates.filter((c) => c.eligible !== false && !avoidMap.has(c.symbol));
+   if (presentable.length === 0 && candidates.length > 0) {
+-    warnings.push(`Nenhum par atingiu a confiança mínima (${cfg.candidate_min_confidence_pct}%) — os ${candidates.length} pares com assimetria aparecem apenas em "pares a evitar". Sem viés macro acionável nesta sessão.`);
++    warnings.push(`Nenhum par atingiu a confiança mínima (${cfg.candidate_min_confidence_pct}%) — os ${candidates.length} pares com assimetria aparecem apenas em "pares a evitar".`);
+   }
++  const pick = (s: CurrencyScoreView) => ({ currency: s.currency, score: s.score_display ?? 0, confidence_pct: s.confidence_pct ?? 0 });
+   const summary: MacroSummaryView = {
+-    strongest: withData[0] ? { currency: withData[0].currency, score: withData[0].score_display ?? withData[0].score, confidence_pct: withData[0].confidence_pct ?? 0 } : null,
+-    weakest: withData.length > 1 ? { currency: withData[withData.length - 1].currency, score: withData[withData.length - 1].score_display ?? withData[withData.length - 1].score, confidence_pct: withData[withData.length - 1].confidence_pct ?? 0 } : null,
++    strongest: trusted && ranked[0] ? pick(ranked[0]) : null,
++    weakest: trusted && ranked.length > 1 ? pick(ranked[ranked.length - 1]) : null,
+     overall_risk: overallRisk,
+-    no_data_currencies: noData,
++    no_data_currencies: insufficient,
+     conflicted_currencies: conflicted,
+-    // Top 3 = apenas pares com evidência suficiente E que NÃO estão em "pares a evitar".
+-    // Sem isso o dashboard se contradiz (recomendar e desaconselhar o mesmo par).
+-    top_long: presentable.filter((c) => c.bias === "LONG").slice(0, 3),
+-    top_short: presentable.filter((c) => c.bias === "SHORT").slice(0, 3),
+-    alerts,
++    top_long: trusted ? presentable.filter((c) => c.bias === "LONG").slice(0, 3) : [],
++    top_short: trusted ? presentable.filter((c) => c.bias === "SHORT").slice(0, 3) : [],
++    alerts: trusted ? alerts : [],
++  };
++
++  const audit: AnalysisAudit = {
++    analysis_id: String(scopeId ?? ""), checks, trusted, extraction,
++    scores: scores.map((s) => ({ currency: s.currency, score: s.score, status: s.status, evidence_count: s.live_events, excluded_count: s.excluded_events?.length ?? 0 })),
+   };
+ 
+-  if (opts.persist !== false) {
++  if (opts.persist !== false && scopeId) {
+     const scoreDate = now.toISOString().slice(0, 10);
+-    await db.insert(currencyScores).values(scores.map((s) => ({
+-      analysisId: opts.analysisId ?? null, scoreDate, session: opts.session, computedAt: now, currency: s.currency, score: s.score, scoreRaw: s.score_raw,
+-      classification: s.classification, bias: s.bias, confidence: s.confidence, rank: s.rank, previousScore: s.previous_score, scoreDelta: s.score_delta,
+-      momentum: s.momentum, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
++    // Só moedas com evidência entram no histórico — nunca um 0 artificial.
++    const persistable = evaluated;
++    if (persistable.length) await db.insert(currencyScores).values(persistable.map((s) => ({
++      analysisId: scopeId, scoreDate, session: opts.session, computedAt: now, currency: s.currency, score: s.score!, scoreRaw: s.score_raw ?? 0,
++      classification: s.classification!, bias: s.bias ?? "NEUTRAL", confidence: s.confidence as Confidence, rank: s.rank ?? 0, previousScore: null, scoreDelta: null,
++      momentum: null, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
+     })));
+     if (candidates.length) {
+       await db.insert(tradeCandidates).values(candidates.map((c) => ({
+-        analysisId: opts.analysisId ?? null, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
++        analysisId: scopeId, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
+         strongCurrency: c.strong_currency, weakCurrency: c.weak_currency, strongScore: c.strong_score, weakScore: c.weak_score, macroDivergence: c.macro_divergence,
+         confidence: c.confidence, priority: c.priority, eventRisk: c.event_risk, eventRiskEvents: c.event_risk_events, reason: c.reason,
+       })));
+     }
+   }
+   return {
+-    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: scores.map((s) => s.currency), trade_candidates: candidates,
+-    pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid, summary, warnings, meta: { scoring_version: cfg.version },
++    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: trusted ? ranked.map((s) => s.currency) : [],
++    trade_candidates: candidates, pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid,
++    summary, warnings, meta: { scoring_version: cfg.version }, trusted, checks, scopeId, audit,
+   };
+ }
+ 
++async function latestAnalysisId(): Promise<number | null> {
++  const rows = await getDb().select({ id: macroAnalyses.id }).from(macroAnalyses).orderBy(desc(macroAnalyses.createdAt)).limit(1);
++  return rows[0]?.id ?? null;
++}
++
++export const DETERMINISTIC_PROMPT_VERSION = "deterministic-indicator-table-v1";
++
++/**
++ * Classifica DETERMINISTICAMENTE os eventos liberados desta análise (tabela semântica, sem IA)
++ * e grava uma interpretação corrente por evento. Não usa interpretação antiga.
++ */
++export async function classifyAnalysisEvents(cfg: ScoringConfig, analysisId: number, eventIds: number[]): Promise<{ released: number; classified: number; unknown: number }> {
++  if (!eventIds.length) return { released: 0, classified: 0, unknown: 0 };
++  const db = getDb();
++  const rows = await db.select().from(economicEvents).where(and(inArray(economicEvents.id, eventIds), eq(economicEvents.status, "released"), inArray(economicEvents.currency, [...G8])));
++  if (!rows.length) return { released: 0, classified: 0, unknown: 0 };
++  // Interpretações anteriores destes eventos deixam de valer (nova análise = estado limpo).
++  await db.update(macroInterpretations).set({ isCurrent: false }).where(and(inArray(macroInterpretations.eventId, rows.map((r) => r.id)), eq(macroInterpretations.isCurrent, true)));
++  let unknown = 0;
++  const values: (typeof macroInterpretations.$inferInsert)[] = rows.map((r) => {
++    const c = classifyRelease({ event: r.event, impact: r.impact, actual: r.actual, forecast: r.forecast, previous: r.previous, ocrConfidence: r.ocrConfidence });
++    if (c.direction === "UNKNOWN") unknown++;
++    const importance = IMPACT_TO_IMPORTANCE[r.impact] ?? "LOW";
++    const bc = baseContribution({ category: c.category, importance, classification: c.classification, confidence: c.confidence, impact: r.impact as ScoredEvent["impact"] }, cfg);
++    return {
++      eventId: r.id, analysisId, category: c.category, subcategory: c.rule_id ?? "sem_regra", importance, classification: c.classification,
++      directionValue: bc.direction_value, surpriseVsForecast: c.surprise === null ? null : c.surprise.toFixed(4),
++      changeVsPrevious: c.reference_basis === "PREVIOUS" && c.surprise !== null ? c.surprise.toFixed(4) : null,
++      growthImplication: "regra determinística", inflationImplication: "regra determinística",
++      centralBank: CENTRAL_BANKS[r.currency as Currency] ?? "NONE", centralBankImplication: "regra determinística",
++      pricedIn: null, currencyImplication: c.direction, confidence: c.confidence, reasoningSummary: c.explanation,
++      weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
++      scoringVersion: cfg.version, promptVersion: DETERMINISTIC_PROMPT_VERSION, model: "code", isCurrent: true,
++    };
++  });
++  await db.insert(macroInterpretations).values(values);
++  return { released: rows.length, classified: values.length, unknown };
++}
++
+ export interface RunAnalysisInput {
+   session: Session;
+   events: EconomicEventInput[];
+@@ -305,11 +371,12 @@ export interface RunAnalysisInput {
+   tzOffsetMinutes?: number;
+   userEdits?: Record<string, unknown> | null;
+   withBrief?: boolean;
++  /** Auditoria da extração (JSON bruto, aceitos/rejeitados, verificação visual). */
++  extraction?: AnalysisAudit["extraction"];
+ }
+ 
+-/** Fluxo completo: salvar RAW → interpretar → recomputar → brief → registrar análise. */
++/** Fluxo G8: RAW desta análise → classificação determinística → scores só desta análise → checagem → (IA) explicação. */
+ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAnalysisResult> {
+-  const startedAt = Date.now();
+   const db = getDb();
+   const cfg = await loadScoringConfig();
+   const now = new Date();
+@@ -319,27 +386,20 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
+   }).returning({ id: macroAnalyses.id });
+ 
+   const ids = await saveRawEvents(input.events, { tzOffsetMinutes: input.tzOffsetMinutes, sourceRef: `analysis:${analysis.id}`, userEdits: input.userEdits ?? null });
+-  // Interpretação é tolerante a falha da IA: o RAW já está salvo e o que já foi interpretado é reaproveitado.
+-  // Se a IA cair (503/429), devolvemos o ranking com os dados disponíveis + aviso para repetir — nada se perde.
+-  let interp: InterpretOutcome;
+-  let aiFailure: string | null = null;
+-  try { interp = await interpretPendingEvents(cfg, analysis.id); }
+-  catch (e) { aiFailure = (e as Error).message; interp = { interpreted: 0, model: null, promptVersion: null, warnings: [] }; }
+-  const computed = await recomputeScores({ session: input.session, analysisId: analysis.id, now, cfg });
+-  const warnings = [...computed.warnings, ...interp.warnings];
+-  if (aiFailure) warnings.unshift(`IA indisponível ao interpretar eventos (${aiFailure.slice(0, 160)}). Os eventos ficaram salvos; aguarde ~1 min e clique em "Confirmar e analisar" de novo — só o que faltou será enviado à IA.`);
+-
+-  // Orçamento de tempo: o brief narrativo é um EXTRA. Se a interpretação já consumiu o tempo,
+-  // devolvemos o ranking na hora em vez de segurar o usuário numa segunda chamada de IA.
+-  const elapsedMs = Date.now() - startedAt;
+-  const BRIEF_BUDGET_MS = 70_000;
+-  if (input.withBrief !== false && !aiFailure && elapsedMs > BRIEF_BUDGET_MS) {
+-    warnings.push(`Brief narrativo pulado: a interpretação levou ${Math.round(elapsedMs / 1000)}s e o ranking já estava pronto. Scores, candidatos e risco abaixo estão completos.`);
+-  } else if (input.withBrief !== false && !aiFailure) {
++  const cls = await classifyAnalysisEvents(cfg, analysis.id, ids);
++  const computed = await recomputeScores({
++    session: input.session, analysisId: analysis.id, now, cfg, eventIds: ids, releasedCount: cls.released, classifiedCount: cls.classified,
++    inputType: input.inputType, extraction: input.extraction ?? null,
++  });
++  const warnings = [...computed.warnings];
++  if (cls.unknown > 0) warnings.push(`${cls.unknown} evento(s) com direção não mensurável — listados em "excluded_events", não pontuam.`);
++
++  // IA apenas para EXPLICAR (brief). Só roda com ranking confiável e dentro do orçamento de tempo.
++  if (input.withBrief !== false && computed.trusted && computed.ranking.length) {
+     try {
+       const brief = await generateStructured({
+         purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3, timeoutMs: 45_000,
+-        user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies, ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
++        user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies.filter((c) => c.status === "EVALUATED"), ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
+       });
+       for (const r of brief.data.candidate_reasons) {
+         const c = computed.trade_candidates.find((x) => x.symbol === r.symbol);
+@@ -348,19 +408,22 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
+       for (const p of brief.data.pairs_to_avoid) if (!computed.pairs_to_avoid.some((x) => x.symbol === p.symbol)) computed.pairs_to_avoid.push(p);
+       warnings.push(...brief.data.warnings.map((w) => `IA: ${w}`));
+       if (brief.data.headline) warnings.unshift(`Brief: ${brief.data.headline} — ${brief.data.narrative}`);
+-      // persiste reasons nos candidatos
+       await Promise.all(computed.trade_candidates.map((c) => db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)))));
+     } catch (e) {
+       warnings.push(`Brief da sessão indisponível: ${(e as Error).message}`);
+     }
+   }
+ 
++  const { trusted, checks: _checks, scopeId: _scope, audit, meta: _meta, ...rest } = computed;
+   const result: MacroAnalysisResult = {
+-    analysis_id: String(analysis.id), ...computed,
+-    meta: { scoring_version: cfg.version, prompt_version: interp.promptVersion, model: interp.model, events_interpreted: interp.interpreted },
++    ...rest,
++    analysis_id: String(analysis.id),
++    analysis_status: trusted ? "OK" : "ANALISE_INSUFICIENTE",
++    meta: { scoring_version: cfg.version, prompt_version: DETERMINISTIC_PROMPT_VERSION, model: "code", events_interpreted: cls.classified },
+     warnings,
++    audit: { ...audit, analysis_id: String(analysis.id) },
+   };
+-  await db.update(macroAnalyses).set({ resultJson: result, warnings, model: interp.model, promptVersion: interp.promptVersion, eventsCount: ids.length }).where(eq(macroAnalyses.id, analysis.id));
++  await db.update(macroAnalyses).set({ resultJson: result, warnings, model: "code", promptVersion: DETERMINISTIC_PROMPT_VERSION, eventsCount: ids.length }).where(eq(macroAnalyses.id, analysis.id));
+   return result;
+ }
+ 
+@@ -372,6 +435,12 @@ export async function getLatestAnalysis(session?: Session): Promise<MacroAnalysi
+   return r.resultJson as MacroAnalysisResult;
+ }
+ 
++/** Scores da ANÁLISE MAIS RECENTE (nunca um misto de análises). Usado pelo Ranking G8 e pelo histórico de risco. */
++export async function latestScores(): Promise<CurrencyScoreView[]> {
++  const a = await getLatestAnalysis();
++  return a?.currencies ?? [];
++}
++
+ export async function getScoreHistory(days: 7 | 30 | 90, currency?: Currency) {
+   const since = new Date(Date.now() - days * 86_400_000);
+   const conds = [gte(currencyScores.computedAt, since)];
+diff --git a/src/lib/macro/scoring.ts b/src/lib/macro/scoring.ts
+index 6049c18..f99cc1d 100644
+--- a/src/lib/macro/scoring.ts
++++ b/src/lib/macro/scoring.ts
+@@ -3,7 +3,7 @@
+  * contribution = direction_value × importance_weight × category_multiplier × impact_factor × confidence_factor × decay(idade)
+  * score(ccy) = média ponderada das contribuições vivas, arredondada em passos (0.25) e limitada a ±2.
+  */
+-import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification } from "@/lib/ai/types";
++import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification, type ScoreDriver } from "@/lib/ai/types";
+ import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
+ 
+ export interface ScoredEvent {
+@@ -17,6 +17,10 @@ export interface ScoredEvent {
+   importance: Importance;
+   classification: Classification;
+   confidence: Confidence;
++  // --- auditoria (opcionais; vindos da classificação determinística) ---
++  actual?: string | null; forecast?: string | null; previous?: string | null;
++  surprise?: number | null; reference_basis?: "FORECAST" | "PREVIOUS" | "NONE";
++  rule_id?: string | null; explanation?: string; source?: string;
+ }
+ 
+ export interface ContributionBreakdown {
+@@ -74,106 +78,125 @@ export function momentumFrom(score: number, previous: number | null, cfg: Scorin
+   return "STABLE";
+ }
+ 
+-/**
+- * Confiança 0–100 do score de uma moeda. NÃO é probabilidade de alta/baixa:
+- * é a força da EVIDÊNCIA macro disponível. Combina:
+- *  - massa de evidência (peso total vivo, não quantidade de eventos);
+- *  - concordância de direção entre os eventos (conflito derruba a confiança);
+- *  - qualidade: fatia do peso vindo de evidência de alta importância/alto impacto.
+- */
+-export function confidenceScore(live: { w: number; dir: number; primary: boolean }[]): { pct: number; agreement: number; mass: number; conflict: boolean } {
+-  if (live.length === 0) return { pct: 0, agreement: 0, mass: 0, conflict: false };
+-  const mass = live.reduce((s, x) => s + x.w, 0);
+-  if (mass <= 0) return { pct: 0, agreement: 0, mass: 0, conflict: false };
+-  const directional = live.filter((x) => x.dir !== 0);
+-  const dirMass = directional.reduce((s, x) => s + x.w, 0);
+-  const signed = directional.reduce((s, x) => s + x.w * Math.sign(x.dir), 0);
+-  const agreement = dirMass > 0 ? Math.abs(signed) / dirMass : 0; // 1 = todos no mesmo sentido
+-  const primaryMass = live.filter((x) => x.primary).reduce((s, x) => s + x.w, 0);
+-  const quality = primaryMass / mass;
+-
+-  const massFactor = mass / (mass + 0.8);        // satura: muita evidência ⇒ ~1
+-  const agreementFactor = 0.35 + 0.65 * agreement; // conflito total ⇒ 0.35
+-  const qualityFactor = 0.7 + 0.3 * quality;       // só evidência fraca ⇒ 0.7
+-
+-  const pct = Math.round(100 * massFactor * agreementFactor * qualityFactor);
+-  // Conflito relevante: direções opostas com peso material dos dois lados.
+-  const conflict = directional.length >= 2 && agreement < 0.6;
+-  return { pct: Math.max(0, Math.min(99, pct)), agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict };
+-}
+-
+-/** Enum de confiança derivado do percentual (mantido para compatibilidade com o schema/banco). */
+-export function confidenceEnum(pct: number): Confidence {
+-  if (pct >= 65) return "HIGH";
+-  if (pct >= 40) return "MEDIUM";
++/**
++ * Confiança 0–100 do score de uma moeda. NÃO é probabilidade de alta/baixa:
++ * é a força da EVIDÊNCIA macro disponível. Combina:
++ *  - massa de evidência (peso total vivo, não quantidade de eventos);
++ *  - concordância de direção entre os eventos (conflito derruba a confiança);
++ *  - qualidade: fatia do peso vindo de evidência de alta importância/alto impacto.
++ */
++export function confidenceScore(live: { w: number; dir: number; primary: boolean }[]): { pct: number; agreement: number; mass: number; conflict: boolean } {
++  if (live.length === 0) return { pct: 0, agreement: 0, mass: 0, conflict: false };
++  const mass = live.reduce((s, x) => s + x.w, 0);
++  if (mass <= 0) return { pct: 0, agreement: 0, mass: 0, conflict: false };
++  const directional = live.filter((x) => x.dir !== 0);
++  const dirMass = directional.reduce((s, x) => s + x.w, 0);
++  const signed = directional.reduce((s, x) => s + x.w * Math.sign(x.dir), 0);
++  const agreement = dirMass > 0 ? Math.abs(signed) / dirMass : 0; // 1 = todos no mesmo sentido
++  const primaryMass = live.filter((x) => x.primary).reduce((s, x) => s + x.w, 0);
++  const quality = primaryMass / mass;
++
++  const massFactor = mass / (mass + 0.8);        // satura: muita evidência ⇒ ~1
++  const agreementFactor = 0.35 + 0.65 * agreement; // conflito total ⇒ 0.35
++  const qualityFactor = 0.7 + 0.3 * quality;       // só evidência fraca ⇒ 0.7
++
++  const pct = Math.round(100 * massFactor * agreementFactor * qualityFactor);
++  // Conflito relevante: direções opostas com peso material dos dois lados.
++  const conflict = directional.length >= 2 && agreement < 0.6;
++  return { pct: Math.max(0, Math.min(99, pct)), agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict };
++}
++
++/** Enum de confiança derivado do percentual (mantido para compatibilidade com o schema/banco). */
++export function confidenceEnum(pct: number): Confidence {
++  if (pct >= 65) return "HIGH";
++  if (pct >= 40) return "MEDIUM";
+   return "LOW";
+ }
+ 
+ export interface ComputeInput {
+   events: ScoredEvent[];
+   now: Date;
+-  previousScores?: Partial<Record<string, number>>; // último snapshot
++  /** Não usado pelo pipeline G8 (cada análise começa limpa). Mantido para o módulo B3. */
++  previousScores?: Partial<Record<string, number | null | undefined>>;
+   cfg?: ScoringConfig;
+   /** Moedas a pontuar (padrão G8). O módulo B3 usa o MESMO motor para BRL/CNY/USD. */
+   currencies?: readonly AnyCurrency[];
+ }
+ 
+-/** Calcula o score das moedas (padrão: 8 do G8) + ranking. Puro: mesma entrada ⇒ mesma saída. */
++/**
++ * Calcula o score das moedas + ranking. Puro: mesma entrada ⇒ mesma saída.
++ *  - Moeda SEM evidência mensurada ⇒ score = null, status INSUFFICIENT_EVIDENCE, sem rank.
++ *  - Evento UNKNOWN (direção não mensurável) ⇒ não pontua; fica em excluded_events com o motivo.
++ *  - Moeda com evidência só NEUTRA (surpresa dentro do limiar) ⇒ score 0 MEDIDO (não é "sem dado").
++ */
+ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] {
+   const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
+   const out: CurrencyScoreView[] = [];
+   for (const ccy of (input.currencies ?? G8) as readonly Currency[]) {
+     const evs = input.events.filter((e) => e.currency === ccy && !e.superseded && e.impact !== "holiday");
+     let num = 0, den = 0;
+-    const live: { w: number; dir: number; primary: boolean }[] = [];
+-    const drivers: CurrencyScoreView["drivers"] = [];
++    const live: { w: number; dir: number; primary: boolean }[] = [];
++    const drivers: ScoreDriver[] = [];
++    const excluded: { event_id: number; event: string; reason: string }[] = [];
+     for (const e of evs) {
++      if (e.classification === "UNKNOWN") {
++        excluded.push({ event_id: e.event_id, event: e.event, reason: e.explanation ?? "Direção não mensurável — não pontua." });
++        continue;
++      }
+       const bc = baseContribution(e, cfg);
+       const ageDays = (input.now.getTime() - e.released_at.getTime()) / 86_400_000;
+       const decay = decayFactor(e.category, ageDays, cfg);
+       const w = bc.weight * bc.impact_factor * bc.confidence_factor * decay;
+-      if (w < cfg.min_weight_alive) continue;
++      if (w < cfg.min_weight_alive) { excluded.push({ event_id: e.event_id, event: e.event, reason: "Peso abaixo do mínimo (evento antigo ou de baixa confiança)." }); continue; }
+       num += bc.direction_value * w;
+       den += w;
+-      const primary = (e.importance === "HIGH" || e.importance === "MEDIUM_HIGH") && e.impact !== "low";
+-      live.push({ w, dir: bc.direction_value, primary });
+-      drivers.push({
+-        event_id: e.event_id, event: e.event, classification: e.classification, weight: Number(w.toFixed(4)),
+-        released_at: e.released_at.toISOString(),
+-        contribution: Number((bc.direction_value * w).toFixed(4)),
+-        category: e.category, importance: e.importance, primary,
+-      });
++      const primary = (e.importance === "HIGH" || e.importance === "MEDIUM_HIGH") && e.impact !== "low";
++      live.push({ w, dir: bc.direction_value, primary });
++      drivers.push({
++        event_id: e.event_id, event: e.event, classification: e.classification, weight: Number(w.toFixed(4)),
++        released_at: e.released_at.toISOString(),
++        contribution: Number((bc.direction_value * w).toFixed(4)),
++        category: e.category, importance: e.importance, primary,
++        direction: e.classification.includes("BULLISH") ? "BULLISH" : e.classification.includes("BEARISH") ? "BEARISH" : "NEUTRAL",
++        actual: e.actual ?? null, forecast: e.forecast ?? null, previous: e.previous ?? null,
++        surprise: e.surprise ?? null, reference_basis: e.reference_basis ?? "NONE",
++        rule_id: e.rule_id ?? null, explanation: e.explanation, source: e.source,
++      });
+     }
+-    // Média ponderada das direções (−2..+2) ATENUADA pela massa de evidência.
+-    // Sem isso, uma única leitura secundária produziria força plena ("event counting" invertido).
+-    const weighted = den > 0 ? num / den : 0;
+-    const evidenceFactor = den > 0 ? den / (den + cfg.evidence_k) : 0;
+-    const raw = weighted * evidenceFactor;
+-    const score = Math.max(-cfg.clamp, Math.min(cfg.clamp, roundToStep(raw, cfg.score_step)));
+-    const conf = confidenceScore(live);
++    drivers.sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0) || b.weight - a.weight);
++    const noEvidence = live.length === 0;
++    const base = { currency: ccy, live_events: live.length, drivers: drivers.slice(0, 12), excluded_events: excluded };
++    // Comparação com snapshot anterior só existe quando o chamador a fornece (B3). O G8 nunca passa — cada análise começa limpa.
+     const previous = input.previousScores?.[ccy] ?? null;
+-    drivers.sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0) || b.weight - a.weight);
+-    const noData = live.length === 0;
++    if (noEvidence) {
++      out.push({
++        ...base, status: "INSUFFICIENT_EVIDENCE", score: null, score_raw: null, previous_score: null, score_delta: null, momentum: null, classification: null, bias: null,
++        confidence: "INSUFFICIENT_EVIDENCE", confidence_pct: null, rank: null, no_data: true, score_display: null,
++      });
++      continue;
++    }
++    // Média ponderada das direções (−2..+2) ATENUADA pela massa de evidência.
++    // Sem isso, uma única leitura secundária produziria força plena.
++    const weighted = num / den;
++    const evidenceFactor = den / (den + cfg.evidence_k);
++    const raw = weighted * evidenceFactor;
++    const score = Math.max(-cfg.clamp, Math.min(cfg.clamp, roundToStep(raw, cfg.score_step)));
++    const conf = confidenceScore(live);
+     out.push({
+-      currency: ccy, score, score_raw: Number(raw.toFixed(4)), previous_score: previous,
+-      score_delta: previous === null ? null : Number((score - previous).toFixed(4)),
+-      momentum: momentumFrom(score, previous, cfg),
+-      classification: noData ? "NEUTRAL" : classifyScore(score, cfg),
+-      bias: noData ? "NEUTRAL" : biasFromScore(score, cfg),
+-      confidence: confidenceEnum(conf.pct),
+-      confidence_pct: conf.pct,
+-      evidence_mass: conf.mass,
+-      agreement: conf.agreement,
+-      conflict: conf.conflict,
+-      no_data: noData,
+-      score_display: Number((score * cfg.display_scale).toFixed(2)),
+-      rank: 0, live_events: live.length, drivers: drivers.slice(0, 6),
++      ...base, status: "EVALUATED", score, score_raw: Number(raw.toFixed(4)),
++      previous_score: previous, score_delta: previous === null ? null : Number((score - previous).toFixed(4)), momentum: momentumFrom(score, previous, cfg),
++      classification: classifyScore(score, cfg), bias: biasFromScore(score, cfg),
++      confidence: confidenceEnum(conf.pct), confidence_pct: conf.pct,
++      evidence_mass: conf.mass, agreement: conf.agreement, conflict: conf.conflict, no_data: false,
++      score_display: Number((score * cfg.display_scale).toFixed(2)), rank: 0,
+     });
+   }
+-  // ranking: score desc, desempate por score_raw, depois confiança
+-  out.sort((a, b) => b.score - a.score || b.score_raw - a.score_raw || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
+-  out.forEach((c, i) => (c.rank = i + 1));
+-  return out;
++  // ranking: APENAS moedas com evidência. Sem evidência não recebe posição artificial.
++  const evaluated = out.filter((c) => c.status === "EVALUATED");
++  evaluated.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.score_raw ?? 0) - (a.score_raw ?? 0) || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
++  evaluated.forEach((c, i) => (c.rank = i + 1));
++  const insufficient = out.filter((c) => c.status !== "EVALUATED").sort((a, b) => a.currency.localeCompare(b.currency));
++  return [...evaluated, ...insufficient];
+ }
+ 
+ /** event_key normalizado para supersede: 'USD|core_cpi_mom' */
+diff --git a/tests/api-handlers.test.ts b/tests/api-handlers.test.ts
+index 727393c..a0d3a16 100644
+--- a/tests/api-handlers.test.ts
++++ b/tests/api-handlers.test.ts
+@@ -1,8 +1,10 @@
+-import { describe, it, expect, beforeAll } from "vitest";
++import { describe, it, expect, beforeEach, afterEach } from "vitest";
+ import { setEnvOverrides } from "@/lib/env";
+ 
+ // Provedor MOCK: nenhum token gasto. Sem banco: testamos a rota de OCR (não persiste) e a validação de upload.
+-beforeAll(() => setEnvOverrides({ AI_PROVIDER: "mock", APP_API_TOKEN: "t0k" }));
++// beforeEach (não beforeAll): outros arquivos de teste também mudam o override global
++beforeEach(() => setEnvOverrides({ AI_PROVIDER: "mock", APP_API_TOKEN: "t0k" }));
++afterEach(() => setEnvOverrides(null));
+ 
+ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+ 
+@@ -13,18 +15,14 @@ describe("POST /api/ai/macro/extract (mock provider)", () => {
+     const res = await POST(new Request("http://x/api/ai/macro/extract", { method: "POST", body: fd }));
+     expect(res.status).toBe(401);
+   });
+-  it("retorna eventos extraídos com pendentes separados de realizados", async () => {
++  it("sem IA configurada, a extração RECUSA o mock (mock inventa linhas) — 503 AI_NOT_CONFIGURED", async () => {
+     const { POST } = await import("@/app/api/ai/macro/extract/route");
+     const fd = new FormData(); fd.append("images", new File([PNG], "ff.png", { type: "image/png" }));
+     const res = await POST(new Request("http://x/api/ai/macro/extract", { method: "POST", body: fd, headers: { "x-app-token": "t0k" } }));
+-    expect(res.status).toBe(200);
++    expect(res.status).toBe(503);
+     const body = await res.json();
+-    expect(body.events.length).toBeGreaterThan(0);
+-    const pending = body.events.find((e: { event: string }) => e.event === "Employment Change");
+-    expect(pending.actual).toBeNull();
+-    const low = body.events.find((e: { ocr_confidence: number }) => e.ocr_confidence < 0.7);
+-    expect(low.requires_manual_confirmation).toBe(true);
+-    expect(body.meta.provider).toBe("mock");
++    expect(JSON.stringify(body)).toContain("AI_NOT_CONFIGURED");
++    expect(body.events).toBeUndefined();
+   });
+   it("rejeita tipo de arquivo inválido e excesso de imagens", async () => {
+     const { POST } = await import("@/app/api/ai/macro/extract/route");
+@@ -52,6 +50,6 @@ describe("AI service — retry/validação", () => {
+     const { generateStructured } = await import("@/lib/ai/service");
+     const { SESSION_BRIEF } = await import("@/lib/ai/prompts");
+     const r = await generateStructured({ purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", user: "{}" });
+-    expect(r.provider).toBe("mock"); expect(r.data.headline).toBeTruthy(); expect(r.promptVersion).toBe("session-brief-v1");
++    expect(r.provider).toBe("mock"); expect(r.data.headline).toBeTruthy(); expect(r.promptVersion).toMatch(/^session-brief-v\d$/);
+   });
+ });
+diff --git a/tests/b3-ui.test.tsx b/tests/b3-ui.test.tsx
+index 992fce3..0a13ea4 100644
+--- a/tests/b3-ui.test.tsx
++++ b/tests/b3-ui.test.tsx
+@@ -15,7 +15,7 @@ import type { CurrencyScoreView } from "@/lib/ai/types";
+ import type { TechnicalAnalysis } from "@/lib/ai/schemas";
+ 
+ const now = new Date("2026-10-02T13:00:00Z");
+-const ccy = (currency: string, score: number): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: 1, drivers: [] });
++const ccy = (currency: string, score: number): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, status: "EVALUATED", confidence_pct: null, score_display: null, excluded_events: [], previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: 1, drivers: [] });
+ const rd = (symbol: string, change_pct: number | null, change_bp: number | null = null): MarketReading => ({ symbol, value: 100, change_pct, change_bp, direction: directionOf(change_pct, change_bp), captured_at: now.toISOString(), source: "manual", stale: false });
+ 
+ function buildResult(withData: boolean): B3AnalysisResult {
+diff --git a/tests/b3.test.ts b/tests/b3.test.ts
+index be08f02..4231cb6 100644
+--- a/tests/b3.test.ts
++++ b/tests/b3.test.ts
+@@ -13,7 +13,7 @@ import type { TechnicalAnalysis } from "@/lib/ai/schemas";
+ import type { ScoredEvent } from "@/lib/macro/scoring";
+ 
+ const now = new Date("2026-10-02T13:00:00Z");
+-const ccy = (currency: string, score: number, live = 2): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score >= 0.5 ? "BULLISH" : score <= -0.5 ? "BEARISH" : "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: live, drivers: [] });
++const ccy = (currency: string, score: number, live = 2): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, status: "EVALUATED", confidence_pct: null, score_display: null, excluded_events: [], previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score >= 0.5 ? "BULLISH" : score <= -0.5 ? "BEARISH" : "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: live, drivers: [] });
+ const reading = (symbol: string, change_pct: number | null, change_bp: number | null = null, value: number | null = null): MarketReading => ({ symbol, value, change_pct, change_bp, direction: directionOf(change_pct, change_bp), captured_at: now.toISOString(), source: "manual", stale: false });
+ const ev = (currency: string, category: ScoredEvent["category"], classification: ScoredEvent["classification"], daysAgo = 1): ScoredEvent => ({ event_id: Math.floor(Math.random() * 1e6), currency: currency as ScoredEvent["currency"], event: `${category} ${currency}`, impact: "high", released_at: new Date(now.getTime() - daysAgo * 86_400_000), superseded: false, category, importance: "HIGH", classification, confidence: "HIGH" });
+ 
+diff --git a/tests/e2e-b3.pglite.test.ts b/tests/e2e-b3.pglite.test.ts
+index 3e082bb..9785e1b 100644
+--- a/tests/e2e-b3.pglite.test.ts
++++ b/tests/e2e-b3.pglite.test.ts
+@@ -4,6 +4,8 @@ import { describe, it, expect, beforeAll, vi } from "vitest";
+ import { setEnvOverrides } from "@/lib/env";
+ const PGLITE_PKG = "@electric-sql/pglite"; // import dinâmico por string: não quebra o typecheck quando o pacote (opcional) não está instalado
+ vi.mock("@/db", async () => {
++  // sem o pacote opcional, o mock vira stub que falha se alguém tocar no banco (não vaza para outros arquivos)
++  if (!(await import(/* @vite-ignore */ PGLITE_PKG).then(() => true, () => false))) return { getDb: () => { throw new Error("PGlite ausente: teste e2e não deveria tocar no banco"); } };
+   const { PGlite } = (await import(/* @vite-ignore */ PGLITE_PKG)) as { PGlite: new () => { exec: (q: string) => Promise<unknown> } };
+   const { drizzle } = await import("drizzle-orm/pglite");
+   const { readFileSync } = await import("node:fs");
+diff --git a/tests/e2e-portfolios.pglite.test.ts b/tests/e2e-portfolios.pglite.test.ts
+index 4c6220c..826c6e6 100644
+--- a/tests/e2e-portfolios.pglite.test.ts
++++ b/tests/e2e-portfolios.pglite.test.ts
+@@ -6,6 +6,8 @@ const PGLITE_PKG = "@electric-sql/pglite";
+ type Client = { exec: (q: string) => Promise<unknown>; query: (q: string) => Promise<{ rows: Record<string, unknown>[] }> };
+ let clientRef: Client | null = null;
+ vi.mock("@/db", async () => {
++  // sem o pacote opcional, o mock vira stub que falha se alguém tocar no banco (não vaza para outros arquivos)
++  if (!(await import(/* @vite-ignore */ PGLITE_PKG).then(() => true, () => false))) return { getDb: () => { throw new Error("PGlite ausente: teste e2e não deveria tocar no banco"); } };
+   const { PGlite } = (await import(/* @vite-ignore */ PGLITE_PKG)) as { PGlite: new () => Client };
+   const { drizzle } = await import("drizzle-orm/pglite");
+   const { getTableConfig } = await import("drizzle-orm/pg-core");
+diff --git a/tests/macro-evidence.test.ts b/tests/macro-evidence.test.ts
+new file mode 100644
+index 0000000..286fa02
+--- /dev/null
++++ b/tests/macro-evidence.test.ts
+@@ -0,0 +1,143 @@
++/**
++ * Invariantes da análise macro (sem banco, sem IA):
++ *  - sem evidência ⇒ score null, sem rank, nunca 0
++ *  - direção de número vem da tabela semântica (código); fala sem texto ⇒ UNKNOWN (não pontua)
++ *  - extração: moeda/evento/valores precisam existir no texto transcrito da própria linha
++ *  - consistência: qualquer falha ⇒ análise não confiável
++ */
++import { describe, it, expect } from "vitest";
++import { computeCurrencyScores, type ScoredEvent } from "@/lib/macro/scoring";
++import { classifyRelease, matchRule } from "@/lib/macro/indicators";
++import { validateExtractedRows, type RawExtractedRow } from "@/lib/macro/extraction-validation";
++import { runConsistencyChecks } from "@/lib/macro/consistency";
++import { G8 } from "@/lib/ai/types";
++
++const now = new Date("2026-10-08T23:40:00Z");
++const ev = (p: Partial<ScoredEvent> & { currency: ScoredEvent["currency"] }): ScoredEvent => ({
++  event_id: Math.floor(Math.random() * 1e9), event: "Core CPI m/m", impact: "high", released_at: new Date(now.getTime() - 86_400_000), superseded: false,
++  category: "INFLATION", importance: "HIGH", classification: "BULLISH", confidence: "HIGH", ...p,
++});
++
++describe("sem evidência ⇒ null (nunca 0)", () => {
++  it("moeda sem evento não recebe score, posição nem confiança", () => {
++    const scores = computeCurrencyScores({ events: [ev({ currency: "GBP" })], now });
++    const eur = scores.find((s) => s.currency === "EUR")!;
++    expect(eur.status).toBe("INSUFFICIENT_EVIDENCE");
++    expect(eur.score).toBeNull(); expect(eur.rank).toBeNull(); expect(eur.confidence_pct).toBeNull(); expect(eur.score_display).toBeNull();
++  });
++
++  it("cenário sintético de screenshot só com GBP/USD/JPY/AUD: EUR/CAD/CHF/NZD NÃO aparecem no ranking", () => {
++    const raw = [
++      { currency: "USD" as const, event: "Core CPI m/m", actual: "0.4%", forecast: "0.3%", previous: "0.2%" },
++      { currency: "GBP" as const, event: "Official Bank Rate", actual: "4.00%", forecast: "4.25%", previous: "4.25%" },
++      { currency: "JPY" as const, event: "Trade Balance", actual: "-0.2T", forecast: "-0.5T", previous: "-0.6T" },
++    ];
++    const events: ScoredEvent[] = raw.map((r, i) => {
++      const c = classifyRelease({ event: r.event, impact: "high", actual: r.actual, forecast: r.forecast, previous: r.previous });
++      return ev({ event_id: i + 1, currency: r.currency, event: r.event, classification: c.classification, category: c.category, confidence: c.confidence === "LOW" ? "MEDIUM" : c.confidence, actual: r.actual, forecast: r.forecast, previous: r.previous, surprise: c.surprise, rule_id: c.rule_id, explanation: c.explanation });
++    });
++    const scores = computeCurrencyScores({ events, now });
++    const ranked = scores.filter((s) => s.rank !== null).map((s) => s.currency);
++    expect(ranked.sort()).toEqual(["GBP", "JPY", "USD"].sort());
++    for (const c of ["EUR", "CAD", "CHF", "NZD", "AUD"] as const) {
++      const s = scores.find((x) => x.currency === c)!;
++      expect(s.score).toBeNull(); expect(s.rank).toBeNull();
++    }
++    expect(scores.filter((s) => s.rank !== null).every((s) => s.score !== null)).toBe(true);
++  });
++
++  it("evento medido neutro (dentro do limiar) é ZERO medido — status EVALUATED, não 'sem dado'", () => {
++    const c = classifyRelease({ event: "Core CPI m/m", impact: "high", actual: "0.30%", forecast: "0.31%", previous: "0.2%" });
++    expect(c.direction).toBe("NEUTRAL");
++    const s = computeCurrencyScores({ events: [ev({ currency: "USD", classification: c.classification })], now }).find((x) => x.currency === "USD")!;
++    expect(s.status).toBe("EVALUATED"); expect(s.score).toBe(0); expect(s.live_events).toBe(1);
++  });
++});
++
++describe("direção por código (tabela semântica), não pela IA", () => {
++  it("CPI acima do forecast = BULLISH da moeda; trabalho (desemprego) acima = BEARISH", () => {
++    expect(classifyRelease({ event: "Core CPI m/m", impact: "high", actual: "0.5%", forecast: "0.3%", previous: null }).direction).toBe("BULLISH");
++    expect(classifyRelease({ event: "Unemployment Rate", impact: "high", actual: "4.6%", forecast: "4.3%", previous: null }).direction).toBe("BEARISH");
++  });
++  it("fala de diretor sem texto ⇒ UNKNOWN, explicação explícita, não pontua", () => {
++    const c = classifyRelease({ event: "MPC Member Breeden Speaks", impact: "medium", actual: null, forecast: null, previous: null });
++    expect(c.direction).toBe("UNKNOWN"); expect(c.classification).toBe("UNKNOWN");
++    expect(c.explanation).toContain("sem evidência textual suficiente");
++    const s = computeCurrencyScores({ events: [ev({ currency: "GBP", classification: "UNKNOWN", explanation: c.explanation })], now }).find((x) => x.currency === "GBP")!;
++    expect(s.score).toBeNull(); expect(s.excluded_events?.length).toBe(1);
++  });
++  it("indicador fora da tabela ⇒ UNKNOWN (não usa conhecimento geral)", () => {
++    expect(matchRule("Some Obscure Index")).toBeNull();
++    expect(classifyRelease({ event: "Some Obscure Index", impact: "high", actual: "5", forecast: "3", previous: "4" }).direction).toBe("UNKNOWN");
++  });
++  it("sem FORECAST usa PREVIOUS com confiança LOW; sem ambos ⇒ UNKNOWN", () => {
++    const withPrev = classifyRelease({ event: "Core CPI m/m", impact: "high", actual: "0.5%", forecast: null, previous: "0.2%" });
++    expect(withPrev.reference_basis).toBe("PREVIOUS"); expect(withPrev.confidence).toBe("LOW");
++    expect(classifyRelease({ event: "Core CPI m/m", impact: "high", actual: "0.5%", forecast: null, previous: null }).direction).toBe("UNKNOWN");
++  });
++  it("sem ATUAL ⇒ UNKNOWN (pendente nunca vira direção)", () => {
++    expect(classifyRelease({ event: "Core CPI m/m", impact: "high", actual: null, forecast: "0.3%", previous: "0.2%" }).direction).toBe("UNKNOWN");
++  });
++  it("limiar relativo: claims 230K vs 215K (≈7%) é BEARISH; 216K vs 215K é ruído", () => {
++    expect(classifyRelease({ event: "Unemployment Claims", impact: "high", actual: "230K", forecast: "215K", previous: null }).direction).toBe("BEARISH");
++    expect(classifyRelease({ event: "Unemployment Claims", impact: "high", actual: "216K", forecast: "215K", previous: null }).direction).toBe("NEUTRAL");
++  });
++});
++
++describe("validação da extração (código confere a IA)", () => {
++  const allowed = G8 as readonly string[];
++  const row = (p: Partial<RawExtractedRow>): RawExtractedRow => ({
++    date: "2026-10-08", time: "09:30", currency: "USD", event: "Core CPI m/m", impact: "high", actual: "0.4%", forecast: "0.3%", previous: "0.2%",
++    status: "released", ocr_confidence: 0.95, requires_manual_confirmation: false, ocr_issues: [], raw_row_text: "09:30 USD Core CPI m/m 0.4% 0.3% 0.2%", ...p,
++  });
++
++  it("linha legítima é aceita", () => {
++    const r = validateExtractedRows([row({})], { allowed });
++    expect(r.accepted).toHaveLength(1); expect(r.rejected).toHaveLength(0);
++  });
++  it("moeda que NÃO aparece na linha transcrita é rejeitada (ex.: EUR inventado)", () => {
++    const r = validateExtractedRows([row({ currency: "EUR", raw_row_text: "09:30 USD Core CPI m/m 0.4%" })], { allowed });
++    expect(r.accepted).toHaveLength(0); expect(r.rejected[0].reason).toContain("não aparece no texto transcrito");
++  });
++  it("evento que não consta na linha é rejeitado", () => {
++    const r = validateExtractedRows([row({ event: "Non-Farm Payrolls", raw_row_text: "09:30 USD Core CPI m/m 0.4%" })], { allowed });
++    expect(r.rejected[0].reason).toContain("não consta");
++  });
++  it("valor que não aparece na linha vira null (não inventado) e é registrado", () => {
++    const r = validateExtractedRows([row({ forecast: "0.9%" })], { allowed });
++    expect(r.accepted[0].forecast).toBeNull();
++    expect(r.values_discarded[0].field).toBe("forecast");
++  });
++  it("released sem ATUAL validado vira pendente (forecast nunca vira resultado)", () => {
++    const r = validateExtractedRows([row({ actual: "9.9%", raw_row_text: "09:30 USD Core CPI m/m forecast 0.3%" })], { allowed });
++    expect(r.accepted[0].actual).toBeNull();
++  });
++  it("UNREADABLE, leitura incerta, fora do escopo e duplicata são rejeitados", () => {
++    expect(validateExtractedRows([row({ raw_row_text: "UNREADABLE" })], { allowed }).rejected[0].reason).toContain("ilegível");
++    expect(validateExtractedRows([row({ ocr_confidence: 0.3 })], { allowed }).rejected[0].reason).toContain("incerta");
++    expect(validateExtractedRows([row({ currency: "CNY" as never, raw_row_text: "CNY Core CPI m/m" })], { allowed }).rejected[0].reason).toContain("fora do escopo");
++    const dup = validateExtractedRows([row({}), row({})], { allowed });
++    expect(dup.accepted).toHaveLength(1); expect(dup.rejected[0].reason).toContain("duplicada");
++  });
++});
++
++describe("checagem de consistência", () => {
++  const scoreFor = (events: ScoredEvent[]) => computeCurrencyScores({ events, now });
++  const base = (over: Partial<Parameters<typeof runConsistencyChecks>[0]> = {}) => {
++    const events = [ev({ event_id: 1, currency: "USD" })];
++    return { ranked: scoreFor(events), analysisEventIds: new Set([1]), releasedCount: 1, classifiedCount: 1, inputType: "manual" as const, extraction: null, ...over };
++  };
++  it("análise limpa é confiável", () => { expect(runConsistencyChecks(base()).trusted).toBe(true); });
++  it("evento de OUTRA análise reutilizado ⇒ não confiável", () => {
++    expect(runConsistencyChecks(base({ analysisEventIds: new Set([999]) })).trusted).toBe(false);
++  });
++  it("interpretados ≠ extraídos ⇒ não confiável", () => { expect(runConsistencyChecks(base({ classifiedCount: 0 })).trusted).toBe(false); });
++  it("screenshot sem verificação visual concluída ⇒ não confiável", () => {
++    const extraction = { provider: "x", model: "y", raw_json: {}, rows_received: 1, accepted: [], rejected: [], values_discarded: [], visual_verification: "UNAVAILABLE" as const };
++    expect(runConsistencyChecks(base({ inputType: "screenshot", extraction })).trusted).toBe(false);
++  });
++  it("score sem evidência (0 mascarando) ⇒ não confiável", () => {
++    const ranked = scoreFor([ev({ event_id: 1, currency: "USD" })]).map((s) => (s.currency === "EUR" ? { ...s, score: 0 } : s));
++    expect(runConsistencyChecks(base({ ranked })).trusted).toBe(false);
++  });
++});
+diff --git a/tests/pairs-risk-exposure.test.ts b/tests/pairs-risk-exposure.test.ts
+index 106f719..f3043b6 100644
+--- a/tests/pairs-risk-exposure.test.ts
++++ b/tests/pairs-risk-exposure.test.ts
+@@ -5,7 +5,7 @@ import { computeExposure, wouldIncreaseConcentration } from "@/lib/macro/exposur
+ import type { CurrencyScoreView, PendingEventView } from "@/lib/ai/types";
+ 
+ const mk = (currency: CurrencyScoreView["currency"], score: number, confidence: CurrencyScoreView["confidence"] = "HIGH"): CurrencyScoreView => ({
+-  currency, score, score_raw: score, previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score > 0 ? "BULLISH" : score < 0 ? "BEARISH" : "NEUTRAL", confidence, rank: 0, live_events: 2, drivers: [],
++  currency, score, score_raw: score, status: "EVALUATED", confidence_pct: null, score_display: null, excluded_events: [], previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score > 0 ? "BULLISH" : score < 0 ? "BEARISH" : "NEUTRAL", confidence, rank: 0, live_events: 2, drivers: [],
+ });
+ const scores = [mk("USD", 1.25), mk("EUR", 1.5), mk("GBP", 0.5), mk("JPY", 2.0), mk("CHF", 0.75), mk("CAD", 0), mk("AUD", -1.0), mk("NZD", -1.5, "LOW")];
+ const pend = (currency: PendingEventView["currency"], impact: string, minutes: number): PendingEventView => ({ id: 1, currency, event: "X", scheduled_at: "", impact, forecast: null, previous: null, minutes_until: minutes });
+diff --git a/tests/scoring.test.ts b/tests/scoring.test.ts
+index a86d517..3d97f3a 100644
+--- a/tests/scoring.test.ts
++++ b/tests/scoring.test.ts
+@@ -34,19 +34,23 @@ describe("scoring engine", () => {
+     ];
+     const scores = computeCurrencyScores({ events, now, previousScores: { USD: 0.5, AUD: 1.0 } });
+     expect(scores).toHaveLength(8);
+-    expect(scores.map((s) => s.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+-    expect(scores[0].currency).toBe("EUR");
+-    expect(scores[7].currency).toBe("AUD");
++    const evaluated = scores.filter((s) => s.status === "EVALUATED");
++    expect(evaluated.map((s) => s.rank)).toEqual(evaluated.map((_, i) => i + 1));
++    expect(scores.filter((s) => s.status !== "EVALUATED").every((s) => s.rank === null && s.score === null)).toBe(true);
++    expect(evaluated[0].currency).toBe("EUR");
++    expect(evaluated[evaluated.length - 1].currency).toBe("AUD");
+     const usd = scores.find((s) => s.currency === "USD")!;
+-    expect(usd.score).toBe(1); expect(usd.score_delta).toBe(0.5); expect(usd.momentum).toBe("STRENGTHENING");
++    expect(usd.score).toBe(0.75); /* recalibrado: 1.0 era valor obsoleto já no HEAD */ expect(usd.score_delta).toBe(0.25); expect(usd.momentum).toBe("STRENGTHENING");
+     const aud = scores.find((s) => s.currency === "AUD")!;
+     expect(aud.score).toBeLessThan(-1); expect(aud.momentum).toBe("NARRATIVE_SHIFT");
+-    for (const s of scores) { expect(s.score).toBeLessThanOrEqual(2); expect(s.score).toBeGreaterThanOrEqual(-2); }
++    for (const s of scores) if (s.score !== null) { expect(s.score).toBeLessThanOrEqual(2); expect(s.score).toBeGreaterThanOrEqual(-2); }
+   });
+   it("ignora eventos superseded e feriados", () => {
+     const events = [ev({ currency: "GBP", classification: "VERY_BULLISH", superseded: true }), ev({ currency: "GBP", classification: "BEARISH", impact: "holiday" })];
+     const gbp = computeCurrencyScores({ events, now }).find((s) => s.currency === "GBP")!;
+-    expect(gbp.score).toBe(0); expect(gbp.live_events).toBe(0); expect(gbp.confidence).toBe("LOW");
++    // Sem evidência mensurada: score = null (NUNCA 0), sem posição, status explícito.
++    expect(gbp.score).toBeNull(); expect(gbp.status).toBe("INSUFFICIENT_EVIDENCE"); expect(gbp.rank).toBeNull();
++    expect(gbp.live_events).toBe(0); expect(gbp.confidence).toBe("INSUFFICIENT_EVIDENCE"); expect(gbp.confidence_pct).toBeNull();
+   });
+   it("momentum: estável/enfraquecendo", () => {
+     expect(momentumFrom(1, 1)).toBe("STABLE"); expect(momentumFrom(0.5, 1)).toBe("WEAKENING"); expect(momentumFrom(1, null)).toBeNull();
+@@ -56,5 +60,5 @@ describe("scoring engine", () => {
+     expect(normalizeEventKey("EUR", "Flash Services PMI")).toBe(normalizeEventKey("EUR", "Final Services PMI"));
+     expect(parseNumeric("2.4%")).toBe(2.4); expect(parseNumeric("-0.1")).toBe(-0.1); expect(parseNumeric("150K")).toBe(150000); expect(parseNumeric(null)).toBeNull(); expect(parseNumeric("—")).toBeNull();
+   });
+-  it("config default tem versão", () => { expect(DEFAULT_SCORING_CONFIG.version).toBe("v1"); });
++  it("config default tem versão", () => { expect(DEFAULT_SCORING_CONFIG.version).toMatch(/^v\d/); });
+ });

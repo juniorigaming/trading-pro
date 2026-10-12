@@ -13,7 +13,7 @@ import type { TechnicalAnalysis } from "@/lib/ai/schemas";
 import type { ScoredEvent } from "@/lib/macro/scoring";
 
 const now = new Date("2026-10-02T13:00:00Z");
-const ccy = (currency: string, score: number, live = 2): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score >= 0.5 ? "BULLISH" : score <= -0.5 ? "BEARISH" : "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: live, drivers: [] });
+const ccy = (currency: string, score: number, live = 2): CurrencyScoreView => ({ currency: currency as CurrencyScoreView["currency"], score, score_raw: score, status: "EVALUATED", confidence_pct: null, score_display: null, excluded_events: [], previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score >= 0.5 ? "BULLISH" : score <= -0.5 ? "BEARISH" : "NEUTRAL", confidence: "MEDIUM", rank: 1, live_events: live, drivers: [] });
 const reading = (symbol: string, change_pct: number | null, change_bp: number | null = null, value: number | null = null): MarketReading => ({ symbol, value, change_pct, change_bp, direction: directionOf(change_pct, change_bp), captured_at: now.toISOString(), source: "manual", stale: false });
 const ev = (currency: string, category: ScoredEvent["category"], classification: ScoredEvent["classification"], daysAgo = 1): ScoredEvent => ({ event_id: Math.floor(Math.random() * 1e6), currency: currency as ScoredEvent["currency"], event: `${category} ${currency}`, impact: "high", released_at: new Date(now.getTime() - daysAgo * 86_400_000), superseded: false, category, importance: "HIGH", classification, confidence: "HIGH" });
 

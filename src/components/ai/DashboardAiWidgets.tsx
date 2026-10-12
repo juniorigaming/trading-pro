@@ -5,7 +5,7 @@ import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark, Bitcoin } 
 import type { PortfolioId } from "@/lib/portfolio";
 import { apiFetch } from "@/lib/ai/client";
 import { B3_SESSION_LABEL, type B3AnalysisResult } from "@/lib/b3/types";
-import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView } from "@/lib/ai/types";
+import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView , EvaluatedCurrency } from "@/lib/ai/types";
 import { Badge, DeltaArrow, fmtScore, riskColor, scoreBg, SESSION_LABEL } from "./ui";
 import CurrencyExposure from "./CurrencyExposure";
 
@@ -70,7 +70,7 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
   if (unavailable) return (
     <div className="glass-card p-4 mb-6 flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-sm text-text-secondary"><BrainCircuit size={18} className="text-accent" />Módulo IA ainda não configurado (rode a migration e defina as variáveis).</div><Link href="/analise-macro" className="text-xs font-bold text-accent inline-flex items-center gap-1">Abrir <ChevronRight size={14} /></Link></div>
   );
-  const sorted = scores ? [...scores].sort((a, b) => a.rank - b.rank) : [];
+  const sorted = scores ? (scores.filter((s) => s.status === "EVALUATED" && s.score !== null) as EvaluatedCurrency[]).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)) : [];
   const top = sorted.slice(0, 3), bottom = sorted.slice(-3).reverse();
   const risky = (latest?.event_risk ?? []).filter((r) => r.level === "HIGH" || r.level === "EXTREME");
   const sessionLabel = latest ? (SESSION_LABEL[latest.session] ?? latest.session) : null;

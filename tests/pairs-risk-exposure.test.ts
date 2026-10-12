@@ -5,7 +5,7 @@ import { computeExposure, wouldIncreaseConcentration } from "@/lib/macro/exposur
 import type { CurrencyScoreView, PendingEventView } from "@/lib/ai/types";
 
 const mk = (currency: CurrencyScoreView["currency"], score: number, confidence: CurrencyScoreView["confidence"] = "HIGH"): CurrencyScoreView => ({
-  currency, score, score_raw: score, previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score > 0 ? "BULLISH" : score < 0 ? "BEARISH" : "NEUTRAL", confidence, rank: 0, live_events: 2, drivers: [],
+  currency, score, score_raw: score, status: "EVALUATED", confidence_pct: null, score_display: null, excluded_events: [], previous_score: null, score_delta: null, momentum: null, classification: "NEUTRAL", bias: score > 0 ? "BULLISH" : score < 0 ? "BEARISH" : "NEUTRAL", confidence, rank: 0, live_events: 2, drivers: [],
 });
 const scores = [mk("USD", 1.25), mk("EUR", 1.5), mk("GBP", 0.5), mk("JPY", 2.0), mk("CHF", 0.75), mk("CAD", 0), mk("AUD", -1.0), mk("NZD", -1.5, "LOW")];
 const pend = (currency: PendingEventView["currency"], impact: string, minutes: number): PendingEventView => ({ id: 1, currency, event: "X", scheduled_at: "", impact, forecast: null, previous: null, minutes_until: minutes });

@@ -11,7 +11,8 @@ import type { PromptDef } from "./prompts";
 import { getEnv } from "@/lib/env";
 import { mockStructured } from "./mock";
 
-export type AIProvider = "openai" | "gemini" | "mock";
+/** Provedores de IA. Toda a análise de dados (scores, ranking) é determinística; a IA só extrai (visão) e explica. */
+export type AIProvider = "openai" | "gemini" | "openrouter" | "groq" | "qwen" | "mock";
 
 export interface AIImage {
   base64: string; // sem prefixo data:
@@ -56,7 +57,15 @@ let logger: Logger | null = null;
 /** Injeta o logger de auditoria (ai_calls). Mantido fora deste módulo para testes sem banco. */
 export function setAICallLogger(fn: Logger | null) { logger = fn; }
 
-export function resolveProvider(): { provider: AIProvider; model: string; apiKey: string | null } {
+const OPENAI_COMPATIBLE: Record<string, { baseUrl: string; keyEnv: "OPENROUTER_API_KEY" | "GROQ_API_KEY" | "QWEN_API_KEY"; modelEnv: "OPENROUTER_MODEL" | "GROQ_MODEL" | "QWEN_MODEL"; defaultModel: string }> = {
+  // Qwen3.8 27B é um modelo visão-linguagem com endpoint gratuito no OpenRouter (qwen/qwen3.8-27b:free).
+  openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", modelEnv: "OPENROUTER_MODEL", defaultModel: "qwen/qwen3.8-27b:free" },
+  groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY", modelEnv: "GROQ_MODEL", defaultModel: "meta-llama/llama-4-scout-17b-16e-instruct" },
+  qwen: { baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", keyEnv: "QWEN_API_KEY", modelEnv: "QWEN_MODEL", defaultModel: "qwen3-vl-plus" },
+};
+
+/** Resolve o provedor. Sem chave do provedor pedido ⇒ "mock" (a extração de screenshot RECUSA mock — ver economic-data-provider). */
+export function resolveProvider(): { provider: AIProvider; model: string; apiKey: string | null; baseUrl?: string } {
   const env = getEnv();
   const requested = (env.AI_PROVIDER || "openai").toLowerCase() as AIProvider;
   if (requested === "mock") return { provider: "mock", model: "mock-1", apiKey: null };
@@ -64,9 +73,18 @@ export function resolveProvider(): { provider: AIProvider; model: string; apiKey
     if (!env.GEMINI_API_KEY) return { provider: "mock", model: "mock-1 (GEMINI_API_KEY ausente)", apiKey: null };
     return { provider: "gemini", model: env.GEMINI_MODEL || "gemini-3.8-flash", apiKey: env.GEMINI_API_KEY };
   }
+  const compat = OPENAI_COMPATIBLE[requested];
+  if (compat) {
+    const key = env[compat.keyEnv];
+    if (!key) return { provider: "mock", model: `mock-1 (${compat.keyEnv} ausente)`, apiKey: null };
+    const base = requested === "qwen" && env.QWEN_BASE_URL ? env.QWEN_BASE_URL : compat.baseUrl;
+    return { provider: requested, model: env[compat.modelEnv] || compat.defaultModel, apiKey: key, baseUrl: base };
+  }
   if (!env.OPENAI_API_KEY) return { provider: "mock", model: "mock-1 (OPENAI_API_KEY ausente)", apiKey: null };
   return { provider: "openai", model: env.OPENAI_MODEL || "gpt-4.1-mini", apiKey: env.OPENAI_API_KEY };
 }
+
+export function isRealProvider(p: AIProvider): boolean { return p !== "mock"; }
 
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
@@ -98,7 +116,7 @@ export async function generateStructured<N extends SchemaName>(
   const zodSchema = SCHEMAS[req.schemaName];
   const jsonSchema = toJsonSchema(zodSchema);
   const resolved = resolveProvider();
-  const { provider, apiKey } = resolved;
+  const { provider, apiKey, baseUrl } = resolved;
   const model = modelOverride ?? resolved.model;
   const started = Date.now();
   const timeoutMs = req.timeoutMs ?? 90_000;
@@ -126,6 +144,9 @@ export async function generateStructured<N extends SchemaName>(
       let raw: string;
       if (provider === "mock") {
         raw = JSON.stringify(mockStructured(req.schemaName, req.user));
+      } else if (provider === "openrouter" || provider === "groq" || provider === "qwen") {
+        const r = await callOpenAICompatible({ baseUrl: baseUrl!, apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs, provider });
+        raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
       } else if (provider === "openai") {
         const r = await callOpenAI({ apiKey: apiKey!, model, system: req.prompt.system, user: req.user + validationHint, images, jsonSchema, schemaName: req.schemaName, temperature: req.temperature ?? 0.2, maxOutputTokens: req.maxOutputTokens ?? 6000, timeoutMs });
         raw = r.text; inputTokens = r.inputTokens; outputTokens = r.outputTokens;
@@ -256,4 +277,39 @@ function geminiSchema(node: unknown): unknown {
   if (n.properties) { const props: Record<string, unknown> = {}; for (const [k, v] of Object.entries(n.properties as Record<string, unknown>)) props[k] = geminiSchema(v); n.properties = props; }
   if (n.items) n.items = geminiSchema(n.items);
   return n;
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI-compatible (OpenRouter, Groq, Qwen/DashScope) — Chat Completions com imagens.
+// O schema vai no prompt e a resposta é validada por Zod (com retry); json_object é o modo mais portável.
+// ---------------------------------------------------------------------------
+async function callOpenAICompatible(p: { baseUrl: string; apiKey: string; model: string; system: string; user: string; images: AIImage[]; jsonSchema: Record<string, unknown>; temperature: number; maxOutputTokens: number; timeoutMs: number; provider: string }) {
+  const content: Record<string, unknown>[] = [{ type: "text", text: p.user }];
+  for (const img of p.images) {
+    if (img.label) content.push({ type: "text", text: `[Imagem: ${img.label}]` });
+    content.push({ type: "image_url", image_url: { url: `data:${img.mime};base64,${img.base64}` } });
+  }
+  const system = `${p.system}\n\nResponda SOMENTE com um objeto JSON válido que respeite exatamente este JSON Schema (sem texto fora do JSON):\n${JSON.stringify(p.jsonSchema)}`;
+  const body = {
+    model: p.model,
+    messages: [{ role: "system", content: system }, { role: "user", content }],
+    temperature: p.temperature,
+    max_tokens: p.maxOutputTokens,
+    response_format: { type: "json_object" },
+  };
+  const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${p.apiKey}` };
+  if (p.provider === "openrouter") { headers["HTTP-Referer"] = "https://trading-pro.junior-a-b2704.workers.dev"; headers["X-Title"] = "Trading Pro"; }
+  const res = await fetchWithTimeout(`${p.baseUrl.replace(/\/$/, "")}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body) }, p.timeoutMs);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    let msg = `${p.provider} HTTP ${res.status}`;
+    try { msg += `: ${JSON.parse(txt)?.error?.message ?? ""}`; } catch { msg += txt ? `: ${txt.slice(0, 200)}` : ""; }
+    throw new AIError(msg, res.status);
+  }
+  const json = (await res.json()) as { choices?: { message?: { content?: string | null } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  let text = json.choices?.[0]?.message?.content ?? "";
+  // alguns modelos envolvem o JSON em cercas de código — remove antes de validar
+  text = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  if (!text) throw new AIError(`${p.provider} retornou vazio`, 502);
+  return { text, inputTokens: json.usage?.prompt_tokens ?? null, outputTokens: json.usage?.completion_tokens ?? null };
 }

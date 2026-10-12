@@ -1,4 +1,4 @@
-/** POST multipart: images[] (+ timezone, referenceDate) → OCR estruturado. NÃO salva nada (vai para validação humana). */
+/** POST multipart: images[] (+ timezone, referenceDate) → extração + validação + verificação visual. NÃO salva nada (vai para validação humana). */
 import { authorize, errorResponse, json, readImages } from "@/lib/api-utils";
 import { ensureAIAudit } from "@/lib/ai/audit";
 import { getEconomicDataProvider } from "@/lib/macro/economic-data-provider";
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const ccyParam = String(form.get("currencies") ?? "").split(",").map((c) => c.trim().toUpperCase()).filter((c) => (ALL_CURRENCIES as readonly string[]).includes(c)) as AnyCurrency[];
     const provider = getEconomicDataProvider("screenshot_ai");
     const result = await provider.extract({ images: images.map((i) => ({ base64: i.base64, mime: i.mime, label: i.name })), timezone, referenceDate, allowedCurrencies: ccyParam.length ? ccyParam : G8 });
-    return json({ events: result.events, meta: { ...result.meta, imagesCount: images.length, sourceType: result.raw.source_type, detectedTimezone: result.raw.detected_timezone, notes: result.raw.notes } });
+    return json({ events: result.events, audit: result.audit, meta: { ...result.meta, imagesCount: images.length, sourceType: result.raw.source_type, detectedTimezone: result.raw.detected_timezone, notes: [...result.meta.notes, ...result.raw.notes] } });
   } catch (e) { return errorResponse(e, "Falha ao extrair calendário"); }
 }
 

@@ -1,26 +1,48 @@
 "use client";
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import type { CurrencyScoreView } from "@/lib/ai/types";
+import type { CurrencyScoreView, EvaluatedCurrency, ScoreDriver } from "@/lib/ai/types";
 import { Badge, DeltaArrow, classColor, scoreBg } from "./ui";
 import { confColor, fmt5 } from "./MacroSummary";
 
 const MOMENTUM_LABEL: Record<string, string> = { STRENGTHENING: "fortalecendo", WEAKENING: "enfraquecendo", STABLE: "estável", NARRATIVE_SHIFT: "mudança de narrativa" };
 const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Muito forte", STRONG: "Forte", MODERATELY_STRONG: "Mod. forte", NEUTRAL: "Neutro", MODERATELY_WEAK: "Mod. fraca", WEAK: "Fraca", VERY_WEAK: "Muito fraca" };
+const DIR_LABEL: Record<string, string> = { BULLISH: "alta da moeda", BEARISH: "baixa da moeda", NEUTRAL: "neutro (medido)" };
 
-/** Score na escala do dashboard (−5..+5). Vem pronto do backend; o fallback cobre snapshots antigos. */
-export const display5 = (s: CurrencyScoreView) => s.score_display ?? Number((s.score * 2.5).toFixed(2));
+/** Score na escala do dashboard (−5..+5). null ⇒ sem evidência (NUNCA 0). */
+export const display5 = (s: CurrencyScoreView): number | null => (s.score === null ? null : (s.score_display ?? Number((s.score * 2.5).toFixed(2))));
+
+function DriverDetail({ d }: { d: ScoreDriver }) {
+  const ref = d.reference_basis === "FORECAST" ? "forecast" : d.reference_basis === "PREVIOUS" ? "previous" : null;
+  return (
+    <li className="rounded-lg bg-surface px-2 py-1.5 space-y-0.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-text-secondary font-semibold">{d.event}{d.primary && <span className="ml-1 text-[9px] uppercase text-accent font-bold">primário</span>}</span>
+        <span className={`tabular-nums font-bold ${(d.contribution ?? 0) >= 0 ? "text-emerald" : "text-rose"}`}>
+          {d.contribution != null ? `${d.contribution > 0 ? "+" : ""}${d.contribution.toFixed(3)}` : d.weight.toFixed(3)}
+        </span>
+      </div>
+      <p className="text-[10px] text-text-muted tabular-nums">
+        {d.actual ? `atual ${d.actual}` : "atual —"}{ref && <> · {ref} {d.reference_basis === "FORECAST" ? d.forecast : d.previous}</>}
+        {d.surprise != null && <> · surpresa {d.surprise > 0 ? "+" : ""}{d.surprise.toFixed(2)}</>}
+        {" · "}{d.direction ? DIR_LABEL[d.direction] : d.classification}
+        {" · peso "}{d.weight.toFixed(3)}{" · "}{new Date(d.released_at).toLocaleDateString("pt-BR")}
+      </p>
+      {d.explanation && <p className="text-[10px] text-text-muted leading-snug">{d.explanation}</p>}
+    </li>
+  );
+}
 
 /** compact = sem expandir drivers (widgets). clean = só rank, moeda, barra, score e seta (página de análise). */
 export default function G8Ranking({ scores, compact = false, clean = false }: { scores: CurrencyScoreView[]; compact?: boolean; clean?: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
-  const sorted = [...scores].sort((a, b) => a.rank - b.rank);
+  const evaluated = scores.filter((s): s is EvaluatedCurrency => s.status === "EVALUATED" && s.score !== null).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+  const insufficient = scores.filter((s) => s.status !== "EVALUATED").sort((a, b) => a.currency.localeCompare(b.currency));
   return (
     <div className="space-y-1.5">
-      {sorted.map((s) => {
-        const v = display5(s);
+      {evaluated.map((s) => {
+        const v = display5(s) ?? 0;
         const pct = s.confidence_pct ?? null;
-        const noData = s.no_data ?? s.live_events === 0;
         return (
           <div key={s.currency} className="rounded-xl border border-border bg-surface-2/60">
             <button onClick={() => !compact && setOpen(open === s.currency ? null : s.currency)} className="w-full flex items-center gap-3 px-3 py-2 text-left">
@@ -35,7 +57,7 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
                 {s.score_delta != null && Math.abs(s.score_delta) >= 0.01 && <><DeltaArrow delta={s.score_delta} />{fmt5(s.score_delta * 2.5)}</>}
               </span>
               {!compact && !clean && <>
-                <span className={`hidden md:inline text-[11px] font-bold w-24 ${noData ? "text-text-muted" : classColor(s.classification)}`}>{noData ? "Sem dado" : (CLASS_LABEL[s.classification] ?? s.classification)}</span>
+                <span className={`hidden md:inline text-[11px] font-bold w-24 ${classColor(s.classification ?? "NEUTRAL")}`}>{s.classification ? (CLASS_LABEL[s.classification] ?? s.classification) : "—"}</span>
                 <span className="hidden lg:inline text-[10px] text-text-muted w-32 truncate">{s.momentum ? MOMENTUM_LABEL[s.momentum] : "—"}</span>
                 <Badge className={pct == null ? "border-border text-text-muted" : pct >= 65 ? "border-emerald/40 text-emerald" : pct >= 40 ? "border-amber/40 text-amber" : "border-border text-text-muted"}>
                   {pct == null ? s.confidence : `${pct}%`}
@@ -49,41 +71,37 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
             </button>
             {open === s.currency && (
               <div className="px-3 pb-3 text-xs">
-                {noData ? (
-                  <p className="text-text-muted">Nenhum dado interpretado no período — <b className="text-text-secondary">neutra por ausência de evidência</b>, não por fraqueza. Poucos eventos ≠ moeda fraca.</p>
-                ) : (
-                  <>
-                    <p className="text-text-muted mb-1">
-                      Confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} · concordância {Math.round((s.agreement ?? 0) * 100)}%
-                      {s.conflict && <span className="text-amber font-semibold"> · viés misto (indicadores contraditórios)</span>}
-                      {" · "}anterior {s.previous_score == null ? "—" : fmt5(s.previous_score * 2.5)}
-                    </p>
-                    <p className="text-[10px] text-text-muted mb-2">Por que este score: soma ponderada das contribuições abaixo (importância × impacto × confiança × atualidade), atenuada quando a evidência é escassa.</p>
-                    <ul className="space-y-1">
-                      {s.drivers.map((d) => (
-                        <li key={d.event_id} className="flex items-center justify-between gap-2 rounded-lg bg-surface px-2 py-1">
-                          <span className="truncate text-text-secondary">
-                            {d.event}
-                            {d.primary && <span className="ml-1 text-[9px] uppercase text-accent font-bold">primário</span>}
-                          </span>
-                          <span className="flex items-center gap-2 shrink-0">
-                            <span className={`font-bold ${classColor(d.classification)}`}>{d.classification}</span>
-                            <span className={`tabular-nums font-semibold ${(d.contribution ?? 0) >= 0 ? "text-emerald" : "text-rose"}`}>
-                              {d.contribution != null ? `${d.contribution > 0 ? "+" : ""}${d.contribution.toFixed(3)}` : `${d.weight.toFixed(3)}`}
-                            </span>
-                            <span className="text-text-muted">{new Date(d.released_at).toLocaleDateString("pt-BR")}</span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
+                <p className="text-text-muted mb-1">
+                  Score <b className="text-text-secondary">{fmt5(v)}</b> · confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} · concordância {Math.round((s.agreement ?? 0) * 100)}%
+                  {s.conflict && <span className="text-amber font-semibold"> · viés misto (indicadores contraditórios)</span>}
+                </p>
+                <p className="text-[10px] text-text-muted mb-2">Por que este score: soma ponderada das contribuições medidas (surpresa × importância × impacto × confiança × atualidade), atenuada quando a evidência é escassa.</p>
+                <ul className="space-y-1">{s.drivers.map((d) => <DriverDetail key={d.event_id} d={d} />)}</ul>
+                {s.excluded_events && s.excluded_events.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-[10px] font-semibold text-text-muted mb-1">Eventos desta análise que NÃO pontuaram:</p>
+                    <ul className="space-y-0.5">{s.excluded_events.map((e) => <li key={e.event_id} className="text-[10px] text-text-muted">{e.event} — {e.reason}</li>)}</ul>
+                  </div>
                 )}
               </div>
             )}
           </div>
         );
       })}
-      {sorted.length === 0 && <p className="text-xs text-text-muted">Nenhum score calculado ainda. Rode uma Análise Macro.</p>}
+      {insufficient.length > 0 && (
+        <div className="rounded-xl border border-dashed border-border px-3 py-2">
+          <p className="text-[11px] font-bold text-text-muted mb-1">Sem evidência suficiente — sem score e sem posição no ranking</p>
+          <div className="flex flex-wrap gap-1.5">
+            {insufficient.map((s) => (
+              <span key={s.currency} className="text-[11px] font-semibold text-text-muted border border-border rounded-md px-2 py-0.5" title={s.excluded_events?.[0]?.reason ?? "Nenhuma divulgação com direção mensurável nesta análise."}>
+                {s.currency} · score —
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-muted mt-1">Ausência de dado não é fraqueza: estas moedas não foram medidas nesta análise.</p>
+        </div>
+      )}
+      {evaluated.length === 0 && insufficient.length === 0 && <p className="text-xs text-text-muted">Nenhum score calculado ainda. Rode uma Análise Macro.</p>}
     </div>
   );
 }

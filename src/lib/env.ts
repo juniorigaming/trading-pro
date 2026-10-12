@@ -11,12 +11,21 @@ export interface AppEnv {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
   GEMINI_FALLBACK_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL?: string;
+  GROQ_API_KEY?: string;
+  GROQ_MODEL?: string;
+  QWEN_API_KEY?: string;
+  QWEN_MODEL?: string;
+  QWEN_BASE_URL?: string;
+  /** "0" desliga a 2ª chamada de verificação visual (não recomendado). */
+  MACRO_VISUAL_VERIFY?: string;
   OPENAI_FALLBACK_MODEL?: string;
   APP_API_TOKEN?: string;
   DATABASE_URL?: string;
 }
 
-const KEYS: (keyof AppEnv)[] = ["AI_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_FALLBACK_MODEL", "OPENAI_FALLBACK_MODEL", "APP_API_TOKEN", "DATABASE_URL"];
+const KEYS: (keyof AppEnv)[] = ["AI_PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "GROQ_API_KEY", "GROQ_MODEL", "QWEN_API_KEY", "QWEN_MODEL", "QWEN_BASE_URL", "MACRO_VISUAL_VERIFY", "OPENAI_API_KEY", "OPENAI_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_FALLBACK_MODEL", "OPENAI_FALLBACK_MODEL", "APP_API_TOKEN", "DATABASE_URL"];
 
 let overrides: Partial<AppEnv> | null = null;
 /** Para testes: sobrescreve o ambiente sem tocar em process.env. */

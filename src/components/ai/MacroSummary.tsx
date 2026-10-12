@@ -72,7 +72,7 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
         <div>
           <p className="text-[10px] uppercase tracking-wider text-text-muted">Qualidade da amostra</p>
           <p className="text-[11px] text-text-secondary mt-1 leading-snug">
-            {s.no_data_currencies.length > 0 && <>Sem dado: <b className="text-text-primary">{s.no_data_currencies.join(", ")}</b> (neutras por ausência de evidência).<br /></>}
+            {s.no_data_currencies.length > 0 && <>Sem evidência suficiente: <b className="text-text-primary">{s.no_data_currencies.join(", ")}</b> (sem score — ausência de evidência não é fraqueza).<br /></>}
             {s.conflicted_currencies.length > 0 && <>Viés misto: <b className="text-amber">{s.conflicted_currencies.join(", ")}</b>.</>}
             {s.no_data_currencies.length === 0 && s.conflicted_currencies.length === 0 && <span className="text-emerald">Evidência consistente nas 8 moedas.</span>}
           </p>

@@ -28,12 +28,24 @@ export const CalendarExtractionSchema = z.object({
       ocr_confidence: z.number().min(0).max(1),
       requires_manual_confirmation: z.boolean(),
       ocr_issues: z.array(z.enum(["blurry", "cut_off", "ambiguous_sign", "ambiguous_decimal", "overlapping_text", "color_only_impact", "revision_suspected", "none"])),
+      /** Texto EXATO da linha como visível (cópia). Prova de origem: moeda, evento e valores precisam estar aqui. "UNREADABLE" se ilegível. */
+      raw_row_text: z.string().describe("Transcrição literal da linha inteira; 'UNREADABLE' se ilegível"),
     }),
   ),
   overall_ocr_confidence: z.number().min(0).max(1),
   notes: z.array(z.string()),
 });
 export type CalendarExtraction = z.infer<typeof CalendarExtractionSchema>;
+
+/** 2ª chamada: a IA confirma, olhando a imagem, se cada linha candidata realmente aparece nela. */
+export const CalendarVisibilitySchema = z.object({
+  verdicts: z.array(z.object({
+    index: z.number().int().describe("índice da linha candidata, como enviado"),
+    visible: z.boolean().describe("true somente se a linha (moeda + evento) está visível na imagem"),
+    reason: z.string().describe("curto: onde na imagem a linha aparece, ou por que não aparece"),
+  })),
+});
+export type CalendarVisibility = z.infer<typeof CalendarVisibilitySchema>;
 
 // ---------------------------------------------------------------------------
 // 2) Interpretação macro por evento
@@ -219,6 +231,7 @@ export type B3Brief = z.infer<typeof B3BriefSchema>;
 
 export const SCHEMAS = {
   calendar_extraction: CalendarExtractionSchema,
+  calendar_visibility: CalendarVisibilitySchema,
   market_extraction: MarketExtractionSchema,
   b3_brief: B3BriefSchema,
   event_interpretation: EventInterpretationSchema,

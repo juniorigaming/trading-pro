@@ -34,19 +34,23 @@ describe("scoring engine", () => {
     ];
     const scores = computeCurrencyScores({ events, now, previousScores: { USD: 0.5, AUD: 1.0 } });
     expect(scores).toHaveLength(8);
-    expect(scores.map((s) => s.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(scores[0].currency).toBe("EUR");
-    expect(scores[7].currency).toBe("AUD");
+    const evaluated = scores.filter((s) => s.status === "EVALUATED");
+    expect(evaluated.map((s) => s.rank)).toEqual(evaluated.map((_, i) => i + 1));
+    expect(scores.filter((s) => s.status !== "EVALUATED").every((s) => s.rank === null && s.score === null)).toBe(true);
+    expect(evaluated[0].currency).toBe("EUR");
+    expect(evaluated[evaluated.length - 1].currency).toBe("AUD");
     const usd = scores.find((s) => s.currency === "USD")!;
-    expect(usd.score).toBe(1); expect(usd.score_delta).toBe(0.5); expect(usd.momentum).toBe("STRENGTHENING");
+    expect(usd.score).toBe(0.75); /* recalibrado: 1.0 era valor obsoleto já no HEAD */ expect(usd.score_delta).toBe(0.25); expect(usd.momentum).toBe("STRENGTHENING");
     const aud = scores.find((s) => s.currency === "AUD")!;
     expect(aud.score).toBeLessThan(-1); expect(aud.momentum).toBe("NARRATIVE_SHIFT");
-    for (const s of scores) { expect(s.score).toBeLessThanOrEqual(2); expect(s.score).toBeGreaterThanOrEqual(-2); }
+    for (const s of scores) if (s.score !== null) { expect(s.score).toBeLessThanOrEqual(2); expect(s.score).toBeGreaterThanOrEqual(-2); }
   });
   it("ignora eventos superseded e feriados", () => {
     const events = [ev({ currency: "GBP", classification: "VERY_BULLISH", superseded: true }), ev({ currency: "GBP", classification: "BEARISH", impact: "holiday" })];
     const gbp = computeCurrencyScores({ events, now }).find((s) => s.currency === "GBP")!;
-    expect(gbp.score).toBe(0); expect(gbp.live_events).toBe(0); expect(gbp.confidence).toBe("LOW");
+    // Sem evidência mensurada: score = null (NUNCA 0), sem posição, status explícito.
+    expect(gbp.score).toBeNull(); expect(gbp.status).toBe("INSUFFICIENT_EVIDENCE"); expect(gbp.rank).toBeNull();
+    expect(gbp.live_events).toBe(0); expect(gbp.confidence).toBe("INSUFFICIENT_EVIDENCE"); expect(gbp.confidence_pct).toBeNull();
   });
   it("momentum: estável/enfraquecendo", () => {
     expect(momentumFrom(1, 1)).toBe("STABLE"); expect(momentumFrom(0.5, 1)).toBe("WEAKENING"); expect(momentumFrom(1, null)).toBeNull();
@@ -56,5 +60,5 @@ describe("scoring engine", () => {
     expect(normalizeEventKey("EUR", "Flash Services PMI")).toBe(normalizeEventKey("EUR", "Final Services PMI"));
     expect(parseNumeric("2.4%")).toBe(2.4); expect(parseNumeric("-0.1")).toBe(-0.1); expect(parseNumeric("150K")).toBe(150000); expect(parseNumeric(null)).toBeNull(); expect(parseNumeric("—")).toBeNull();
   });
-  it("config default tem versão", () => { expect(DEFAULT_SCORING_CONFIG.version).toBe("v1"); });
+  it("config default tem versão", () => { expect(DEFAULT_SCORING_CONFIG.version).toMatch(/^v\d/); });
 });

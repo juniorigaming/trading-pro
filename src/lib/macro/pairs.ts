@@ -2,7 +2,7 @@
  * Matriz Forte × Fraca — divergência macro entre moedas e candidatos de pares.
  * Macro define QUE par e QUAL direção — nunca é gatilho de entrada.
  */
-import { G8, type Confidence, type Currency, type CurrencyScoreView, type EventRiskLevel, type PairStrengthClass, type PendingEventView, type TradeCandidateView } from "@/lib/ai/types";
+import { G8, type Confidence, type Currency, type CurrencyScoreView, type EvaluatedCurrency, type EventRiskLevel, type PairStrengthClass, type PendingEventView, type TradeCandidateView } from "@/lib/ai/types";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
 
 /** Ordem de prioridade de base nas convenções de mercado (EUR > GBP > AUD > NZD > USD > CAD > CHF > JPY). */
@@ -92,7 +92,8 @@ export interface CandidateInput {
 /** Gera candidatos ordenados pela maior assimetria macro (força relativa), com confiança e invalidação. */
 export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[] {
   const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
-  const byCcy = Object.fromEntries(input.scores.map((s) => [s.currency, s])) as Record<Currency, CurrencyScoreView>;
+  // Só moedas com evidência formam pares. Sem dado não há viés — nunca usar 0 como substituto.
+  const byCcy = Object.fromEntries(input.scores.filter((s) => s.status === "EVALUATED" && s.score !== null).map((s) => [s.currency, s])) as Record<Currency, EvaluatedCurrency>;
   const list: TradeCandidateView[] = [];
   for (const p of G8_PAIRS) {
     const b = byCcy[p.base], q = byCcy[p.quote];

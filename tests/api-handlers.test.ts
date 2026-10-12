@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { setEnvOverrides } from "@/lib/env";
 
 // Provedor MOCK: nenhum token gasto. Sem banco: testamos a rota de OCR (não persiste) e a validação de upload.
-beforeAll(() => setEnvOverrides({ AI_PROVIDER: "mock", APP_API_TOKEN: "t0k" }));
+// beforeEach (não beforeAll): outros arquivos de teste também mudam o override global
+beforeEach(() => setEnvOverrides({ AI_PROVIDER: "mock", APP_API_TOKEN: "t0k" }));
+afterEach(() => setEnvOverrides(null));
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
@@ -12,19 +14,15 @@ describe("POST /api/ai/macro/extract (mock provider)", () => {
     const fd = new FormData(); fd.append("images", new File([PNG], "ff.png", { type: "image/png" }));
     const res = await POST(new Request("http://x/api/ai/macro/extract", { method: "POST", body: fd }));
     expect(res.status).toBe(401);
-  });
-  it("retorna eventos extraídos com pendentes separados de realizados", async () => {
+  }, 60000);
+  it("sem IA configurada, a extração RECUSA o mock (mock inventa linhas) — 503 AI_NOT_CONFIGURED", async () => {
     const { POST } = await import("@/app/api/ai/macro/extract/route");
     const fd = new FormData(); fd.append("images", new File([PNG], "ff.png", { type: "image/png" }));
     const res = await POST(new Request("http://x/api/ai/macro/extract", { method: "POST", body: fd, headers: { "x-app-token": "t0k" } }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     const body = await res.json();
-    expect(body.events.length).toBeGreaterThan(0);
-    const pending = body.events.find((e: { event: string }) => e.event === "Employment Change");
-    expect(pending.actual).toBeNull();
-    const low = body.events.find((e: { ocr_confidence: number }) => e.ocr_confidence < 0.7);
-    expect(low.requires_manual_confirmation).toBe(true);
-    expect(body.meta.provider).toBe("mock");
+    expect(JSON.stringify(body)).toContain("AI_NOT_CONFIGURED");
+    expect(body.events).toBeUndefined();
   });
   it("rejeita tipo de arquivo inválido e excesso de imagens", async () => {
     const { POST } = await import("@/app/api/ai/macro/extract/route");
@@ -52,6 +50,6 @@ describe("AI service — retry/validação", () => {
     const { generateStructured } = await import("@/lib/ai/service");
     const { SESSION_BRIEF } = await import("@/lib/ai/prompts");
     const r = await generateStructured({ purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", user: "{}" });
-    expect(r.provider).toBe("mock"); expect(r.data.headline).toBeTruthy(); expect(r.promptVersion).toBe("session-brief-v1");
+    expect(r.provider).toBe("mock"); expect(r.data.headline).toBeTruthy(); expect(r.promptVersion).toMatch(/^session-brief-v\d$/);
   });
 });

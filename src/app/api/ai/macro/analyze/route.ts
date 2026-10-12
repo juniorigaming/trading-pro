@@ -17,7 +17,7 @@ const EventSchema = z.object({
 const BodySchema = z.object({
   session: z.enum(SESSIONS), events: z.array(EventSchema).max(300),
   inputType: z.enum(["screenshot", "structured", "manual"]).default("screenshot"), imagesCount: z.number().int().min(0).max(20).optional(),
-  tzOffsetMinutes: z.number().int().min(-840).max(840).optional(), userEdits: z.record(z.string(), z.unknown()).nullable().optional(), withBrief: z.boolean().optional(),
+  tzOffsetMinutes: z.number().int().min(-840).max(840).optional(), userEdits: z.record(z.string(), z.unknown()).nullable().optional(), withBrief: z.boolean().optional(), extraction: z.any().nullable().optional(),
 });
 
 export async function POST(request: Request) {

@@ -14,7 +14,8 @@ export const CENTRAL_BANKS: Record<Currency, string> = {
   USD: "FED", EUR: "ECB", GBP: "BOE", JPY: "BOJ", CHF: "SNB", CAD: "BOC", AUD: "RBA", NZD: "RBNZ",
 };
 
-export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH"] as const;
+/** UNKNOWN = divulgação sem direção mensurável (fala sem texto, indicador fora da tabela, sem ATUAL/referência). Não pontua. */
+export const CLASSIFICATIONS = ["VERY_BULLISH", "BULLISH", "NEUTRAL", "BEARISH", "VERY_BEARISH", "UNKNOWN"] as const;
 export type Classification = (typeof CLASSIFICATIONS)[number];
 
 export const CATEGORIES = ["INFLATION", "EMPLOYMENT", "GROWTH", "ACTIVITY", "CENTRAL_BANK", "HOUSING", "CONSUMPTION", "SENTIMENT", "TRADE", "FISCAL", "OTHER"] as const;
@@ -74,39 +75,58 @@ export interface EconomicEventInput {
   user_edited?: boolean;
 }
 
+/** Status explícito por moeda. INSUFFICIENT_EVIDENCE ⇒ score = null (NUNCA 0), sem posição no ranking. */
+export type CurrencyStatus = "EVALUATED" | "INSUFFICIENT_EVIDENCE";
+/** Moeda com evidência: score, rank e confiança são números (sem null). */
+export type EvaluatedCurrency = CurrencyScoreView & { score: number; rank: number; confidence_pct: number };
+
+/** Evidência usada no score (auditável). direction vem da tabela semântica (código), não da IA. */
+export interface ScoreDriver {
+  event_id: number; event: string; classification: Classification; weight: number; released_at: string;
+  /** direction_value × peso — quanto este evento empurrou o score (sinal = direção). */
+  contribution?: number;
+  category?: Category;
+  importance?: Importance;
+  /** evidência primária (alta importância e impacto não-baixo) */
+  primary?: boolean;
+  direction?: "BULLISH" | "BEARISH" | "NEUTRAL";
+  actual?: string | null; forecast?: string | null; previous?: string | null;
+  /** ATUAL − referência (forecast, ou previous com confiança rebaixada). */
+  surprise?: number | null;
+  reference_basis?: "FORECAST" | "PREVIOUS" | "NONE";
+  rule_id?: string | null;
+  explanation?: string;
+  source?: string;
+}
+
 export interface CurrencyScoreView {
   currency: Currency;
-  score: number;
-  score_raw: number;
+  status: CurrencyStatus;
+  /** Score nativo (−2..+2). NULL = sem evidência (ausência de dado ≠ zero = ausência de efeito). */
+  score: number | null;
+  score_raw: number | null;
   previous_score: number | null;
   score_delta: number | null;
   momentum: Momentum | null;
-  classification: ScoreClassification;
-  bias: "BULLISH" | "NEUTRAL" | "BEARISH";
-  confidence: Confidence;
-  rank: number;
+  classification: ScoreClassification | null;
+  bias: "BULLISH" | "NEUTRAL" | "BEARISH" | null;
+  /** HIGH/MEDIUM/LOW da EVIDÊNCIA; INSUFFICIENT_EVIDENCE quando não há dado. Nunca mascara falta de evidência. */
+  confidence: Confidence | "INSUFFICIENT_EVIDENCE";
+  /** Posição no ranking — só para moedas EVALUATED. */
+  rank: number | null;
   live_events: number;
-  drivers: {
-    event_id: number; event: string; classification: Classification; weight: number; released_at: string;
-    /** direction_value × peso — quanto este evento empurrou o score (sinal = direção). */
-    contribution?: number;
-    category?: Category;
-    importance?: Importance;
-    /** evidência primária (alta importância e impacto não-baixo) */
-    primary?: boolean;
-  }[];
-  /** Confiança 0–100 da EVIDÊNCIA macro (não é probabilidade de alta/baixa). */
-  confidence_pct?: number;
+  drivers: ScoreDriver[];
+  /** Eventos desta análise que NÃO pontuaram, com o motivo (direção desconhecida, etc.). */
+  excluded_events?: { event_id: number; event: string; reason: string }[];
+  /** Confiança 0–100 da EVIDÊNCIA macro (não é probabilidade de alta/baixa). null se sem evidência. */
+  confidence_pct: number | null;
   /** Peso total vivo — massa de evidência (não é contagem de eventos). */
   evidence_mass?: number;
-  /** 0–1: concordância de direção entre os eventos vivos. */
   agreement?: number;
-  /** true quando há indicadores relevantes em direções opostas (viés misto). */
   conflict?: boolean;
-  /** true quando não há nenhum dado vivo — moeda é NEUTRA por falta de dado, não fraca. */
   no_data?: boolean;
-  /** Score na escala de apresentação (−5..+5). */
-  score_display?: number;
+  /** score × display_scale (−5..+5); null se sem evidência. */
+  score_display: number | null;
 }
 
 export interface TradeCandidateView {
@@ -168,6 +188,10 @@ export interface MacroAnalysisResult {
   summary?: MacroSummaryView;
   warnings: string[];
   meta: { scoring_version: string; prompt_version: string | null; model: string | null; events_interpreted: number };
+  /** OK = ranking confiável. ANALISE_INSUFICIENTE = a validação de consistência falhou (ver audit.checks). */
+  analysis_status?: "OK" | "ANALISE_INSUFICIENTE";
+  /** Auditoria completa: extração bruta, eventos aceitos/rejeitados, checagens de consistência. */
+  audit?: AnalysisAudit;
 }
 
 /** Resumo macro consolidado — fonte única para o dashboard (evita recalcular na UI). */
@@ -182,4 +206,24 @@ export interface MacroSummaryView {
   top_long: TradeCandidateView[];
   top_short: TradeCandidateView[];
   alerts: string[];
+}
+
+export interface AuditCheck { id: string; label: string; passed: boolean; detail: string }
+
+export interface AnalysisAudit {
+  analysis_id: string;
+  checks: AuditCheck[];
+  trusted: boolean;
+  /** Extração por IA (quando a análise veio de screenshot). JSON bruto + validação. */
+  extraction: {
+    provider: string | null; model: string | null;
+    raw_json: unknown;
+    rows_received: number;
+    accepted: { currency: string; event: string; time: string | null; actual: string | null; forecast: string | null; previous: string | null; confidence: number | null; raw_row_text: string | null }[];
+    rejected: { index: number; currency: string | null; event: string | null; reason: string }[];
+    values_discarded: { currency: string; event: string; field: "actual" | "forecast" | "previous"; value: string; reason: string }[];
+    visual_verification: "OK" | "REJECTED_SOME" | "UNAVAILABLE" | "SKIPPED";
+  } | null;
+  /** Por moeda: evidência e score final (espelha currencies, mas em formato de auditoria). */
+  scores: { currency: string; score: number | null; status: CurrencyStatus; evidence_count: number; excluded_count: number }[];
 }

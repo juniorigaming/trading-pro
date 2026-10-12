@@ -6,7 +6,7 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { b3MacroAnalyses, b3Scores, b3Settings, b3TradeCandidates, diCurveSnapshots, economicEvents, macroInterpretations, marketSnapshots } from "@/db/schema";
-import type { CurrencyScoreView, EconomicEventInput } from "@/lib/ai/types";
+import type { CurrencyScoreView, Confidence, EconomicEventInput, ScoreClassification } from "@/lib/ai/types";
 import { generateStructured } from "@/lib/ai/service";
 import { B3_SESSION_BRIEF, MACRO_BRAZIL_SYSTEM } from "@/lib/ai/prompts";
 import { computeCurrencyScores } from "@/lib/macro/scoring";
@@ -171,13 +171,16 @@ export async function runB3Analysis(input: RunB3Input): Promise<B3AnalysisResult
   const scored = await loadScoredEvents(scfg);
   const prevG8 = await latestScores().catch(() => [] as CurrencyScoreView[]);
   const prevB3: Awaited<ReturnType<typeof latestB3Scores>> = await latestB3Scores().catch(() => ({}));
-  const ccyScores = computeCurrencyScores({ events: scored, now, cfg: scfg, currencies: ["USD", "BRL", "CNY"], previousScores: { USD: prevG8.find((p) => p.currency === "USD")?.score, BRL: prevB3.BRL?.score } });
+  // B3 ainda usa o motor com a convenção antiga (sem dado ⇒ 0) — pendência registrada; o G8 já usa null.
+  type B3Score = Omit<CurrencyScoreView, "score" | "score_raw" | "confidence" | "classification" | "bias"> & { score: number; score_raw: number; confidence: Confidence; classification: ScoreClassification; bias: "BULLISH" | "NEUTRAL" | "BEARISH" };
+  const b3Safe = (x: CurrencyScoreView): B3Score => ({ ...x, score: x.score ?? 0, score_raw: x.score_raw ?? 0, confidence: x.confidence === "INSUFFICIENT_EVIDENCE" ? "LOW" : x.confidence, classification: x.classification ?? "NEUTRAL", bias: x.bias ?? "NEUTRAL" });
+  const ccyScores = computeCurrencyScores({ events: scored, now, cfg: scfg, currencies: ["USD", "BRL", "CNY"], previousScores: { USD: prevG8.find((p) => p.currency === "USD")?.score, BRL: prevB3.BRL?.score } }).map(b3Safe);
   const byCcy = (c: string) => ccyScores.find((x) => (x.currency as string) === c);
   const usd = byCcy("USD")!;
   const brlEv = byCcy("BRL")!;
   const cny = byCcy("CNY") ?? null;
   const g8usd = prevG8.find((p) => p.currency === "USD");
-  const usdNote = g8usd && Math.abs(g8usd.score - usd.score) >= 0.25 ? `USD recalculado (${usd.score}) difere do último snapshot G8 (${g8usd.score}) por eventos novos — o Ranking G8 será atualizado na próxima análise G8.` : null;
+  const usdNote = g8usd && g8usd.score !== null && Math.abs(g8usd.score - usd.score) >= 0.25 ? `USD recalculado (${usd.score}) difere do último snapshot G8 (${g8usd.score}) por eventos novos — o Ranking G8 será atualizado na próxima análise G8.` : null;
 
   // 3) Contexto: DI, fluxo, previous
   const diRow = await loadLatestDi(now, cfg, evidence);

@@ -3,7 +3,7 @@
  * contribution = direction_value × importance_weight × category_multiplier × impact_factor × confidence_factor × decay(idade)
  * score(ccy) = média ponderada das contribuições vivas, arredondada em passos (0.25) e limitada a ±2.
  */
-import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification } from "@/lib/ai/types";
+import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification, type ScoreDriver } from "@/lib/ai/types";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
 
 export interface ScoredEvent {
@@ -17,6 +17,10 @@ export interface ScoredEvent {
   importance: Importance;
   classification: Classification;
   confidence: Confidence;
+  // --- auditoria (opcionais; vindos da classificação determinística) ---
+  actual?: string | null; forecast?: string | null; previous?: string | null;
+  surprise?: number | null; reference_basis?: "FORECAST" | "PREVIOUS" | "NONE";
+  rule_id?: string | null; explanation?: string; source?: string;
 }
 
 export interface ContributionBreakdown {
@@ -112,13 +116,19 @@ export function confidenceEnum(pct: number): Confidence {
 export interface ComputeInput {
   events: ScoredEvent[];
   now: Date;
-  previousScores?: Partial<Record<string, number>>; // último snapshot
+  /** Não usado pelo pipeline G8 (cada análise começa limpa). Mantido para o módulo B3. */
+  previousScores?: Partial<Record<string, number | null | undefined>>;
   cfg?: ScoringConfig;
   /** Moedas a pontuar (padrão G8). O módulo B3 usa o MESMO motor para BRL/CNY/USD. */
   currencies?: readonly AnyCurrency[];
 }
 
-/** Calcula o score das moedas (padrão: 8 do G8) + ranking. Puro: mesma entrada ⇒ mesma saída. */
+/**
+ * Calcula o score das moedas + ranking. Puro: mesma entrada ⇒ mesma saída.
+ *  - Moeda SEM evidência mensurada ⇒ score = null, status INSUFFICIENT_EVIDENCE, sem rank.
+ *  - Evento UNKNOWN (direção não mensurável) ⇒ não pontua; fica em excluded_events com o motivo.
+ *  - Moeda com evidência só NEUTRA (surpresa dentro do limiar) ⇒ score 0 MEDIDO (não é "sem dado").
+ */
 export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] {
   const cfg = input.cfg ?? DEFAULT_SCORING_CONFIG;
   const out: CurrencyScoreView[] = [];
@@ -126,13 +136,18 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
     const evs = input.events.filter((e) => e.currency === ccy && !e.superseded && e.impact !== "holiday");
     let num = 0, den = 0;
     const live: { w: number; dir: number; primary: boolean }[] = [];
-    const drivers: CurrencyScoreView["drivers"] = [];
+    const drivers: ScoreDriver[] = [];
+    const excluded: { event_id: number; event: string; reason: string }[] = [];
     for (const e of evs) {
+      if (e.classification === "UNKNOWN") {
+        excluded.push({ event_id: e.event_id, event: e.event, reason: e.explanation ?? "Direção não mensurável — não pontua." });
+        continue;
+      }
       const bc = baseContribution(e, cfg);
       const ageDays = (input.now.getTime() - e.released_at.getTime()) / 86_400_000;
       const decay = decayFactor(e.category, ageDays, cfg);
       const w = bc.weight * bc.impact_factor * bc.confidence_factor * decay;
-      if (w < cfg.min_weight_alive) continue;
+      if (w < cfg.min_weight_alive) { excluded.push({ event_id: e.event_id, event: e.event, reason: "Peso abaixo do mínimo (evento antigo ou de baixa confiança)." }); continue; }
       num += bc.direction_value * w;
       den += w;
       const primary = (e.importance === "HIGH" || e.importance === "MEDIUM_HIGH") && e.impact !== "low";
@@ -142,38 +157,46 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
         released_at: e.released_at.toISOString(),
         contribution: Number((bc.direction_value * w).toFixed(4)),
         category: e.category, importance: e.importance, primary,
+        direction: e.classification.includes("BULLISH") ? "BULLISH" : e.classification.includes("BEARISH") ? "BEARISH" : "NEUTRAL",
+        actual: e.actual ?? null, forecast: e.forecast ?? null, previous: e.previous ?? null,
+        surprise: e.surprise ?? null, reference_basis: e.reference_basis ?? "NONE",
+        rule_id: e.rule_id ?? null, explanation: e.explanation, source: e.source,
       });
     }
+    drivers.sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0) || b.weight - a.weight);
+    const noEvidence = live.length === 0;
+    const base = { currency: ccy, live_events: live.length, drivers: drivers.slice(0, 12), excluded_events: excluded };
+    // Comparação com snapshot anterior só existe quando o chamador a fornece (B3). O G8 nunca passa — cada análise começa limpa.
+    const previous = input.previousScores?.[ccy] ?? null;
+    if (noEvidence) {
+      out.push({
+        ...base, status: "INSUFFICIENT_EVIDENCE", score: null, score_raw: null, previous_score: null, score_delta: null, momentum: null, classification: null, bias: null,
+        confidence: "INSUFFICIENT_EVIDENCE", confidence_pct: null, rank: null, no_data: true, score_display: null,
+      });
+      continue;
+    }
     // Média ponderada das direções (−2..+2) ATENUADA pela massa de evidência.
-    // Sem isso, uma única leitura secundária produziria força plena ("event counting" invertido).
-    const weighted = den > 0 ? num / den : 0;
-    const evidenceFactor = den > 0 ? den / (den + cfg.evidence_k) : 0;
+    // Sem isso, uma única leitura secundária produziria força plena.
+    const weighted = num / den;
+    const evidenceFactor = den / (den + cfg.evidence_k);
     const raw = weighted * evidenceFactor;
     const score = Math.max(-cfg.clamp, Math.min(cfg.clamp, roundToStep(raw, cfg.score_step)));
     const conf = confidenceScore(live);
-    const previous = input.previousScores?.[ccy] ?? null;
-    drivers.sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0) || b.weight - a.weight);
-    const noData = live.length === 0;
     out.push({
-      currency: ccy, score, score_raw: Number(raw.toFixed(4)), previous_score: previous,
-      score_delta: previous === null ? null : Number((score - previous).toFixed(4)),
-      momentum: momentumFrom(score, previous, cfg),
-      classification: noData ? "NEUTRAL" : classifyScore(score, cfg),
-      bias: noData ? "NEUTRAL" : biasFromScore(score, cfg),
-      confidence: confidenceEnum(conf.pct),
-      confidence_pct: conf.pct,
-      evidence_mass: conf.mass,
-      agreement: conf.agreement,
-      conflict: conf.conflict,
-      no_data: noData,
-      score_display: Number((score * cfg.display_scale).toFixed(2)),
-      rank: 0, live_events: live.length, drivers: drivers.slice(0, 6),
+      ...base, status: "EVALUATED", score, score_raw: Number(raw.toFixed(4)),
+      previous_score: previous, score_delta: previous === null ? null : Number((score - previous).toFixed(4)), momentum: momentumFrom(score, previous, cfg),
+      classification: classifyScore(score, cfg), bias: biasFromScore(score, cfg),
+      confidence: confidenceEnum(conf.pct), confidence_pct: conf.pct,
+      evidence_mass: conf.mass, agreement: conf.agreement, conflict: conf.conflict, no_data: false,
+      score_display: Number((score * cfg.display_scale).toFixed(2)), rank: 0,
     });
   }
-  // ranking: score desc, desempate por score_raw, depois confiança
-  out.sort((a, b) => b.score - a.score || b.score_raw - a.score_raw || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
-  out.forEach((c, i) => (c.rank = i + 1));
-  return out;
+  // ranking: APENAS moedas com evidência. Sem evidência não recebe posição artificial.
+  const evaluated = out.filter((c) => c.status === "EVALUATED");
+  evaluated.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.score_raw ?? 0) - (a.score_raw ?? 0) || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
+  evaluated.forEach((c, i) => (c.rank = i + 1));
+  const insufficient = out.filter((c) => c.status !== "EVALUATED").sort((a, b) => a.currency.localeCompare(b.currency));
+  return [...evaluated, ...insufficient];
 }
 
 /** event_key normalizado para supersede: 'USD|core_cpi_mom' */

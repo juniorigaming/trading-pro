@@ -10,12 +10,14 @@ export function mockStructured(schema: SchemaName, user: string): unknown {
       return {
         source_type: "forexfactory", detected_timezone: "GMT-3",
         rows: [
-          { date: today(), time: "09:30", currency: "USD", event: "Core CPI m/m", impact: "high", actual: "0.4%", forecast: "0.3%", previous: "0.2%", status: "released", ocr_confidence: 0.96, requires_manual_confirmation: false, ocr_issues: ["none"] },
-          { date: today(), time: "21:30", currency: "AUD", event: "Employment Change", impact: "high", actual: null, forecast: "25.0K", previous: "47.5K", status: "pending", ocr_confidence: 0.9, requires_manual_confirmation: false, ocr_issues: ["none"] },
-          { date: today(), time: "05:00", currency: "EUR", event: "Flash Services PMI", impact: "medium", actual: "51.2", forecast: "50.6", previous: "50.5", status: "released", ocr_confidence: 0.62, requires_manual_confirmation: true, ocr_issues: ["blurry"] },
+          { date: today(), time: "09:30", currency: "USD", event: "Core CPI m/m", impact: "high", actual: "0.4%", forecast: "0.3%", previous: "0.2%", status: "released", ocr_confidence: 0.96, requires_manual_confirmation: false, ocr_issues: ["none"], raw_row_text: "transcrição de teste" },
+          { date: today(), time: "21:30", currency: "AUD", event: "Employment Change", impact: "high", actual: null, forecast: "25.0K", previous: "47.5K", status: "pending", ocr_confidence: 0.9, requires_manual_confirmation: false, ocr_issues: ["none"], raw_row_text: "transcrição de teste" },
+          { date: today(), time: "05:00", currency: "EUR", event: "Flash Services PMI", impact: "medium", actual: "51.2", forecast: "50.6", previous: "50.5", status: "released", ocr_confidence: 0.62, requires_manual_confirmation: true, ocr_issues: ["blurry"], raw_row_text: "transcrição de teste" },
         ],
         overall_ocr_confidence: 0.83, notes: ["Resposta MOCK — configure OPENAI_API_KEY para OCR real."],
       };
+    case "calendar_visibility":
+      return { verdicts: [] };
     case "event_interpretation": {
       const ids = [...user.matchAll(/"id":\s*(\d+)/g)].map((m) => Number(m[1]));
       const ccyByEvent = new Map<number, string>();

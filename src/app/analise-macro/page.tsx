@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, ScanText, Sparkles, History, KeyRound, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import ImageDropzone from "@/components/ai/ImageDropzone";
 import AiWaitPanel from "@/components/ai/AiWaitPanel";
+import AuditPanel from "@/components/ai/AuditPanel";
 import MacroSummary from "@/components/ai/MacroSummary";
 import OcrValidationTable, { type OcrRow } from "@/components/ai/OcrValidationTable";
 import G8Ranking from "@/components/ai/G8Ranking";
@@ -36,6 +37,9 @@ export default function AnaliseMacroPage() {
   const [withBrief, setWithBrief] = useState(true);
   const [showWarnings, setShowWarnings] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
+  const [auditMode, setAuditMode] = useState(false);
+  const [extractionAudit, setExtractionAudit] = useState<unknown>(null);
+  const [extractionRejected, setExtractionRejected] = useState(0);
 
   useEffect(() => { const id = setTimeout(() => setTok(getToken()), 0); return () => clearTimeout(id); }, []);
   const loadHistory = useCallback(() => { apiFetch<AnalysisListItem[]>("/api/macro/analyses?limit=30").then(setHistory).catch((e) => setErr(e.message)); }, []);
@@ -48,7 +52,8 @@ export default function AnaliseMacroPage() {
       images.forEach((i) => fd.append("images", i.file, i.file.name));
       fd.append("timezone", `${Intl.DateTimeFormat().resolvedOptions().timeZone} (GMT${-new Date().getTimezoneOffset() / 60})`);
       fd.append("referenceDate", new Date().toISOString().slice(0, 10));
-      const r = await apiFetch<{ events: EconomicEventInput[]; meta: Record<string, unknown> }>("/api/ai/macro/extract", { method: "POST", body: fd });
+      const r = await apiFetch<{ events: EconomicEventInput[]; meta: Record<string, unknown>; audit?: { rejected?: unknown[] } & Record<string, unknown> }>("/api/ai/macro/extract", { method: "POST", body: fd });
+      setExtractionAudit(r.audit ?? null); setExtractionRejected(r.audit?.rejected?.length ?? 0);
       setRows(r.events.map((e) => ({ ...e, _id: uid(), _confirmed: !e.requires_manual_confirmation, _original: { actual: e.actual, forecast: e.forecast, previous: e.previous, event: e.event } })));
       setOcrMeta(r.meta); setStep("validate");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
@@ -57,12 +62,12 @@ export default function AnaliseMacroPage() {
   const analyze = async () => {
     const unconfirmed = rows.filter((r) => r.requires_manual_confirmation && !r._confirmed).length;
     if (unconfirmed > 0 && !confirm(`${unconfirmed} evento(s) de baixa confiança ainda não confirmados. Continuar mesmo assim?`)) return;
-    setErr(null); setBusy("Salvando RAW → interpretando eventos → recalculando scores G8..."); setBusyKind("analyze");
+    setErr(null); setBusy("Salvando RAW → classificando por regra → recalculando scores da análise → checando consistência..."); setBusyKind("analyze");
     try {
       const userEdits: Record<string, unknown> = {};
       for (const r of rows) if (r.user_edited) userEdits[`${r.currency}|${r.event}`] = { from: r._original ?? null, to: { actual: r.actual, forecast: r.forecast, previous: r.previous, event: r.event } };
       const events = rows.filter((r) => r.event.trim()).map(({ _id, _confirmed, _original, ...e }) => { void _id; void _confirmed; void _original; return e; });
-      const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief }) });
+      const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief, extraction: extractionAudit }) });
       setResult(r); setStep("result");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
@@ -164,6 +169,7 @@ export default function AnaliseMacroPage() {
         <Section title="2. Validar leitura do OCR" sub={ocrMeta ? `${String(ocrMeta.provider ?? "")} · ${String(ocrMeta.model ?? "")} · ${String(ocrMeta.promptVersion ?? ocrMeta.prompt_version ?? "")} · fuso detectado: ${String(ocrMeta.detectedTimezone ?? "n/d")}${ocrMeta.notes ? ` · ${String(ocrMeta.notes)}` : ""}` : "Entrada manual"} right={<Btn variant="ghost" onClick={reset}>Recomeçar</Btn>}>
           <OcrValidationTable rows={rows} onChange={setRows} />
           <div className="flex flex-wrap items-center gap-3 mt-4">
+            {extractionRejected > 0 && <p className="text-[11px] text-amber mb-2">{extractionRejected} linha(s) foram rejeitadas pela validação do código (moeda/evento/valor não constam no texto transcrito ou não foram confirmadas na imagem). Veja no modo auditoria após analisar.</p>}
             <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Aguarde, analisando as informações..."><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
           </div>
@@ -182,10 +188,19 @@ export default function AnaliseMacroPage() {
               {otherWarnings.length > 0 && (
                 <button onClick={() => setShowWarnings((v) => !v)} className="inline-flex items-center gap-1 text-amber font-bold"><AlertTriangle size={12} />{otherWarnings.length} aviso{otherWarnings.length > 1 ? "s" : ""}{showWarnings ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
               )}
-              <div className="ml-auto flex gap-2"><Btn variant="ghost" onClick={() => router.push("/ranking-g8")}>Ranking completo</Btn><Btn variant="ghost" onClick={reset}>Nova análise</Btn></div>
+              <div className="ml-auto flex gap-2"><Btn variant={auditMode ? "primary" : "ghost"} onClick={() => setAuditMode((v) => !v)}>{auditMode ? "Fechar auditoria" : "Modo auditoria"}</Btn><Btn variant="ghost" onClick={() => router.push("/ranking-g8")}>Ranking completo</Btn><Btn variant="ghost" onClick={reset}>Nova análise</Btn></div>
             </div>
             {showWarnings && <div className="space-y-1.5">{otherWarnings.map((w, i) => <Notice key={i} kind="warn">{w}</Notice>)}</div>}
 
+            {result.analysis_status === "ANALISE_INSUFICIENTE" && (
+              <div className="glass-card p-4 border border-rose/50">
+                <p className="text-sm font-extrabold text-rose mb-1">ANÁLISE INSUFICIENTE</p>
+                <p className="text-xs text-text-secondary mb-2">A validação de consistência falhou, então este resultado <b>não</b> é apresentado como ranking confiável. Nenhuma moeda recebeu score sem evidência.</p>
+                <ul className="space-y-0.5">{(result.audit?.checks ?? []).filter((c) => !c.passed).map((c) => <li key={c.id} className="text-[11px] text-text-muted">• {c.label}: {c.detail}</li>)}</ul>
+              </div>
+            )}
+            {auditMode && result.audit && <Section title="Modo auditoria" sub="Do screenshot ao ranking: cada etapa, cada rejeição e cada score"><AuditPanel result={result} previews={images.map((i) => ({ id: i.id, previewUrl: i.previewUrl, name: i.label }))} /></Section>}
+            {result.analysis_status !== "ANALISE_INSUFICIENTE" && <>
             {/* Resumo macro consolidado (backend): forte/fraca, risco, Top 3 long/short, pares a evitar, alertas */}
             <MacroSummary result={result} />
             {brief && <p className="glass-card p-4 text-xs text-text-secondary leading-snug">{brief.replace("Brief: ", "").split(" — ")[0]}</p>}
@@ -199,6 +214,7 @@ export default function AnaliseMacroPage() {
               <span>Eventos pendentes e risco por moeda <span className="text-text-muted font-normal">({result.pending_events.length} pendentes)</span></span>{showEvents ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
             {showEvents && <Section title="Event Risk" sub="Calculado por perna do par a partir dos eventos pendentes informados"><EventRiskPanel eventRisk={result.event_risk} pending={result.pending_events} pairsToAvoid={result.pairs_to_avoid} /></Section>}
+            </>}
           </div>
         );
       })()}
