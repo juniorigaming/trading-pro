@@ -6,8 +6,15 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { Badge, riskColor, scoreBg } from "./ui";
 
 export function DivergenceMatrix({ scores }: { scores: CurrencyScoreView[] }) {
-  const map = Object.fromEntries(scores.map((s) => [s.currency, s.score])) as Record<string, number>;
-  const order = [...G8].sort((a, b) => (map[b] ?? 0) - (map[a] ?? 0));
+  // null = sem evidência nesta análise: aparece como "—", nunca como 0.00
+  const map = Object.fromEntries(scores.map((s) => [s.currency, s.score])) as Record<string, number | null>;
+  const order = [...G8].sort((a, b) => {
+    const x = map[a] ?? null, y = map[b] ?? null;
+    if (x === null && y === null) return 0;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return y - x;
+  });
   return (
     <div className="overflow-x-auto">
       <table className="text-[11px] tabular-nums">
@@ -15,10 +22,11 @@ export function DivergenceMatrix({ scores }: { scores: CurrencyScoreView[] }) {
         <tbody>
           {order.map((r) => (
             <tr key={r}>
-              <td className="px-1.5 py-1 font-extrabold text-text-primary">{r} <span className={`ml-1 px-1 rounded ${scoreBg(map[r] ?? 0)}`}>{(map[r] ?? 0).toFixed(2)}</span></td>
+              <td className="px-1.5 py-1 font-extrabold text-text-primary">{r} <span className={`ml-1 px-1 rounded ${map[r] == null ? "text-text-muted" : scoreBg(map[r] as number)}`}>{map[r] == null ? "—" : (map[r] as number).toFixed(2)}</span></td>
               {order.map((c) => {
                 if (r === c) return <td key={c} className="px-1.5 py-1 text-center text-text-muted">·</td>;
-                const d = (map[r] ?? 0) - (map[c] ?? 0);
+                if (map[r] == null || map[c] == null) return <td key={c} className="px-1.5 py-1 text-center text-text-muted">—</td>;
+                const d = (map[r] as number) - (map[c] as number);
                 const strong = Math.abs(d) >= 1.5, ok = Math.abs(d) >= 1.0;
                 return <td key={c} className={`px-1.5 py-1 text-center rounded ${ok ? (d > 0 ? (strong ? "bg-emerald/25 text-emerald font-bold" : "bg-emerald/10 text-emerald") : (strong ? "bg-rose/25 text-rose font-bold" : "bg-rose/10 text-rose")) : "text-text-muted"}`}>{d > 0 ? "+" : ""}{d.toFixed(2)}</td>;
               })}

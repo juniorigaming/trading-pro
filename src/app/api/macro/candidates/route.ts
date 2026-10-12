@@ -1,6 +1,6 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { tradeCandidates } from "@/db/schema";
+import { macroAnalyses, tradeCandidates } from "@/db/schema";
 import { errorResponse, json } from "@/lib/api-utils";
 import type { Confidence, Currency, EventRiskLevel, PendingEventView, TradeCandidateView } from "@/lib/ai/types";
 export const dynamic = "force-dynamic";
@@ -29,13 +29,21 @@ function toView(r: Row): TradeCandidateView & { id: number; analysis_id: number 
   };
 }
 
-/** GET → candidatos do último cálculo (mesmo computed_at), já no formato TradeCandidateView */
-export async function GET() {
+/**
+ * GET[?session=] → candidatos SOMENTE da análise mais recente (mesmo critério de /api/macro/analyses?latest=1).
+ * Nunca reaproveita candidatos de análises anteriores: se a análise atual não gerou nenhum, a lista é vazia.
+ */
+export async function GET(request: Request) {
   try {
     const db = getDb();
-    const last = await db.select({ computedAt: tradeCandidates.computedAt }).from(tradeCandidates).orderBy(desc(tradeCandidates.computedAt)).limit(1);
-    if (!last[0]) return json([]);
-    const rows = await db.select().from(tradeCandidates).where(eq(tradeCandidates.computedAt, last[0].computedAt)).orderBy(tradeCandidates.priority);
+    const session = new URL(request.url).searchParams.get("session");
+    const latest = await db.select({ id: macroAnalyses.id }).from(macroAnalyses)
+      .where(session && session !== "ALL" ? eq(macroAnalyses.session, session as never) : undefined)
+      .orderBy(desc(macroAnalyses.createdAt)).limit(1);
+    if (!latest[0]) return json([]);
+    const rows = await db.select().from(tradeCandidates)
+      .where(and(eq(tradeCandidates.analysisId, latest[0].id)))
+      .orderBy(tradeCandidates.priority);
     return json(rows.map(toView));
   } catch (e) { return errorResponse(e, "Falha ao carregar candidatos"); }
 }
