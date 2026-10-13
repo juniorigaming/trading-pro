@@ -11,8 +11,8 @@ export function statusColor(s: string) { return s === "READY" ? "bg-emerald/15 t
 export const fmtScore = (s: number | null | undefined) => (s == null ? "—" : `${s > 0 ? "+" : ""}${s.toFixed(2)}`);
 export const SESSION_LABEL: Record<string, string> = { ASIA: "Ásia", LONDON: "Londres", NEW_YORK: "Nova York" };
 
-export function Badge({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border ${className}`}>{children}</span>;
+export function Badge({ children, className = "", title }: { children: ReactNode; className?: string; title?: string }) {
+  return <span title={title} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide border ${className}`}>{children}</span>;
 }
 export function DeltaArrow({ delta }: { delta: number | null | undefined }) {
   if (delta == null || Math.abs(delta) < 0.01) return <Minus size={14} className="text-text-muted" />;

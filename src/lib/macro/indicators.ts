@@ -60,6 +60,8 @@ export const INDICATOR_RULES: IndicatorRule[] = [
     pattern: /\b(trade balance|merchandise trade|balance of trade|trade surplus|current account)\b/i },
   { id: "housing", category: "HOUSING", above_is: "BULLISH", threshold: 0.03, threshold_kind: "relative", reliability: "MEDIUM",
     pattern: /\b(building permits|housing starts|home sales|house prices?|hpi)\b/i },
+  { id: "credit", category: "ACTIVITY", above_is: "BULLISH", threshold: 0.1, threshold_kind: "absolute", reliability: "LOW",
+    pattern: /\b(bank lending|private loans?|consumer credit|credit growth|m3 money supply|m2 money supply|mortgage approvals|net lending)\b/i },
   { id: "sentiment_confidence", category: "SENTIMENT", above_is: "BULLISH", threshold: 1, threshold_kind: "absolute", reliability: "LOW",
     pattern: /\b(consumer (confidence|sentiment)|sentiment|confidence|michigan|zew|ifo|westpac|economy watchers)\b/i },
 ];
@@ -131,7 +133,8 @@ export function classifyRelease(input: {
   const refLabel = basis === "FORECAST" ? "forecast" : "previous";
   const head = `${input.event}: atual ${input.actual} vs ${refLabel} ${input.forecast ?? input.previous}`;
 
-  if (Math.abs(surprise) < threshold) {
+  // Tolerância de ponto flutuante: 1.0 − 0.8 = 0.19999… não pode ser lido como "abaixo de 0.2".
+  if (Math.abs(surprise) + 1e-9 < threshold) {
     return { ...base, direction: "NEUTRAL", classification: CLASS_FOR.NEUTRAL(false),
       explanation: `${head} → surpresa ${surprise.toFixed(2)} dentro do limiar (${threshold.toFixed(2)}) — efeito zero mensurado.` };
   }

@@ -8,6 +8,17 @@ import { confColor, fmt5 } from "./MacroSummary";
 const MOMENTUM_LABEL: Record<string, string> = { STRENGTHENING: "fortalecendo", WEAKENING: "enfraquecendo", STABLE: "estável", NARRATIVE_SHIFT: "mudança de narrativa" };
 const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Muito forte", STRONG: "Forte", MODERATELY_STRONG: "Mod. forte", NEUTRAL: "Neutro", MODERATELY_WEAK: "Mod. fraca", WEAK: "Fraca", VERY_WEAK: "Muito fraca" };
 const DIR_LABEL: Record<string, string> = { BULLISH: "alta da moeda", BEARISH: "baixa da moeda", NEUTRAL: "neutro (medido)" };
+const EVIDENCE_LABEL: Record<string, string> = { WEAK: "evidência fraca", MODERATE: "evidência moderada", STRONG: "evidência sólida" };
+const EVIDENCE_TITLE: Record<string, string> = {
+  WEAK: "Score sustentado por pouca evidência (ex.: um único dado de impacto baixo ou sem forecast). Entra no ranking, mas não gera candidato de par.",
+  MODERATE: "Evidência intermediária: dado primário único ou alguns dados secundários.",
+  STRONG: "Vários dados relevantes ou dado primário de alto impacto.",
+};
+/** Pílula de nível de evidência — só aparece quando é FRACA (as demais não precisam de ressalva). */
+function EvidencePill({ level }: { level?: string }) {
+  if (level !== "WEAK") return null;
+  return <Badge className="border-amber/40 text-amber" title={EVIDENCE_TITLE[level]}>{EVIDENCE_LABEL[level]}</Badge>;
+}
 
 /** Score na escala do dashboard (−5..+5). null ⇒ sem evidência (NUNCA 0). */
 export const display5 = (s: CurrencyScoreView): number | null => (s.score === null ? null : (s.score_display ?? Number((s.score * 2.5).toFixed(2))));
@@ -62,9 +73,11 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
                 <Badge className={pct == null ? "border-border text-text-muted" : pct >= 65 ? "border-emerald/40 text-emerald" : pct >= 40 ? "border-amber/40 text-amber" : "border-border text-text-muted"}>
                   {pct == null ? s.confidence : `${pct}%`}
                 </Badge>
+                <span className="hidden sm:inline"><EvidencePill level={s.evidence_level} /></span>
                 {open === s.currency ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />}
               </>}
               {clean && <>
+                <EvidencePill level={s.evidence_level} />
                 {pct != null && <span className={`text-[11px] font-semibold tabular-nums ${confColor(pct)}`}>{pct}%</span>}
                 {open === s.currency ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />}
               </>}
@@ -72,7 +85,7 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
             {open === s.currency && (
               <div className="px-3 pb-3 text-xs">
                 <p className="text-text-muted mb-1">
-                  Score <b className="text-text-secondary">{fmt5(v)}</b> · confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} · concordância {Math.round((s.agreement ?? 0) * 100)}%
+                  Score <b className="text-text-secondary">{fmt5(v)}</b> · confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} ({s.evidence_level ? EVIDENCE_LABEL[s.evidence_level] : "—"}) · concordância {Math.round((s.agreement ?? 0) * 100)}%
                   {s.conflict && <span className="text-amber font-semibold"> · viés misto (indicadores contraditórios)</span>}
                 </p>
                 <p className="text-[10px] text-text-muted mb-2">Por que este score: soma ponderada das contribuições medidas (surpresa × importância × impacto × confiança × atualidade), atenuada quando a evidência é escassa.</p>
@@ -90,11 +103,11 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
       })}
       {insufficient.length > 0 && (
         <div className="rounded-xl border border-dashed border-border px-3 py-2">
-          <p className="text-[11px] font-bold text-text-muted mb-1">Sem evidência suficiente — sem score e sem posição no ranking</p>
+          <p className="text-[11px] font-bold text-text-muted mb-1">Sem dado divulgado nesta análise — sem score e sem posição no ranking</p>
           <div className="flex flex-wrap gap-1.5">
             {insufficient.map((s) => (
               <span key={s.currency} className="text-[11px] font-semibold text-text-muted border border-border rounded-md px-2 py-0.5" title={s.excluded_events?.[0]?.reason ?? "Nenhuma divulgação com direção mensurável nesta análise."}>
-                {s.currency} · score —
+                {s.currency} · sem dado
               </span>
             ))}
           </div>

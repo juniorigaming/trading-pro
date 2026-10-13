@@ -77,6 +77,8 @@ export interface EconomicEventInput {
 
 /** Status explícito por moeda. INSUFFICIENT_EVIDENCE ⇒ score = null (NUNCA 0), sem posição no ranking. */
 export type CurrencyStatus = "EVALUATED" | "INSUFFICIENT_EVIDENCE";
+/** Quanta evidência sustenta o score de uma moeda EVALUATED (rótulo para a UI; não altera o cálculo). */
+export type EvidenceLevel = "WEAK" | "MODERATE" | "STRONG";
 /** Moeda com evidência: score, rank e confiança são números (sem null). */
 export type EvaluatedCurrency = CurrencyScoreView & { score: number; rank: number; confidence_pct: number };
 
@@ -122,6 +124,8 @@ export interface CurrencyScoreView {
   confidence_pct: number | null;
   /** Peso total vivo — massa de evidência (não é contagem de eventos). */
   evidence_mass?: number;
+  /** WEAK = 1 dado de impacto baixo / sem forecast; MODERATE; STRONG. Só para EVALUATED. */
+  evidence_level?: EvidenceLevel;
   agreement?: number;
   conflict?: boolean;
   no_data?: boolean;

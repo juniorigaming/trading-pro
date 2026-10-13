@@ -3,7 +3,7 @@
  * contribution = direction_value × importance_weight × category_multiplier × impact_factor × confidence_factor × decay(idade)
  * score(ccy) = média ponderada das contribuições vivas, arredondada em passos (0.25) e limitada a ±2.
  */
-import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type Importance, type Momentum, type ScoreClassification, type ScoreDriver } from "@/lib/ai/types";
+import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EvidenceLevel, type Importance, type Momentum, type ScoreClassification, type ScoreDriver } from "@/lib/ai/types";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
 
 export interface ScoredEvent {
@@ -106,6 +106,18 @@ export function confidenceScore(live: { w: number; dir: number; primary: boolean
   return { pct: Math.max(0, Math.min(99, pct)), agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict };
 }
 
+/**
+ * Nível de evidência por trás do score — rótulo honesto para a UI:
+ *  WEAK     = pouca massa (ex.: 1 dado de impacto baixo, ou dado sem forecast) e nenhuma evidência primária;
+ *  MODERATE = massa intermediária ou evidência primária única;
+ *  STRONG   = massa relevante (vários dados ou dado primário de alto impacto).
+ */
+export function evidenceLevel(mass: number, hasPrimary: boolean, cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): EvidenceLevel {
+  if (mass >= cfg.evidence_k) return "STRONG";
+  if (hasPrimary || mass >= cfg.evidence_k * 0.35) return "MODERATE";
+  return "WEAK";
+}
+
 /** Enum de confiança derivado do percentual (mantido para compatibilidade com o schema/banco). */
 export function confidenceEnum(pct: number): Confidence {
   if (pct >= 65) return "HIGH";
@@ -147,7 +159,10 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
       const ageDays = (input.now.getTime() - e.released_at.getTime()) / 86_400_000;
       const decay = decayFactor(e.category, ageDays, cfg);
       const w = bc.weight * bc.impact_factor * bc.confidence_factor * decay;
-      if (w < cfg.min_weight_alive) { excluded.push({ event_id: e.event_id, event: e.event, reason: "Peso abaixo do mínimo (evento antigo ou de baixa confiança)." }); continue; }
+      // Divulgação MEDIDA (direção conhecida) é evidência — fraca, mas evidência. O piso de peso só poda eventos que já
+      // perderam metade do valor por idade; um dado de impacto baixo divulgado HOJE entra com seu peso pequeno e
+      // o evidenceFactor cuida de atenuar o score (nunca some do ranking por ser "pequeno").
+      if (w < cfg.min_weight_alive && decay < 0.5) { excluded.push({ event_id: e.event_id, event: e.event, reason: "Peso abaixo do mínimo (evento antigo demais para contar)." }); continue; }
       num += bc.direction_value * w;
       den += w;
       const primary = (e.importance === "HIGH" || e.importance === "MEDIUM_HIGH") && e.impact !== "low";
@@ -182,13 +197,16 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
     const raw = weighted * evidenceFactor;
     const score = Math.max(-cfg.clamp, Math.min(cfg.clamp, roundToStep(raw, cfg.score_step)));
     const conf = confidenceScore(live);
+    const evidence_level = evidenceLevel(conf.mass, live.some((x) => x.primary), cfg);
     out.push({
-      ...base, status: "EVALUATED", score, score_raw: Number(raw.toFixed(4)),
+      ...base, status: "EVALUATED", score, score_raw: Number(raw.toFixed(4)), evidence_level,
       previous_score: previous, score_delta: previous === null ? null : Number((score - previous).toFixed(4)), momentum: momentumFrom(score, previous, cfg),
       classification: classifyScore(score, cfg), bias: biasFromScore(score, cfg),
       confidence: confidenceEnum(conf.pct), confidence_pct: conf.pct,
       evidence_mass: conf.mass, agreement: conf.agreement, conflict: conf.conflict, no_data: false,
-      score_display: Number((score * cfg.display_scale).toFixed(2)), rank: 0,
+      // Apresentação usa o valor contínuo (antes do arredondamento em passos): evidência fraca aparece como +0.2 / −0.1,
+      // em vez de ser "engolida" pelo passo de 0.25. Classificação/viés/pares continuam usando o score em passos.
+      score_display: Number((raw * cfg.display_scale).toFixed(2)), rank: 0,
     });
   }
   // ranking: APENAS moedas com evidência. Sem evidência não recebe posição artificial.

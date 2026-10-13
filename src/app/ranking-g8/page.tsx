@@ -68,6 +68,7 @@ export default function RankingG8Page() {
             <Section title="Como ler" sub="Evidência, não contagem de eventos">
               <ul className="text-xs text-text-secondary space-y-1.5 list-disc pl-4">
                 <li><b>Poucos eventos ≠ moeda fraca.</b> Sem dado vivo a moeda fica <i>neutra por ausência de evidência</i>, nunca penalizada.</li>
+                <li><b>Toda moeda com dado divulgado entra no ranking.</b> Um único dado de impacto baixo (ou sem forecast) gera score pequeno com a etiqueta <i>evidência fraca</i> — aparece, mas não vira candidato de par.</li>
                 <li>Escala <b>−5..+5</b>: força da EVIDÊNCIA macro — <b>não</b> é probabilidade de o preço subir.</li>
                 <li>Força relativa do par = base − cotada. Bandas: &lt;0.5 neutro · 0.6–1.0 muito fraco · 1.1–1.5 moderado · 1.6–2.5 forte · 2.6+ muito forte.</li>
                 <li><b>Confiança 0–100%</b> cai com evidência escassa, indicadores conflitantes e evento de alto impacto iminente.</li>

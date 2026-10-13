@@ -248,7 +248,8 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
   const evaluated = scores.filter((s) => s.status === "EVALUATED");
   const insufficient = scores.filter((s) => s.status !== "EVALUATED").map((s) => s.currency);
   const conflicted = evaluated.filter((s) => s.conflict).map((s) => s.currency);
-  const thin = evaluated.filter((s) => (s.confidence_pct ?? 0) < 40).map((s) => s.currency);
+  const thin = evaluated.filter((s) => (s.confidence_pct ?? 0) < 40 && s.evidence_level !== "WEAK").map((s) => s.currency);
+  const weak = evaluated.filter((s) => s.evidence_level === "WEAK").map((s) => s.currency);
 
   // Checagem de consistência — decide se o ranking pode ser apresentado.
   const releasedCount = opts.releasedCount ?? events.length;
@@ -261,7 +262,8 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
   });
 
   const warnings: string[] = [];
-  if (insufficient.length) warnings.push(`Sem evidência suficiente: ${insufficient.join(", ")} — não recebem score nem posição no ranking (nunca tratadas como 0).`);
+  if (insufficient.length) warnings.push(`Sem dado divulgado: ${insufficient.join(", ")} — não recebem score nem posição no ranking (nunca tratadas como 0).`);
+  if (weak.length) warnings.push(`Evidência fraca: ${weak.join(", ")} — score pequeno sustentado por um único dado de impacto baixo ou sem forecast; entra no ranking, não gera candidato de par.`);
   if (thin.length) warnings.push(`Evidência fraca (confiança < 40%): ${thin.join(", ")} — score atenuado de propósito.`);
   if (conflicted.length) warnings.push(`Indicadores conflitantes (viés misto): ${conflicted.join(", ")} — confiança reduzida.`);
   if (events.length === 0) warnings.push("Nenhum evento com direção mensurável nesta análise — nenhum ranking pode ser gerado.");
