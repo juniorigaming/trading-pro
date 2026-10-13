@@ -33,9 +33,12 @@ export function errorResponse(e: unknown, fallback = "Erro interno") {
   const full = `${msg} ${cause ?? ""}`;
   const safe = /relation .* does not exist/i.test(full) ? "Tabelas do módulo de IA ausentes — rode a migration drizzle/0001_ai_module.sql (veja INSTRUCOES.txt)"
     : /column .* does not exist/i.test(full) ? "Coluna ausente no banco — a migration do módulo de IA está incompleta/desatualizada"
+    : /violates check constraint "macro_interpretations/i.test(full) ? "Dados antigos de macro_interpretations fora do padrão atual (CHECK constraint). Execute drizzle/0004_fix_macro_checks.sql no Neon SQL Editor e repita a análise (diagnóstico: GET /api/macro/diagnostics)."
+    : /violates check constraint/i.test(full) ? "O banco rejeitou um valor (CHECK constraint) — veja o detalhe; as migrations do módulo de IA podem estar desatualizadas"
     : /DATABASE_URL/i.test(full) ? "DATABASE_URL não configurada" : fallback;
   // Detalhe curto e sem stack para depuração (mensagem do driver, não o trace)
-  return json({ error: safe, detail: cause ? cause.slice(0, 200) : undefined }, 500);
+  const detail = (cause ?? (safe !== msg ? msg : "")).slice(0, 300) || undefined;
+  return json({ error: safe, detail }, 500);
 }
 
 export interface ValidatedImage { base64: string; mime: "image/png" | "image/jpeg" | "image/webp"; name: string; size: number; label?: string }
