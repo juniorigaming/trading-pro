@@ -6,14 +6,14 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
-import { ALL_CURRENCIES, G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type Importance, type MacroAnalysisResult, type PendingEventView, type Session } from "@/lib/ai/types";
+import { ALL_CURRENCIES, CENTRAL_BANKS, G8, type AnalysisAudit, type AnyCurrency, type AuditCheck, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
 import { generateStructured } from "@/lib/ai/service";
 import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
 import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
 import { baseContribution, computeCurrencyScores, normalizeEventKey, parseNumeric, type ScoredEvent } from "./scoring";
 import { buildTradeCandidates } from "./pairs";
 import { eventRiskFor, toPendingView } from "./event-risk";
-import { dbErrorMessage, normalizeInterpretationEnums } from "./normalize";
+import { classifyRelease, IMPACT_TO_IMPORTANCE } from "./indicators";
 
 export async function loadScoringConfig(): Promise<ScoringConfig> {
   try {
@@ -67,13 +67,7 @@ export async function saveRawEvents(events: EconomicEventInput[], opts: SaveRawO
     ids.push(row.id);
     // Se o Actual mudou (correção manual ou revisão), a interpretação antiga deixa de valer.
     if (existing[0] && existing[0].actual !== actual) {
-      try {
-        await db.update(macroInterpretations).set({ isCurrent: false }).where(and(eq(macroInterpretations.eventId, row.id), eq(macroInterpretations.isCurrent, true)));
-      } catch (dbErr) {
-        // Um UPDATE reavalia as CHECK constraints da linha: se há interpretações antigas fora do enum atual, o Postgres
-        // falha aqui ("new row ... violates check constraint"). A correção é estrutural (SQL), então explicamos.
-        throw new Error(`Falha ao invalidar interpretação antiga de "${e.event}": ${dbErrorMessage(dbErr)}. Causa provável: dados antigos em macro_interpretations fora do padrão atual — execute drizzle/0004_fix_macro_checks.sql no Neon SQL Editor (veja GET /api/macro/diagnostics) e repita a análise.`);
-      }
+      await db.update(macroInterpretations).set({ isCurrent: false }).where(and(eq(macroInterpretations.eventId, row.id), eq(macroInterpretations.isCurrent, true)));
     }
     if (status === "released") {
       // supersede releases anteriores do mesmo indicador (dado novo substitui o antigo)
@@ -107,148 +101,266 @@ export async function interpretPendingEvents(cfg: ScoringConfig, analysisId: num
   const todo = await db.select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
   if (todo.length === 0) return { interpreted: 0, model: null, promptVersion: null, warnings: [] };
 
-  // contexto por moeda: últimos drivers + score atual (para "já precificado" e mudança de narrativa)
-  const latest = await latestScores();
-  const context: Record<string, unknown> = {};
-  for (const c of currencies) {
-    const s = latest.find((x) => x.currency === c);
-    context[c] = s ? { score: s.score, classification: s.classification, drivers: s.drivers.slice(0, 4).map((d) => `${d.event} (${d.classification})`) } : { score: 0, classification: "NEUTRAL", drivers: [] };
-  }
-
   const warnings: string[] = [];
-  let interpreted = 0; let failed = 0; let model: string | null = null; let promptVersion: string | null = null;
-  for (let i = 0; i < todo.length; i += 20) {
-    const batch = todo.slice(i, i + 20);
+  let interpreted = 0; let model: string | null = null; let promptVersion: string | null = null;
+
+  // Lotes MENORES em PARALELO: cada chamada gera menos tokens (responde mais rápido)
+  // e várias correm ao mesmo tempo — o tempo total vira ~o da chamada mais lenta, não a soma.
+  const BATCH_SIZE = 8;
+  const MAX_PARALLEL = 3;
+  const batches: (typeof todo)[] = [];
+  for (let i = 0; i < todo.length; i += BATCH_SIZE) batches.push(todo.slice(i, i + BATCH_SIZE));
+
+  const runBatch = async (batch: typeof todo) => {
     const payload = batch.map((e) => ({ id: e.id, currency: e.currency, event: e.event, impact: e.impact, scheduled_at: e.scheduledAt.toISOString(), actual: e.actual, forecast: e.forecast, previous: e.previous }));
     const res = await generateStructured({
       purpose: prompt === MACRO_SYSTEM ? "macro_interpret" : "b3_macro_interpret", prompt, schemaName: "event_interpretation", temperature: 0.2,
-      user: JSON.stringify({ events: payload, context_by_currency: context, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
+      timeoutMs: 60_000,
+      user: JSON.stringify({ events: payload, ...(options.extraContext ? { extra_context: options.extraContext } : {}) }, null, 0),
     });
     model = res.model; promptVersion = res.promptVersion;
     const byId = new Map(batch.map((e) => [e.id, e]));
+    // Um ÚNICO insert com todas as linhas do lote (antes: 1 round-trip por evento).
+    const rows: (typeof macroInterpretations.$inferInsert)[] = [];
     for (const it of res.data.interpretations) {
       const ev = byId.get(it.event_id);
       if (!ev) { warnings.push(`IA retornou event_id desconhecido ${it.event_id}`); continue; }
-      // Normalização defensiva: o banco tem CHECK constraints (classification/importance/...) e um valor fora do
-      // padrão não pode derrubar a análise inteira. Correções viram warnings visíveis na UI.
-      const { enums, fixes } = normalizeInterpretationEnums(it);
-      if (fixes.length) warnings.push(`"${ev.event}": valor(es) da IA ajustado(s) — ${fixes.join(", ")}`);
-      const bc = baseContribution({ category: enums.category, importance: enums.importance, classification: enums.classification, confidence: enums.confidence, impact: ev.impact as ScoredEvent["impact"] }, cfg);
-      try {
-        await db.insert(macroInterpretations).values({
-          eventId: ev.id, analysisId, category: enums.category, subcategory: it.subcategory, importance: enums.importance, classification: enums.classification,
-          directionValue: bc.direction_value, surpriseVsForecast: it.surprise_vs_forecast, changeVsPrevious: it.change_vs_previous,
-          growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, fiscalImplication: it.fiscal_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
-          pricedIn: it.priced_in, currencyImplication: it.currency_implication, confidence: enums.confidence, reasoningSummary: it.reasoning_summary,
-          weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
-          scoringVersion: cfg.version, promptVersion: res.promptVersion, model: res.model, isCurrent: true,
-        });
-        interpreted++;
-      } catch (e) {
-        // Um evento que o banco rejeita não invalida os demais; a causa exata (constraint + valores) vai para o warning e para o log.
-        const detail = `"${ev.event}" (${ev.currency}) não gravado: ${dbErrorMessage(e)} [classification=${enums.classification}, importance=${enums.importance}, confidence=${enums.confidence}, category=${enums.category}, direction_value=${bc.direction_value}]`;
-        console.error("[macro] insert macro_interpretations falhou:", detail);
-        warnings.push(detail);
-        failed++;
-      }
+      const bc = baseContribution({ category: it.category, importance: it.importance, classification: it.classification, confidence: it.confidence, impact: ev.impact as ScoredEvent["impact"] }, cfg);
+      rows.push({
+        eventId: ev.id, analysisId, category: it.category, subcategory: it.subcategory, importance: it.importance, classification: it.classification,
+        directionValue: bc.direction_value, surpriseVsForecast: it.surprise_vs_forecast, changeVsPrevious: it.change_vs_previous,
+        growthImplication: it.growth_implication, inflationImplication: it.inflation_implication, fiscalImplication: it.fiscal_implication, centralBank: it.central_bank, centralBankImplication: it.central_bank_implication,
+        pricedIn: it.priced_in, currencyImplication: it.currency_implication, confidence: it.confidence, reasoningSummary: it.reasoning_summary,
+        weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
+        scoringVersion: cfg.version, promptVersion: res.promptVersion, model: res.model, isCurrent: true,
+      });
     }
+    if (rows.length) { await db.insert(macroInterpretations).values(rows); interpreted += rows.length; }
     const missing = batch.filter((e) => !res.data.interpretations.some((x) => x.event_id === e.id));
     if (missing.length) warnings.push(`${missing.length} evento(s) sem interpretação neste lote: ${missing.map((m) => m.event).join(", ")}`);
+  };
+
+  for (let i = 0; i < batches.length; i += MAX_PARALLEL) {
+    const group = batches.slice(i, i + MAX_PARALLEL);
+    const results = await Promise.allSettled(group.map(runBatch));
+    const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    // Todos falharam ⇒ propaga (o chamador avisa e o RAW fica salvo). Falha parcial vira aviso.
+    if (failed.length === group.length) throw failed[0].reason;
+    for (const f of failed) warnings.push(`Um lote de eventos não pôde ser interpretado: ${String(f.reason).slice(0, 120)}`);
   }
-  if (failed > 0 && interpreted === 0) {
-    // Nada foi gravado: o problema é estrutural (ex.: CHECK constraint divergente no banco) — melhor falhar com a causa clara.
-    throw new Error(`Nenhuma interpretação pôde ser gravada (${failed} rejeitada(s) pelo banco). ${warnings[warnings.length - 1] ?? ""} Execute o SQL drizzle/0004_fix_macro_checks.sql no Neon.`);
-  }
+
+
   return { interpreted, model, promptVersion, warnings };
 }
 
-/** Último snapshot de score por moeda (qualquer sessão). */
-export async function latestScores(): Promise<CurrencyScoreView[]> {
-  const rows = await getDb().execute(sql`SELECT DISTINCT ON (currency) * FROM currency_scores ORDER BY currency, computed_at DESC`);
-  return (rows.rows as Record<string, unknown>[]).map(rowToScoreView).sort((a, b) => a.rank - b.rank);
-}
-
-function rowToScoreView(r: Record<string, unknown>): CurrencyScoreView {
-  return {
-    currency: r.currency as Currency, score: Number(r.score), score_raw: Number(r.score_raw), previous_score: r.previous_score === null ? null : Number(r.previous_score),
-    score_delta: r.score_delta === null ? null : Number(r.score_delta), momentum: (r.momentum as CurrencyScoreView["momentum"]) ?? null,
-    classification: r.classification as CurrencyScoreView["classification"], bias: r.bias as CurrencyScoreView["bias"], confidence: r.confidence as Confidence,
-    rank: Number(r.rank), live_events: Number(r.live_events ?? 0), drivers: (r.drivers as CurrencyScoreView["drivers"]) ?? [],
-  };
-}
-
-export async function loadPendingEvents(now = new Date(), horizonHours = 72): Promise<PendingEventView[]> {
+export async function loadPendingEvents(now = new Date(), horizonHours = 72, scope?: { analysisId?: number | null }): Promise<PendingEventView[]> {
   const to = new Date(now.getTime() + horizonHours * 3_600_000);
   const from = new Date(now.getTime() - 30 * 60_000); // tolerância de 30 min p/ eventos "agora"
-  const rows = await getDb().select().from(economicEvents)
-    .where(and(eq(economicEvents.status, "pending"), gte(economicEvents.scheduledAt, from), sql`${economicEvents.scheduledAt} <= ${to}`))
-    .orderBy(economicEvents.scheduledAt);
+  const conds = [eq(economicEvents.status, "pending"), gte(economicEvents.scheduledAt, from), sql`${economicEvents.scheduledAt} <= ${to}`];
+  if (scope) {
+    if (!scope.analysisId) return [];
+    conds.push(eq(economicEvents.sourceRef, `analysis:${scope.analysisId}`));
+  }
+  const rows = await getDb().select().from(economicEvents).where(and(...conds)).orderBy(economicEvents.scheduledAt);
   return rows.map((r) => toPendingView(r, now));
 }
 
-/** Eventos released + interpretação corrente → ScoredEvent[] (todas as moedas; quem consome filtra). */
-export async function loadScoredEvents(cfg: ScoringConfig): Promise<ScoredEvent[]> {
-  const since = new Date(Date.now() - cfg.max_age_days * 86_400_000);
+/**
+ * Eventos liberados + classificação corrente → ScoredEvent[].
+ *  - scope undefined (B3): comportamento anterior, janela de max_age_days.
+ *  - scope.analysisId (G8): EXCLUSIVAMENTE os eventos daquela análise. Nada de análises antigas.
+ */
+export async function loadScoredEvents(cfg: ScoringConfig, scope?: { analysisId?: number | null }): Promise<ScoredEvent[]> {
+  if (scope && !scope.analysisId) return [];
+  const conds = [eq(economicEvents.status, "released")];
+  if (scope?.analysisId) conds.push(eq(macroInterpretations.analysisId, scope.analysisId));
+  else { const since = new Date(Date.now() - cfg.max_age_days * 86_400_000); conds.push(gte(economicEvents.scheduledAt, since)); }
   const rows = await getDb().select({
     id: economicEvents.id, currency: economicEvents.currency, event: economicEvents.event, impact: economicEvents.impact, scheduledAt: economicEvents.scheduledAt,
-    supersededBy: economicEvents.supersededBy, category: macroInterpretations.category, importance: macroInterpretations.importance,
-    classification: macroInterpretations.classification, confidence: macroInterpretations.confidence,
+    eventKey: economicEvents.eventKey, supersededBy: economicEvents.supersededBy, actual: economicEvents.actual, forecast: economicEvents.forecast, previous: economicEvents.previous,
+    source: economicEvents.source, category: macroInterpretations.category, importance: macroInterpretations.importance,
+    classification: macroInterpretations.classification, confidence: macroInterpretations.confidence, surpriseVsForecast: macroInterpretations.surpriseVsForecast,
+    ruleId: macroInterpretations.subcategory, explanation: macroInterpretations.reasoningSummary,
   }).from(economicEvents)
     .innerJoin(macroInterpretations, and(eq(macroInterpretations.eventId, economicEvents.id), eq(macroInterpretations.isCurrent, true)))
-    .where(and(eq(economicEvents.status, "released"), gte(economicEvents.scheduledAt, since)));
-  return rows.map((r) => ({
-    event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
-    superseded: r.supersededBy !== null, category: r.category as Category, importance: r.importance as Importance,
-    classification: r.classification as Classification, confidence: r.confidence as Confidence,
-  }));
+    .where(and(...conds));
+
+  // Dentro de uma análise, a "supersede" é recalculada só entre seus próprios eventos (mesmo indicador, release mais recente vence).
+  const latestByKey = new Map<string, Date>();
+  if (scope?.analysisId) for (const r of rows) { const cur = latestByKey.get(r.eventKey); if (!cur || r.scheduledAt > cur) latestByKey.set(r.eventKey, r.scheduledAt); }
+
+  return rows.map((r) => {
+    const scoped = !!scope?.analysisId;
+    const superseded = scoped ? r.scheduledAt.getTime() < (latestByKey.get(r.eventKey)?.getTime() ?? 0) : r.supersededBy !== null;
+    return {
+      event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
+      superseded, category: r.category as Category, importance: r.importance as Importance,
+      classification: r.classification as Classification, confidence: r.confidence as Confidence,
+      actual: r.actual, forecast: r.forecast, previous: r.previous, source: r.source,
+      surprise: r.surpriseVsForecast === null ? null : Number(r.surpriseVsForecast),
+      reference_basis: r.forecast ? "FORECAST" : r.previous ? "PREVIOUS" : "NONE",
+      rule_id: r.ruleId, explanation: r.explanation,
+    };
+  });
 }
 
-export interface RecomputeOptions { session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean }
+export interface RecomputeOptions {
+  session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean;
+  /** IDs dos RAW desta análise (para checar que nenhuma evidência veio de outra). */
+  eventIds?: number[];
+  classifiedCount?: number; releasedCount?: number;
+  inputType?: "screenshot" | "structured" | "manual";
+  extraction?: AnalysisAudit["extraction"];
+}
 
-/** Recalcula scores/candidatos/event risk e persiste snapshot. */
-export async function recomputeScores(opts: RecomputeOptions): Promise<Omit<MacroAnalysisResult, "analysis_id" | "meta"> & { meta: { scoring_version: string } }> {
+/** Recalcula scores/candidatos/risco a partir de UMA análise (padrão: a mais recente), aplica a checagem de consistência e persiste. */
+export interface RecomputeResult extends Omit<MacroAnalysisResult, "analysis_id" | "meta" | "analysis_status" | "audit"> {
+  meta: { scoring_version: string }; trusted: boolean; checks: AuditCheck[]; scopeId: number | null; audit: AnalysisAudit;
+}
+
+export async function recomputeScores(opts: RecomputeOptions): Promise<RecomputeResult> {
   const cfg = opts.cfg ?? (await loadScoringConfig());
   const now = opts.now ?? new Date();
   const db = getDb();
-  const [events, prev, pending] = await Promise.all([loadScoredEvents(cfg), latestScores(), loadPendingEvents(now)]);
-  const previousScores = Object.fromEntries(prev.map((p) => [p.currency, p.score])) as Partial<Record<Currency, number>>;
-  const scores = computeCurrencyScores({ events, now, previousScores, cfg });
+  const scopeId = opts.analysisId ?? (await latestAnalysisId());
+  const [events, pending] = await Promise.all([loadScoredEvents(cfg, { analysisId: scopeId }), loadPendingEvents(now, 72, { analysisId: scopeId })]);
+  const scores = computeCurrencyScores({ events, now, cfg });
   const candidates = buildTradeCandidates({ scores, pending, cfg, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
   const eventRisk = G8.map((c) => {
     const s = scores.find((x) => x.currency === c)!;
     const r = eventRiskFor([c], pending, { horizonHours: 12 });
-    return { currency: c, current_bias: s.bias, level: r.level, events: r.events };
+    return { currency: c, current_bias: s.bias ?? "NEUTRAL", level: r.level, events: r.events };
   });
-  const pairsToAvoid: { symbol: string; reason: string }[] = [];
+  // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
+  // REGRA DE OURO: um par que entra aqui NUNCA pode aparecer no Top 3.
+  const avoidMap = new Map<string, string[]>();
+  const addAvoid = (symbol: string, reason: string) => {
+    const cur = avoidMap.get(symbol) ?? [];
+    if (!cur.includes(reason)) cur.push(reason);
+    avoidMap.set(symbol, cur);
+  };
   for (const c of candidates) {
-    if (c.event_risk === "EXTREME") pairsToAvoid.push({ symbol: c.symbol, reason: `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}` });
-    const sShift = scores.find((s) => s.currency === c.strong_currency)?.momentum === "NARRATIVE_SHIFT" || scores.find((s) => s.currency === c.weak_currency)?.momentum === "NARRATIVE_SHIFT";
-    if (sShift) pairsToAvoid.push({ symbol: c.symbol, reason: "Mudança de narrativa recente em uma das pernas — aguardar confirmação" });
+    if (c.eligible === false && c.ineligible_reason) addAvoid(c.symbol, c.ineligible_reason);
+    if (c.event_risk === "EXTREME") addAvoid(c.symbol, `Event risk EXTREME: ${c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event}`).join(" + ")}`);
   }
-  const warnings: string[] = [];
-  const lowSample = scores.filter((s) => s.live_events <= 1).map((s) => s.currency);
-  if (lowSample.length) warnings.push(`Amostra baixa (≤1 dado vivo): ${lowSample.join(", ")} — confiança limitada.`);
-  if (events.length === 0) warnings.push("Nenhum dado realizado interpretado no período — ranking neutro.");
+  const pairsToAvoid = [...avoidMap.entries()].map(([symbol, reasons]) => ({ symbol, reason: reasons.join(" · ") }));
 
-  if (opts.persist !== false) {
+  const evaluated = scores.filter((s) => s.status === "EVALUATED");
+  const insufficient = scores.filter((s) => s.status !== "EVALUATED").map((s) => s.currency);
+  const conflicted = evaluated.filter((s) => s.conflict).map((s) => s.currency);
+  const thin = evaluated.filter((s) => (s.confidence_pct ?? 0) < 40).map((s) => s.currency);
+
+  // Checagem de consistência — decide se o ranking pode ser apresentado.
+  const releasedCount = opts.releasedCount ?? events.length;
+  const classifiedCount = opts.classifiedCount ?? events.length;
+  const extraction = opts.extraction ?? null;
+  const { runConsistencyChecks } = await import("./consistency");
+  const { trusted, checks } = runConsistencyChecks({
+    ranked: scores, analysisEventIds: new Set(opts.eventIds ?? events.map((e) => e.event_id)), releasedCount, classifiedCount,
+    inputType: opts.inputType ?? "manual", extraction,
+  });
+
+  const warnings: string[] = [];
+  if (insufficient.length) warnings.push(`Sem evidência suficiente: ${insufficient.join(", ")} — não recebem score nem posição no ranking (nunca tratadas como 0).`);
+  if (thin.length) warnings.push(`Evidência fraca (confiança < 40%): ${thin.join(", ")} — score atenuado de propósito.`);
+  if (conflicted.length) warnings.push(`Indicadores conflitantes (viés misto): ${conflicted.join(", ")} — confiança reduzida.`);
+  if (events.length === 0) warnings.push("Nenhum evento com direção mensurável nesta análise — nenhum ranking pode ser gerado.");
+  for (const c of checks) if (!c.passed) warnings.push(`Consistência — ${c.label}: ${c.detail}`);
+
+  // Resumo consolidado: fonte ÚNICA para o dashboard. Se a análise não é confiável, não há destaques.
+  const ranked = [...evaluated].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+  const riskOrder: EventRiskLevel[] = ["LOW", "MEDIUM", "HIGH", "EXTREME"];
+  const overallRisk = eventRisk.reduce<EventRiskLevel>((acc, r) => (riskOrder.indexOf(r.level) > riskOrder.indexOf(acc) ? r.level : acc), "LOW");
+  const alerts: string[] = [];
+  for (const r of eventRisk) {
+    if (r.level === "EXTREME" || r.level === "HIGH") {
+      const ev = r.events[0];
+      alerts.push(`${r.currency}: risco ${r.level}${ev ? ` — ${ev.event} em ${ev.minutes_until < 60 ? `${ev.minutes_until}min` : `${(ev.minutes_until / 60).toFixed(1)}h`}` : ""}. O viés pode mudar após o dado.`);
+    }
+  }
+  for (const sc of evaluated) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
+  const presentable = candidates.filter((c) => c.eligible !== false && !avoidMap.has(c.symbol));
+  if (presentable.length === 0 && candidates.length > 0) {
+    warnings.push(`Nenhum par atingiu a confiança mínima (${cfg.candidate_min_confidence_pct}%) — os ${candidates.length} pares com assimetria aparecem apenas em "pares a evitar".`);
+  }
+  const pick = (s: CurrencyScoreView) => ({ currency: s.currency, score: s.score_display ?? 0, confidence_pct: s.confidence_pct ?? 0 });
+  const summary: MacroSummaryView = {
+    strongest: trusted && ranked[0] ? pick(ranked[0]) : null,
+    weakest: trusted && ranked.length > 1 ? pick(ranked[ranked.length - 1]) : null,
+    overall_risk: overallRisk,
+    no_data_currencies: insufficient,
+    conflicted_currencies: conflicted,
+    top_long: trusted ? presentable.filter((c) => c.bias === "LONG").slice(0, 3) : [],
+    top_short: trusted ? presentable.filter((c) => c.bias === "SHORT").slice(0, 3) : [],
+    alerts: trusted ? alerts : [],
+  };
+
+  const audit: AnalysisAudit = {
+    analysis_id: String(scopeId ?? ""), checks, trusted, extraction,
+    scores: scores.map((s) => ({ currency: s.currency, score: s.score, status: s.status, evidence_count: s.live_events, excluded_count: s.excluded_events?.length ?? 0 })),
+  };
+
+  if (opts.persist !== false && scopeId) {
     const scoreDate = now.toISOString().slice(0, 10);
-    await db.insert(currencyScores).values(scores.map((s) => ({
-      analysisId: opts.analysisId ?? null, scoreDate, session: opts.session, computedAt: now, currency: s.currency, score: s.score, scoreRaw: s.score_raw,
-      classification: s.classification, bias: s.bias, confidence: s.confidence, rank: s.rank, previousScore: s.previous_score, scoreDelta: s.score_delta,
-      momentum: s.momentum, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
+    // Só moedas com evidência entram no histórico — nunca um 0 artificial.
+    const persistable = evaluated;
+    if (persistable.length) await db.insert(currencyScores).values(persistable.map((s) => ({
+      analysisId: scopeId, scoreDate, session: opts.session, computedAt: now, currency: s.currency, score: s.score!, scoreRaw: s.score_raw ?? 0,
+      classification: s.classification!, bias: s.bias ?? "NEUTRAL", confidence: s.confidence as Confidence, rank: s.rank ?? 0, previousScore: null, scoreDelta: null,
+      momentum: null, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
     })));
     if (candidates.length) {
       await db.insert(tradeCandidates).values(candidates.map((c) => ({
-        analysisId: opts.analysisId ?? null, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
+        analysisId: scopeId, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
         strongCurrency: c.strong_currency, weakCurrency: c.weak_currency, strongScore: c.strong_score, weakScore: c.weak_score, macroDivergence: c.macro_divergence,
         confidence: c.confidence, priority: c.priority, eventRisk: c.event_risk, eventRiskEvents: c.event_risk_events, reason: c.reason,
       })));
     }
   }
   return {
-    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: scores.map((s) => s.currency), trade_candidates: candidates,
-    pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid, warnings, meta: { scoring_version: cfg.version },
+    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: trusted ? ranked.map((s) => s.currency) : [],
+    trade_candidates: candidates, pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid,
+    summary, warnings, meta: { scoring_version: cfg.version }, trusted, checks, scopeId, audit,
   };
+}
+
+async function latestAnalysisId(): Promise<number | null> {
+  const rows = await getDb().select({ id: macroAnalyses.id }).from(macroAnalyses).orderBy(desc(macroAnalyses.createdAt)).limit(1);
+  return rows[0]?.id ?? null;
+}
+
+export const DETERMINISTIC_PROMPT_VERSION = "deterministic-indicator-table-v1";
+
+/**
+ * Classifica DETERMINISTICAMENTE os eventos liberados desta análise (tabela semântica, sem IA)
+ * e grava uma interpretação corrente por evento. Não usa interpretação antiga.
+ */
+export async function classifyAnalysisEvents(cfg: ScoringConfig, analysisId: number, eventIds: number[]): Promise<{ released: number; classified: number; unknown: number }> {
+  if (!eventIds.length) return { released: 0, classified: 0, unknown: 0 };
+  const db = getDb();
+  const rows = await db.select().from(economicEvents).where(and(inArray(economicEvents.id, eventIds), eq(economicEvents.status, "released"), inArray(economicEvents.currency, [...G8])));
+  if (!rows.length) return { released: 0, classified: 0, unknown: 0 };
+  // Interpretações anteriores destes eventos deixam de valer (nova análise = estado limpo).
+  await db.update(macroInterpretations).set({ isCurrent: false }).where(and(inArray(macroInterpretations.eventId, rows.map((r) => r.id)), eq(macroInterpretations.isCurrent, true)));
+  let unknown = 0;
+  const values: (typeof macroInterpretations.$inferInsert)[] = rows.map((r) => {
+    const c = classifyRelease({ event: r.event, impact: r.impact, actual: r.actual, forecast: r.forecast, previous: r.previous, ocrConfidence: r.ocrConfidence });
+    if (c.direction === "UNKNOWN") unknown++;
+    const importance = IMPACT_TO_IMPORTANCE[r.impact] ?? "LOW";
+    const bc = baseContribution({ category: c.category, importance, classification: c.classification, confidence: c.confidence, impact: r.impact as ScoredEvent["impact"] }, cfg);
+    return {
+      eventId: r.id, analysisId, category: c.category, subcategory: c.rule_id ?? "sem_regra", importance, classification: c.classification,
+      directionValue: bc.direction_value, surpriseVsForecast: c.surprise === null ? null : c.surprise.toFixed(4),
+      changeVsPrevious: c.reference_basis === "PREVIOUS" && c.surprise !== null ? c.surprise.toFixed(4) : null,
+      growthImplication: "regra determinística", inflationImplication: "regra determinística",
+      centralBank: CENTRAL_BANKS[r.currency as Currency] ?? "NONE", centralBankImplication: "regra determinística",
+      pricedIn: null, currencyImplication: c.direction, confidence: c.confidence, reasoningSummary: c.explanation,
+      weight: bc.weight, impactFactor: bc.impact_factor, confidenceFactor: bc.confidence_factor, scoreContribution: bc.base_contribution,
+      scoringVersion: cfg.version, promptVersion: DETERMINISTIC_PROMPT_VERSION, model: "code", isCurrent: true,
+    };
+  });
+  await db.insert(macroInterpretations).values(values);
+  return { released: rows.length, classified: values.length, unknown };
 }
 
 export interface RunAnalysisInput {
@@ -259,9 +371,11 @@ export interface RunAnalysisInput {
   tzOffsetMinutes?: number;
   userEdits?: Record<string, unknown> | null;
   withBrief?: boolean;
+  /** Auditoria da extração (JSON bruto, aceitos/rejeitados, verificação visual). */
+  extraction?: AnalysisAudit["extraction"];
 }
 
-/** Fluxo completo: salvar RAW → interpretar → recomputar → brief → registrar análise. */
+/** Fluxo G8: RAW desta análise → classificação determinística → scores só desta análise → checagem → (IA) explicação. */
 export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAnalysisResult> {
   const db = getDb();
   const cfg = await loadScoringConfig();
@@ -272,22 +386,20 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
   }).returning({ id: macroAnalyses.id });
 
   const ids = await saveRawEvents(input.events, { tzOffsetMinutes: input.tzOffsetMinutes, sourceRef: `analysis:${analysis.id}`, userEdits: input.userEdits ?? null });
-  // Interpretação é tolerante a falha da IA: o RAW já está salvo e o que já foi interpretado é reaproveitado.
-  // Se a IA cair (503/429), devolvemos o ranking com os dados disponíveis + aviso para repetir — nada se perde.
-  let interp: InterpretOutcome;
-  let aiFailure: string | null = null;
-  try { interp = await interpretPendingEvents(cfg, analysis.id); }
-  catch (e) { aiFailure = (e as Error).message; interp = { interpreted: 0, model: null, promptVersion: null, warnings: [] }; }
-  const computed = await recomputeScores({ session: input.session, analysisId: analysis.id, now, cfg });
-  const warnings = [...computed.warnings, ...interp.warnings];
-  if (aiFailure && /pelo banco/.test(aiFailure)) warnings.unshift(`Banco de dados rejeitou as interpretações desta análise — ${aiFailure}`);
-  else if (aiFailure) warnings.unshift(`IA indisponível ao interpretar eventos (${aiFailure.slice(0, 160)}). Os eventos ficaram salvos; aguarde ~1 min e clique em "Confirmar e analisar" de novo — só o que faltou será enviado à IA.`);
+  const cls = await classifyAnalysisEvents(cfg, analysis.id, ids);
+  const computed = await recomputeScores({
+    session: input.session, analysisId: analysis.id, now, cfg, eventIds: ids, releasedCount: cls.released, classifiedCount: cls.classified,
+    inputType: input.inputType, extraction: input.extraction ?? null,
+  });
+  const warnings = [...computed.warnings];
+  if (cls.unknown > 0) warnings.push(`${cls.unknown} evento(s) com direção não mensurável — listados em "excluded_events", não pontuam.`);
 
-  if (input.withBrief !== false && !aiFailure) {
+  // IA apenas para EXPLICAR (brief). Só roda com ranking confiável e dentro do orçamento de tempo.
+  if (input.withBrief !== false && computed.trusted && computed.ranking.length) {
     try {
       const brief = await generateStructured({
-        purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3,
-        user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies, ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
+        purpose: "session_brief", prompt: SESSION_BRIEF, schemaName: "session_brief", temperature: 0.3, timeoutMs: 45_000,
+        user: JSON.stringify({ session: input.session, date: computed.date, currency_scores: computed.currencies.filter((c) => c.status === "EVALUATED"), ranking: computed.ranking, pair_candidates: computed.trade_candidates.slice(0, 6), pending_events: computed.pending_events.slice(0, 12), pairs_to_avoid: computed.pairs_to_avoid }),
       });
       for (const r of brief.data.candidate_reasons) {
         const c = computed.trade_candidates.find((x) => x.symbol === r.symbol);
@@ -296,19 +408,22 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
       for (const p of brief.data.pairs_to_avoid) if (!computed.pairs_to_avoid.some((x) => x.symbol === p.symbol)) computed.pairs_to_avoid.push(p);
       warnings.push(...brief.data.warnings.map((w) => `IA: ${w}`));
       if (brief.data.headline) warnings.unshift(`Brief: ${brief.data.headline} — ${brief.data.narrative}`);
-      // persiste reasons nos candidatos
-      for (const c of computed.trade_candidates) await db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)));
+      await Promise.all(computed.trade_candidates.map((c) => db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)))));
     } catch (e) {
       warnings.push(`Brief da sessão indisponível: ${(e as Error).message}`);
     }
   }
 
+  const { trusted, checks: _checks, scopeId: _scope, audit, meta: _meta, ...rest } = computed;
   const result: MacroAnalysisResult = {
-    analysis_id: String(analysis.id), ...computed,
-    meta: { scoring_version: cfg.version, prompt_version: interp.promptVersion, model: interp.model, events_interpreted: interp.interpreted },
+    ...rest,
+    analysis_id: String(analysis.id),
+    analysis_status: trusted ? "OK" : "ANALISE_INSUFICIENTE",
+    meta: { scoring_version: cfg.version, prompt_version: DETERMINISTIC_PROMPT_VERSION, model: "code", events_interpreted: cls.classified },
     warnings,
+    audit: { ...audit, analysis_id: String(analysis.id) },
   };
-  await db.update(macroAnalyses).set({ resultJson: result, warnings, model: interp.model, promptVersion: interp.promptVersion, eventsCount: ids.length }).where(eq(macroAnalyses.id, analysis.id));
+  await db.update(macroAnalyses).set({ resultJson: result, warnings, model: "code", promptVersion: DETERMINISTIC_PROMPT_VERSION, eventsCount: ids.length }).where(eq(macroAnalyses.id, analysis.id));
   return result;
 }
 
@@ -318,6 +433,12 @@ export async function getLatestAnalysis(session?: Session): Promise<MacroAnalysi
   const r = rows[0];
   if (!r || !r.resultJson || Object.keys(r.resultJson as object).length === 0) return null;
   return r.resultJson as MacroAnalysisResult;
+}
+
+/** Scores da ANÁLISE MAIS RECENTE (nunca um misto de análises). Usado pelo Ranking G8 e pelo histórico de risco. */
+export async function latestScores(): Promise<CurrencyScoreView[]> {
+  const a = await getLatestAnalysis();
+  return a?.currencies ?? [];
 }
 
 export async function getScoreHistory(days: 7 | 30 | 90, currency?: Currency) {
