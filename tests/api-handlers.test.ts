@@ -36,11 +36,11 @@ describe("POST /api/ai/macro/extract (mock provider)", () => {
 });
 
 describe("POST /api/ai/macro/analyze — validação de payload", () => {
-  it("rejeita sessão inválida e moeda fora do G8 sem tocar no banco", async () => {
+  it("rejeita sessão inválida e moeda desconhecida sem tocar no banco (CNY/BRL agora são aceitas e avaliadas à parte)", async () => {
     const { POST } = await import("@/app/api/ai/macro/analyze/route");
     const res = await POST(new Request("http://x", { method: "POST", headers: { "x-app-token": "t0k", "content-type": "application/json" }, body: JSON.stringify({ session: "TOKYO", events: [] }) }));
     expect(res.status).toBe(400);
-    const res2 = await POST(new Request("http://x", { method: "POST", headers: { "x-app-token": "t0k", "content-type": "application/json" }, body: JSON.stringify({ session: "LONDON", events: [{ date: null, time: null, currency: "BRL", event: "Selic", actual: null, forecast: null, previous: null }] }) }));
+    const res2 = await POST(new Request("http://x", { method: "POST", headers: { "x-app-token": "t0k", "content-type": "application/json" }, body: JSON.stringify({ session: "LONDON", events: [{ date: null, time: null, currency: "XXX", event: "Selic", actual: null, forecast: null, previous: null }] }) }));
     expect(res2.status).toBe(400);
   });
 });

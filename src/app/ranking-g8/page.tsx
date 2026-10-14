@@ -64,7 +64,16 @@ export default function RankingG8Page() {
         <div className="space-y-4">
           {latest && <MacroSummary result={latest} />}
           <div className="grid gap-4 xl:grid-cols-3">
-            <Section className="xl:col-span-2" title="Ranking de moedas" sub="Verde = forte · cinza = neutro · vermelho = fraca. Toque numa moeda para ver POR QUE ela recebeu esse score.">{scores ? <G8Ranking scores={scores} /> : <Spinner />}</Section>
+            <Section className="xl:col-span-2" title="Ranking de moedas" sub="Verde = forte · cinza = neutro · vermelho = fraca. Toque numa moeda para ver POR QUE ela recebeu esse score.">
+              {scores ? <G8Ranking scores={scores} /> : <Spinner />}
+              {(latest?.extra_currencies?.length ?? 0) > 0 && (
+                <div className="mt-4 pt-4 border-t border-border">
+                  <p className="text-xs font-bold text-text-primary">Moedas fora do G8 com evidência disponível</p>
+                  <p className="text-[11px] text-text-muted mb-2">Mesmo motor, mostradas à parte — não entram no ranking G8 nem nos pares. Contexto útil para AUD/NZD (CNY) e para o módulo B3 (BRL).</p>
+                  <G8Ranking scores={latest!.extra_currencies!} clean />
+                </div>
+              )}
+            </Section>
             <Section title="Como ler" sub="Evidência, não contagem de eventos">
               <ul className="text-xs text-text-secondary space-y-1.5 list-disc pl-4">
                 <li><b>Poucos eventos ≠ moeda fraca.</b> Sem dado vivo a moeda fica <i>neutra por ausência de evidência</i>, nunca penalizada.</li>

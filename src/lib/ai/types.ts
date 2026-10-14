@@ -183,6 +183,8 @@ export interface MacroAnalysisResult {
   date: string;
   session: Session;
   currencies: CurrencyScoreView[];
+  /** Moedas FORA do G8 (CNY, BRL) com evidência nesta análise — mostradas à parte; não entram no ranking G8 nem nos pares. */
+  extra_currencies?: CurrencyScoreView[];
   ranking: Currency[];
   trade_candidates: TradeCandidateView[];
   pending_events: PendingEventView[];

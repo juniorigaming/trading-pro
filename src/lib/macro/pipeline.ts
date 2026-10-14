@@ -6,7 +6,7 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { currencyScores, economicEvents, macroAnalyses, macroInterpretations, scoringConfig, tradeCandidates } from "@/db/schema";
-import { ALL_CURRENCIES, CENTRAL_BANKS, G8, type AnalysisAudit, type AnyCurrency, type AuditCheck, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
+import { ALL_CURRENCIES, CENTRAL_BANKS, EXTRA_CURRENCIES, G8, type AnalysisAudit, type AnyCurrency, type AuditCheck, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EconomicEventInput, type EventRiskLevel, type Importance, type MacroAnalysisResult, type MacroSummaryView, type PendingEventView, type Session } from "@/lib/ai/types";
 import { generateStructured } from "@/lib/ai/service";
 import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
 import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
@@ -225,6 +225,10 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
   const scopeId = opts.analysisId ?? (await latestAnalysisId());
   const [events, pending] = await Promise.all([loadScoredEvents(cfg, { analysisId: scopeId }), loadPendingEvents(now, 72, { analysisId: scopeId })]);
   const scores = computeCurrencyScores({ events, now, cfg });
+  // Moedas fora do G8 (CNY/BRL) com ATUAL nesta análise: avaliadas pelo MESMO motor, apresentadas à parte.
+  // Nunca "sem dado" quando há dado; nunca dentro do ranking G8 nem dos pares.
+  const extraEvents = events.filter((e) => (EXTRA_CURRENCIES as readonly string[]).includes(e.currency));
+  const extraCurrencies = extraEvents.length ? computeCurrencyScores({ events: extraEvents, now, cfg, currencies: EXTRA_CURRENCIES }).filter((s) => s.status === "EVALUATED") : [];
   const candidates = buildTradeCandidates({ scores, pending, cfg, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
   const eventRisk = G8.map((c) => {
     const s = scores.find((x) => x.currency === c)!;
@@ -266,6 +270,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
   if (weak.length) warnings.push(`Evidência fraca: ${weak.join(", ")} — score pequeno sustentado por um único dado de impacto baixo ou sem forecast; entra no ranking, não gera candidato de par.`);
   if (thin.length) warnings.push(`Evidência fraca (confiança < 40%): ${thin.join(", ")} — score atenuado de propósito.`);
   if (conflicted.length) warnings.push(`Indicadores conflitantes (viés misto): ${conflicted.join(", ")} — confiança reduzida.`);
+  if (extraCurrencies.length) warnings.push(`Fora do G8 com evidência: ${extraCurrencies.map((s) => `${s.currency} ${(s.score_display ?? 0) > 0 ? "+" : ""}${s.score_display}`).join(", ")} — mostradas à parte; não entram no ranking G8 nem nos pares.`);
   if (events.length === 0) warnings.push("Nenhum evento com direção mensurável nesta análise — nenhum ranking pode ser gerado.");
   for (const c of checks) if (!c.passed) warnings.push(`Consistência — ${c.label}: ${c.detail}`);
 
@@ -320,7 +325,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
     }
   }
   return {
-    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, ranking: trusted ? ranked.map((s) => s.currency) : [],
+    date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, extra_currencies: extraCurrencies, ranking: trusted ? ranked.map((s) => s.currency) : [],
     trade_candidates: candidates, pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid,
     summary, warnings, meta: { scoring_version: cfg.version }, trusted, checks, scopeId, audit,
   };
@@ -340,7 +345,8 @@ export const DETERMINISTIC_PROMPT_VERSION = "deterministic-indicator-table-v1";
 export async function classifyAnalysisEvents(cfg: ScoringConfig, analysisId: number, eventIds: number[]): Promise<{ released: number; classified: number; unknown: number }> {
   if (!eventIds.length) return { released: 0, classified: 0, unknown: 0 };
   const db = getDb();
-  const rows = await db.select().from(economicEvents).where(and(inArray(economicEvents.id, eventIds), eq(economicEvents.status, "released"), inArray(economicEvents.currency, [...G8])));
+  // Todas as moedas aceitas (G8 + CNY/BRL): quem tem ATUAL é classificado; o ranking G8 filtra depois.
+  const rows = await db.select().from(economicEvents).where(and(inArray(economicEvents.id, eventIds), eq(economicEvents.status, "released"), inArray(economicEvents.currency, [...ALL_CURRENCIES])));
   if (!rows.length) return { released: 0, classified: 0, unknown: 0 };
   // Interpretações anteriores destes eventos deixam de valer (nova análise = estado limpo).
   await db.update(macroInterpretations).set({ isCurrent: false }).where(and(inArray(macroInterpretations.eventId, rows.map((r) => r.id)), eq(macroInterpretations.isCurrent, true)));

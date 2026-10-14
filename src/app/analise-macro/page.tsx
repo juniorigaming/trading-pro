@@ -11,7 +11,7 @@ import { CandidateList } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
 import { apiFetch, getToken, setToken, uid, type LocalImage } from "@/lib/ai/client";
-import { SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
+import { ALL_CURRENCIES, SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
 import { useRouter } from "next/navigation";
 
 type Step = "upload" | "validate" | "result";
@@ -167,7 +167,7 @@ export default function AnaliseMacroPage() {
 
       {tab === "nova" && step === "validate" && (
         <Section title="2. Validar leitura do OCR" sub={ocrMeta ? `${String(ocrMeta.provider ?? "")} · ${String(ocrMeta.model ?? "")} · ${String(ocrMeta.promptVersion ?? ocrMeta.prompt_version ?? "")} · fuso detectado: ${String(ocrMeta.detectedTimezone ?? "n/d")}${ocrMeta.notes ? ` · ${String(ocrMeta.notes)}` : ""}` : "Entrada manual"} right={<Btn variant="ghost" onClick={reset}>Recomeçar</Btn>}>
-          <OcrValidationTable rows={rows} onChange={setRows} />
+          <OcrValidationTable rows={rows} onChange={setRows} currencies={ALL_CURRENCIES} />
           <div className="flex flex-wrap items-center gap-3 mt-4">
             {extractionRejected > 0 && <p className="text-[11px] text-amber mb-2">{extractionRejected} linha(s) foram rejeitadas pela validação do código (moeda/evento/valor não constam no texto transcrito ou não foram confirmadas na imagem). Veja no modo auditoria após analisar.</p>}
             <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Aguarde, analisando as informações..."><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
@@ -209,6 +209,11 @@ export default function AnaliseMacroPage() {
               <Section title="Ranking G8" sub="Toque numa moeda para ver o que puxou o score"><G8Ranking scores={result.currencies} clean /></Section>
               <Section title="Trade Candidates" sub="Direção macro para buscar setup no SMC/ICT — não é entrada"><CandidateList candidates={result.trade_candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /></Section>
             </div>
+            {(result.extra_currencies?.length ?? 0) > 0 && (
+              <Section title="Moedas fora do G8 com evidência disponível" sub="Avaliadas pelo mesmo motor (surpresa × impacto × confiança). Não entram no ranking G8 nem nos pares — servem de contexto (ex.: CNY para AUD/NZD).">
+                <G8Ranking scores={result.extra_currencies!} clean />
+              </Section>
+            )}
 
             <button onClick={() => setShowEvents((v) => !v)} className="w-full glass-card px-4 py-3 flex items-center justify-between text-sm font-bold text-text-primary">
               <span>Eventos pendentes e risco por moeda <span className="text-text-muted font-normal">({result.pending_events.length} pendentes)</span></span>{showEvents ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

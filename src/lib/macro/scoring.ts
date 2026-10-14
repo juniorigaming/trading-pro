@@ -103,7 +103,8 @@ export function confidenceScore(live: { w: number; dir: number; primary: boolean
   const pct = Math.round(100 * massFactor * agreementFactor * qualityFactor);
   // Conflito relevante: direções opostas com peso material dos dois lados.
   const conflict = directional.length >= 2 && agreement < 0.6;
-  return { pct: Math.max(0, Math.min(99, pct)), agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict };
+  // Moeda avaliada tem SEMPRE confiança entre 1% e 99% (0% é reservado para "sem evidência").
+  return { pct: Math.max(1, Math.min(99, pct)), agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict };
 }
 
 /**

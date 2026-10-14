@@ -66,9 +66,12 @@ describe("direção por código (tabela semântica), não pela IA", () => {
     const s = computeCurrencyScores({ events: [ev({ currency: "GBP", classification: "UNKNOWN", explanation: c.explanation })], now }).find((x) => x.currency === "GBP")!;
     expect(s.score).toBeNull(); expect(s.excluded_events?.length).toBe(1);
   });
-  it("indicador fora da tabela ⇒ UNKNOWN (não usa conhecimento geral)", () => {
+  it("indicador fora da tabela com ATUAL numérico ⇒ regra genérica explícita (confiança LOW, categoria OTHER), nunca conhecimento oculto da IA", () => {
     expect(matchRule("Some Obscure Index")).toBeNull();
-    expect(classifyRelease({ event: "Some Obscure Index", impact: "high", actual: "5", forecast: "3", previous: "4" }).direction).toBe("UNKNOWN");
+    const c = classifyRelease({ event: "Some Obscure Index", impact: "high", actual: "5", forecast: "3", previous: "4" });
+    expect(c.direction).toBe("BULLISH"); expect(c.rule_id).toBe("generic_higher_is_better"); expect(c.confidence).toBe("LOW"); expect(c.category).toBe("OTHER");
+    // sem ATUAL continua UNKNOWN
+    expect(classifyRelease({ event: "Some Obscure Index", impact: "high", actual: null, forecast: "3", previous: "4" }).direction).toBe("UNKNOWN");
   });
   it("sem FORECAST usa PREVIOUS com confiança LOW; sem ambos ⇒ UNKNOWN", () => {
     const withPrev = classifyRelease({ event: "Core CPI m/m", impact: "high", actual: "0.5%", forecast: null, previous: "0.2%" });
