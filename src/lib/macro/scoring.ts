@@ -1,7 +1,14 @@
 /**
- * Motor de score G8 — determinístico, auditável, sem IA.
- * contribution = direction_value × importance_weight × category_multiplier × impact_factor × confidence_factor × decay(idade)
- * score(ccy) = média ponderada das contribuições vivas, arredondada em passos (0.25) e limitada a ±2.
+ * Motor de score G8 (v3-strength) — determinístico, auditável, sem IA.
+ *
+ *  SCORE do evento (−5..+5)  = direção × magnitude(|surpresa|/limiar) × impacto(÷3) × relevância × base(forecast/previous) × checagem do previous
+ *  PESO do evento            = impacto(3/2/1) × relevância × qualidade do dado × força da surpresa × decaimento
+ *  SCORE da moeda (−5..+5)   = média ponderada dos scores dos eventos  (quantidade NÃO encolhe o score)
+ *  CONFIANÇA (1–100)         = 30% qualidade/impacto + 25% magnitude + 20% consistência + 15% quantidade + 10% certeza do dado,
+ *                              limitada por teto conforme nº de evidências (70/80/90/100) e penalizada por conflito.
+ *  SCORE ≠ CONFIANÇA: um evento forte e claro pode dar score alto com confiança moderada; muitos eventos pequenos e
+ *  contraditórios dão score baixo e confiança baixa. Ranking ordena por SCORE (força), nunca por confiança.
+ *  Internamente o score nativo continua em −2..+2 (= apresentação ÷ 2.5) para compatibilidade com pares/B3/histórico.
  */
 import { G8, type AnyCurrency, type Category, type Classification, type Confidence, type Currency, type CurrencyScoreView, type EvidenceLevel, type Importance, type Momentum, type ScoreClassification, type ScoreDriver } from "@/lib/ai/types";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from "./config";
@@ -21,6 +28,8 @@ export interface ScoredEvent {
   actual?: string | null; forecast?: string | null; previous?: string | null;
   surprise?: number | null; reference_basis?: "FORECAST" | "PREVIOUS" | "NONE";
   rule_id?: string | null; explanation?: string; source?: string;
+  /** limiar de ruído do indicador (mesma unidade da surpresa) — permite normalizar a surpresa entre indicadores. */
+  threshold?: number | null;
 }
 
 export interface ContributionBreakdown {
@@ -78,8 +87,115 @@ export function momentumFrom(score: number, previous: number | null, cfg: Scorin
   return "STABLE";
 }
 
+// ---------------------------------------------------------------------------
+// v3-strength: score individual do evento e confiança decomposta
+// ---------------------------------------------------------------------------
+const CLASS_RATIO_FALLBACK: Record<Classification, number> = { VERY_BULLISH: 3, BULLISH: 1, NEUTRAL: 0, BEARISH: 1, VERY_BEARISH: 3, UNKNOWN: 0 };
+
+/** Surpresa normalizada m = |surpresa| / limiar (comparável entre CPI em p.p., payroll em K, M2 em %). Sem limiar ⇒ aproximação pela classificação. */
+export function surpriseRatio(e: Pick<ScoredEvent, "surprise" | "threshold" | "classification">): number {
+  if (e.surprise != null && e.threshold != null && e.threshold > 0 && Number.isFinite(e.surprise)) return Math.abs(e.surprise) / e.threshold;
+  return CLASS_RATIO_FALLBACK[e.classification] ?? 0;
+}
+
+/** Magnitude saturada 0..5: m=1 (no limiar) ≈ 1.7 · m=2 ≈ 2.5 · m=4 ≈ 3.3 · m=10 ≈ 4.2 · m→∞ → 5. Nunca explode por divisão pequena. */
+export function magnitudeFromRatio(m: number, cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): number {
+  if (!Number.isFinite(m) || m <= 0) return 0;
+  return 5 * m / (m + cfg.magnitude_k);
+}
+
+function directionSign(c: Classification): number { return c.includes("BULLISH") ? 1 : c.includes("BEARISH") ? -1 : 0; }
+
+/** Checagem secundária: ATUAL vs PREVIOUS confirma (agrees) ou contradiz (disagrees) a direção medida vs FORECAST. */
+export function previousCheck(e: Pick<ScoredEvent, "actual" | "previous" | "forecast" | "classification">): "agrees" | "disagrees" | null {
+  const dir = directionSign(e.classification);
+  if (dir === 0 || !e.forecast) return null;
+  const a = parseNumeric(e.actual), p = parseNumeric(e.previous), f = parseNumeric(e.forecast);
+  if (a === null || p === null || f === null || a === p) return null;
+  // sentido "acima da referência" ⇒ sinal da regra = dir × sign(actual − forecast)
+  const aboveIs = dir * Math.sign(a - f);
+  if (aboveIs === 0) return null;
+  return Math.sign(a - p) * aboveIs === dir ? "agrees" : "disagrees";
+}
+
+export interface EventScoreBreakdown {
+  direction: number; ratio: number; magnitude: number; impact_norm: number; relevance: number; basis: number; previous_check: "agrees" | "disagrees" | null; previous_adj: number;
+  /** score do evento na escala −5..+5 */
+  score: number;
+  /** peso do evento na média da moeda */
+  weight: number;
+  quality: number;
+}
+
+/** Score individual do evento (−5..+5) + peso. Puro. */
+export function eventScore(e: ScoredEvent, decay = 1, cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): EventScoreBreakdown {
+  const direction = directionSign(e.classification);
+  const ratio = surpriseRatio(e);
+  const magnitude = magnitudeFromRatio(ratio, cfg);
+  const impact_norm = (cfg.impact_weight[e.impact] ?? cfg.impact_weight.unknown) / 3;
+  const relevance = cfg.relevance_factor[e.category] ?? cfg.relevance_factor.OTHER;
+  // Base da surpresa: FORECAST vale 1.0; PREVIOUS (sem forecast) 0.7. Sem surpresa medida (classificação vinda da IA, módulo B3)
+  // a classificação já embute o julgamento ⇒ fator 1.0 (não penalizar duas vezes).
+  const measured = e.surprise != null && e.threshold != null && e.threshold > 0;
+  const basis = measured ? (cfg.basis_factor[e.reference_basis ?? (e.forecast ? "FORECAST" : e.previous ? "PREVIOUS" : "NONE")] ?? 1) : 1;
+  const previous_check = previousCheck(e);
+  const previous_adj = previous_check === "agrees" ? 1.1 : previous_check === "disagrees" ? 0.85 : 1;
+  const score = Math.max(-5, Math.min(5, direction * magnitude * impact_norm * relevance * basis * previous_adj));
+  const quality = cfg.quality_factor[e.confidence] ?? cfg.quality_factor.LOW;
+  const surpriseStrength = 0.5 + 0.5 * Math.min(1, ratio / 2); // evento "em linha" conta, mas com metade do peso
+  const weight = (cfg.impact_weight[e.impact] ?? cfg.impact_weight.unknown) * relevance * quality * surpriseStrength * decay;
+  return { direction, ratio, magnitude, impact_norm, relevance, basis, previous_check, previous_adj, score: Number(score.toFixed(3)), weight: Number(weight.toFixed(4)), quality };
+}
+
+export interface ConfidenceV3 {
+  pct: number; agreement: number; mass: number; conflict: boolean; consistency: "HIGH" | "MIXED" | "LOW" | "NA";
+  breakdown: { quality: number; magnitude: number; consistency: number; quantity: number; certainty: number; raw_pct: number; cap_pct: number; conflict_penalty: boolean };
+}
+
 /**
- * Confiança 0–100 do score de uma moeda. NÃO é probabilidade de alta/baixa:
+ * Confiança 1–100 = robustez da EVIDÊNCIA (não é probabilidade de o preço subir, nem de lucro).
+ *  quality     = impacto (50%) + relevância (30%) + base forecast (20%), média ponderada
+ *  magnitude   = quão longe do ruído as surpresas ficaram (min(1, m/3))
+ *  consistency = concordância de direção entre eventos (1 evento direcional ⇒ 0.5 = "não aplicável")
+ *  quantity    = min(1, n/4)
+ *  certainty   = qualidade do dado (OCR, regra genérica, referência previous)
+ *  teto por nº de evidências: 1 ⇒ 70 · 2 ⇒ 80 · 3 ⇒ 90 · 4+ ⇒ 100. Conflito material ⇒ ×0.8.
+ */
+export function confidenceV3(items: { w: number; s: number; ratio: number; impact_norm: number; relevance: number; basis: number; quality: number }[], cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): ConfidenceV3 {
+  const empty: ConfidenceV3 = { pct: 0, agreement: 0, mass: 0, conflict: false, consistency: "NA", breakdown: { quality: 0, magnitude: 0, consistency: 0, quantity: 0, certainty: 0, raw_pct: 0, cap_pct: 0, conflict_penalty: false } };
+  if (!items.length) return empty;
+  const mass = items.reduce((a, x) => a + x.w, 0);
+  if (mass <= 0) return empty;
+  const wavg = (f: (x: typeof items[number]) => number) => items.reduce((a, x) => a + x.w * f(x), 0) / mass;
+  const quality = wavg((x) => 0.5 * x.impact_norm + 0.3 * x.relevance + 0.2 * (x.basis >= 1 ? 1 : 0.4));
+  const magnitude = wavg((x) => Math.min(1, x.ratio / 3));
+  const directional = items.filter((x) => x.s !== 0);
+  const dirMass = directional.reduce((a, x) => a + x.w, 0);
+  const signed = directional.reduce((a, x) => a + x.w * Math.sign(x.s), 0);
+  const agreement = dirMass > 0 ? Math.abs(signed) / dirMass : 0;
+  let consistencyLabel: ConfidenceV3["consistency"];
+  let consistency: number;
+  if (directional.length <= 1) { consistencyLabel = "NA"; consistency = directional.length === 1 ? 0.5 : 0.4; }
+  else if (agreement >= 0.8) { consistencyLabel = "HIGH"; consistency = 0.7 + 0.3 * agreement; }
+  else if (agreement >= 0.5) { consistencyLabel = "MIXED"; consistency = 0.35 + 0.3 * agreement; }
+  else { consistencyLabel = "LOW"; consistency = 0.15 + 0.3 * agreement; }
+  const quantity = Math.min(1, items.length / 4);
+  const certainty = wavg((x) => x.quality);
+  const cw = cfg.confidence_weights;
+  const raw = 100 * (cw.quality * quality + cw.magnitude * magnitude + cw.consistency * consistency + cw.quantity * quantity + cw.certainty * certainty);
+  const cap = cfg.confidence_caps[Math.min(3, items.length - 1)];
+  const conflict = directional.length >= 2 && agreement < 0.6;
+  let pct = Math.min(cap, raw);
+  if (conflict) pct *= 0.8;
+  pct = Math.max(1, Math.min(100, Math.round(pct)));
+  return {
+    pct, agreement: Number(agreement.toFixed(3)), mass: Number(mass.toFixed(4)), conflict, consistency: consistencyLabel,
+    breakdown: { quality: Number(quality.toFixed(3)), magnitude: Number(magnitude.toFixed(3)), consistency: Number(consistency.toFixed(3)), quantity: Number(quantity.toFixed(3)), certainty: Number(certainty.toFixed(3)), raw_pct: Math.round(raw), cap_pct: cap, conflict_penalty: conflict },
+  };
+}
+
+/**
+ * (legado v2) Confiança 0–100 do score de uma moeda. NÃO é probabilidade de alta/baixa:
  * é a força da EVIDÊNCIA macro disponível. Combina:
  *  - massa de evidência (peso total vivo, não quantidade de eventos);
  *  - concordância de direção entre os eventos (conflito derruba a confiança);
@@ -115,7 +231,7 @@ export function confidenceScore(live: { w: number; dir: number; primary: boolean
  */
 export function evidenceLevel(mass: number, hasPrimary: boolean, cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): EvidenceLevel {
   if (mass >= cfg.evidence_k) return "STRONG";
-  if (hasPrimary || mass >= cfg.evidence_k * 0.35) return "MODERATE";
+  if (hasPrimary || mass >= cfg.evidence_k * 0.4) return "MODERATE";
   return "WEAK";
 }
 
@@ -148,7 +264,7 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
   for (const ccy of (input.currencies ?? G8) as readonly Currency[]) {
     const evs = input.events.filter((e) => e.currency === ccy && !e.superseded && e.impact !== "holiday");
     let num = 0, den = 0;
-    const live: { w: number; dir: number; primary: boolean }[] = [];
+    const live: { w: number; s: number; ratio: number; impact_norm: number; relevance: number; basis: number; quality: number; primary: boolean }[] = [];
     const drivers: ScoreDriver[] = [];
     const excluded: { event_id: number; event: string; reason: string }[] = [];
     for (const e of evs) {
@@ -156,29 +272,32 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
         excluded.push({ event_id: e.event_id, event: e.event, reason: e.explanation ?? "Direção não mensurável — não pontua." });
         continue;
       }
-      const bc = baseContribution(e, cfg);
       const ageDays = (input.now.getTime() - e.released_at.getTime()) / 86_400_000;
       const decay = decayFactor(e.category, ageDays, cfg);
-      const w = bc.weight * bc.impact_factor * bc.confidence_factor * decay;
+      const es = eventScore(e, decay, cfg);
+      const w = es.weight;
       // Divulgação MEDIDA (direção conhecida) é evidência — fraca, mas evidência. O piso de peso só poda eventos que já
-      // perderam metade do valor por idade; um dado de impacto baixo divulgado HOJE entra com seu peso pequeno e
-      // o evidenceFactor cuida de atenuar o score (nunca some do ranking por ser "pequeno").
+      // perderam metade do valor por idade; um dado de impacto baixo divulgado HOJE entra com seu peso e conta.
       if (w < cfg.min_weight_alive && decay < 0.5) { excluded.push({ event_id: e.event_id, event: e.event, reason: "Peso abaixo do mínimo (evento antigo demais para contar)." }); continue; }
-      num += bc.direction_value * w;
+      num += es.score * w;
       den += w;
       const primary = (e.importance === "HIGH" || e.importance === "MEDIUM_HIGH") && e.impact !== "low";
-      live.push({ w, dir: bc.direction_value, primary });
+      live.push({ w, s: es.score, ratio: es.ratio, impact_norm: es.impact_norm, relevance: es.relevance, basis: es.basis, quality: es.quality, primary });
       drivers.push({
         event_id: e.event_id, event: e.event, classification: e.classification, weight: Number(w.toFixed(4)),
         released_at: e.released_at.toISOString(),
-        contribution: Number((bc.direction_value * w).toFixed(4)),
+        // contribuição = score do evento × fatia do peso (preenchida após o loop, quando a massa total é conhecida)
+        contribution: es.score * w,
         category: e.category, importance: e.importance, primary,
-        direction: e.classification.includes("BULLISH") ? "BULLISH" : e.classification.includes("BEARISH") ? "BEARISH" : "NEUTRAL",
+        direction: es.direction > 0 ? "BULLISH" : es.direction < 0 ? "BEARISH" : "NEUTRAL",
         actual: e.actual ?? null, forecast: e.forecast ?? null, previous: e.previous ?? null,
         surprise: e.surprise ?? null, reference_basis: e.reference_basis ?? "NONE",
         rule_id: e.rule_id ?? null, explanation: e.explanation, source: e.source,
+        threshold: e.threshold ?? null, surprise_ratio: Number(es.ratio.toFixed(2)), event_score: es.score, previous_check: es.previous_check,
       });
     }
+    // contribuição real de cada evento para a média (soma = score da moeda em −5..+5)
+    for (const d of drivers) d.contribution = den > 0 ? Number(((d.contribution ?? 0) / den).toFixed(3)) : 0;
     drivers.sort((a, b) => Math.abs(b.contribution ?? 0) - Math.abs(a.contribution ?? 0) || b.weight - a.weight);
     const noEvidence = live.length === 0;
     const base = { currency: ccy, live_events: live.length, drivers: drivers.slice(0, 12), excluded_events: excluded };
@@ -191,13 +310,12 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
       });
       continue;
     }
-    // Média ponderada das direções (−2..+2) ATENUADA pela massa de evidência.
-    // Sem isso, uma única leitura secundária produziria força plena.
-    const weighted = num / den;
-    const evidenceFactor = den / (den + cfg.evidence_k);
-    const raw = weighted * evidenceFactor;
+    // SCORE da moeda = média ponderada dos scores dos eventos (−5..+5). Quantidade de eventos NÃO encolhe o score:
+    // um único dado relevante com surpresa grande pode dar score alto — a escassez reduz a CONFIANÇA, não a força.
+    const display = num / den;
+    const raw = display / cfg.display_scale; // escala nativa −2..+2 (compatibilidade: pares, B3, histórico)
     const score = Math.max(-cfg.clamp, Math.min(cfg.clamp, roundToStep(raw, cfg.score_step)));
-    const conf = confidenceScore(live);
+    const conf = confidenceV3(live, cfg);
     const evidence_level = evidenceLevel(conf.mass, live.some((x) => x.primary), cfg);
     out.push({
       ...base, status: "EVALUATED", score, score_raw: Number(raw.toFixed(4)), evidence_level,
@@ -205,14 +323,14 @@ export function computeCurrencyScores(input: ComputeInput): CurrencyScoreView[] 
       classification: classifyScore(score, cfg), bias: biasFromScore(score, cfg),
       confidence: confidenceEnum(conf.pct), confidence_pct: conf.pct,
       evidence_mass: conf.mass, agreement: conf.agreement, conflict: conf.conflict, no_data: false,
-      // Apresentação usa o valor contínuo (antes do arredondamento em passos): evidência fraca aparece como +0.2 / −0.1,
-      // em vez de ser "engolida" pelo passo de 0.25. Classificação/viés/pares continuam usando o score em passos.
-      score_display: Number((raw * cfg.display_scale).toFixed(2)), rank: 0,
+      consistency: conf.consistency, confidence_breakdown: conf.breakdown,
+      score_display: Number(display.toFixed(2)), rank: 0,
     });
   }
   // ranking: APENAS moedas com evidência. Sem evidência não recebe posição artificial.
   const evaluated = out.filter((c) => c.status === "EVALUATED");
-  evaluated.sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || (b.score_raw ?? 0) - (a.score_raw ?? 0) || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
+  // Ordenação = FORÇA macro (score), da mais forte à mais fraca. Confiança só desempata score idêntico; nunca reordena.
+  evaluated.sort((a, b) => (b.score_raw ?? 0) - (a.score_raw ?? 0) || (b.confidence_pct ?? 0) - (a.confidence_pct ?? 0) || a.currency.localeCompare(b.currency));
   evaluated.forEach((c, i) => (c.rank = i + 1));
   const insufficient = out.filter((c) => c.status !== "EVALUATED").sort((a, b) => a.currency.localeCompare(b.currency));
   return [...evaluated, ...insufficient];

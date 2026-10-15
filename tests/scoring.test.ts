@@ -20,10 +20,10 @@ describe("scoring engine", () => {
     expect(decayFactor("CENTRAL_BANK", 14)).toBeCloseTo(0.5, 5);
     expect(decayFactor("GROWTH", 100)).toBe(0);
   });
-  it("classifica e arredonda em passos de 0.25 dentro de ±2", () => {
-    expect(roundToStep(1.13, 0.25)).toBe(1.25);
-    expect(classifyScore(1.5)).toBe("VERY_STRONG"); expect(classifyScore(1.0)).toBe("STRONG"); expect(classifyScore(0.5)).toBe("MODERATELY_STRONG");
-    expect(classifyScore(0)).toBe("NEUTRAL"); expect(classifyScore(-0.5)).toBe("MODERATELY_WEAK"); expect(classifyScore(-1)).toBe("WEAK"); expect(classifyScore(-2)).toBe("VERY_WEAK");
+  it("classifica (v3: ±0.60/±0.30/±0.10 nativo = ±1.50/±0.75/±0.25 na escala −5..+5) e arredonda em passos", () => {
+    expect(roundToStep(1.13, 0.25)).toBe(1.25); expect(roundToStep(0.63, 0.05)).toBe(0.65);
+    expect(classifyScore(0.6)).toBe("VERY_STRONG"); expect(classifyScore(0.3)).toBe("STRONG"); expect(classifyScore(0.1)).toBe("MODERATELY_STRONG");
+    expect(classifyScore(0)).toBe("NEUTRAL"); expect(classifyScore(0.05)).toBe("NEUTRAL"); expect(classifyScore(-0.1)).toBe("MODERATELY_WEAK"); expect(classifyScore(-0.3)).toBe("WEAK"); expect(classifyScore(-0.6)).toBe("VERY_WEAK");
   });
   it("gera ranking 1–8 com scores coerentes e delta/momentum", () => {
     const events: ScoredEvent[] = [
@@ -32,7 +32,7 @@ describe("scoring engine", () => {
       ev({ currency: "AUD", classification: "BEARISH" }), ev({ currency: "AUD", classification: "VERY_BEARISH", category: "CENTRAL_BANK" }),
       ev({ currency: "JPY", classification: "NEUTRAL" }),
     ];
-    const scores = computeCurrencyScores({ events, now, previousScores: { USD: 0.5, AUD: 1.0 } });
+    const scores = computeCurrencyScores({ events, now, previousScores: { USD: 0.3, AUD: 1.0 } });
     expect(scores).toHaveLength(8);
     const evaluated = scores.filter((s) => s.status === "EVALUATED");
     expect(evaluated.map((s) => s.rank)).toEqual(evaluated.map((_, i) => i + 1));
@@ -40,9 +40,10 @@ describe("scoring engine", () => {
     expect(evaluated[0].currency).toBe("EUR");
     expect(evaluated[evaluated.length - 1].currency).toBe("AUD");
     const usd = scores.find((s) => s.currency === "USD")!;
-    expect(usd.score).toBe(0.75); /* recalibrado: 1.0 era valor obsoleto já no HEAD */ expect(usd.score_delta).toBe(0.25); expect(usd.momentum).toBe("STRENGTHENING");
+    // v3: sem surpresa/limiar, BULLISH ≈ 1 limiar ⇒ magnitude 1.67 (−5..+5) ⇒ 0.667 nativo ⇒ passo 0.05 = 0.65
+    expect(usd.score).toBe(0.65); expect(usd.score_delta).toBeCloseTo(0.35, 5); expect(usd.momentum).toBe("STRENGTHENING");
     const aud = scores.find((s) => s.currency === "AUD")!;
-    expect(aud.score).toBeLessThan(-1); expect(aud.momentum).toBe("NARRATIVE_SHIFT");
+    expect(aud.score).toBeLessThan(-0.6); expect(aud.classification).toBe("VERY_WEAK"); expect(aud.momentum).toBe("NARRATIVE_SHIFT");
     for (const s of scores) if (s.score !== null) { expect(s.score).toBeLessThanOrEqual(2); expect(s.score).toBeGreaterThanOrEqual(-2); }
   });
   it("ignora eventos superseded e feriados", () => {

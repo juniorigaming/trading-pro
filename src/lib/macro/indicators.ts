@@ -167,7 +167,12 @@ export function classifyRelease(input: {
   if (ref === null) return unknown(rule, "Sem FORECAST nem PREVIOUS — impossível medir surpresa.", { category: rule.category, actual });
 
   const surprise = actual - ref;
-  const threshold = rule.threshold_kind === "relative" ? rule.threshold * Math.max(Math.abs(ref), 1) : rule.threshold;
+  // Limiar de ruído do indicador. Valores monetários/contagens grandes (K/M/B) usam limiar RELATIVO (2% da referência) —
+  // nunca um limiar absoluto pensado para p.p. — e a referência nunca é menor que 1 na divisão (sem explosão por forecast ≈ 0).
+  const bigNumber = Math.abs(ref) >= 1000 || Math.abs(actual) >= 1000;
+  const threshold = rule.threshold_kind === "relative" ? rule.threshold * Math.max(Math.abs(ref), 1)
+    : bigNumber && rule.threshold < 1000 ? 0.02 * Math.max(Math.abs(ref), Math.abs(actual) * 0.25, 1)
+    : rule.threshold;
   // Confiança: limitada pela regra, rebaixada se a leitura OCR é incerta ou se a referência é o PREVIOUS.
   let confidence: Confidence = basis === "FORECAST" ? rule.reliability : "LOW";
   if ((input.ocrConfidence ?? 1) < 0.8) confidence = "LOW";

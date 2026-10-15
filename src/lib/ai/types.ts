@@ -99,6 +99,13 @@ export interface ScoreDriver {
   rule_id?: string | null;
   explanation?: string;
   source?: string;
+  /** v3: limiar de ruído do indicador e surpresa normalizada (|surpresa| / limiar) — base comparável entre indicadores. */
+  threshold?: number | null;
+  surprise_ratio?: number | null;
+  /** v3: score INDIVIDUAL do evento na escala −5..+5 (direção × magnitude × impacto × relevância × base). */
+  event_score?: number | null;
+  /** v3: confirmação do PREVIOUS — "agrees" (atual vs previous no mesmo sentido), "disagrees" ou null. */
+  previous_check?: "agrees" | "disagrees" | null;
 }
 
 export interface CurrencyScoreView {
@@ -131,6 +138,10 @@ export interface CurrencyScoreView {
   no_data?: boolean;
   /** score × display_scale (−5..+5); null se sem evidência. */
   score_display: number | null;
+  /** v3: rótulo de consistência entre os eventos da moeda (n/a com um único evento direcional). */
+  consistency?: "HIGH" | "MIXED" | "LOW" | "NA";
+  /** v3: decomposição da confiança (0–1 cada) + teto aplicado — auditável. */
+  confidence_breakdown?: { quality: number; magnitude: number; consistency: number; quantity: number; certainty: number; raw_pct: number; cap_pct: number; conflict_penalty: boolean };
 }
 
 export interface TradeCandidateView {

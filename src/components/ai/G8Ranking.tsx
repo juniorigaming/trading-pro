@@ -6,7 +6,10 @@ import { Badge, DeltaArrow, classColor, scoreBg } from "./ui";
 import { confColor, fmt5 } from "./MacroSummary";
 
 const MOMENTUM_LABEL: Record<string, string> = { STRENGTHENING: "fortalecendo", WEAKENING: "enfraquecendo", STABLE: "estável", NARRATIVE_SHIFT: "mudança de narrativa" };
-const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Muito forte", STRONG: "Forte", MODERATELY_STRONG: "Mod. forte", NEUTRAL: "Neutro", MODERATELY_WEAK: "Mod. fraca", WEAK: "Fraca", VERY_WEAK: "Muito fraca" };
+/** Viés pelo score agregado (escala −5..+5): ≥ +1.50 forte positivo · +0.75 positivo · +0.25 levemente positivo · neutro · … · ≤ −1.50 forte negativo. */
+export const CLASS_LABEL: Record<string, string> = { VERY_STRONG: "Forte positivo", STRONG: "Positivo", MODERATELY_STRONG: "Levemente positivo", NEUTRAL: "Neutro", MODERATELY_WEAK: "Levemente negativo", WEAK: "Negativo", VERY_WEAK: "Forte negativo" };
+const CONSISTENCY_LABEL: Record<string, string> = { HIGH: "alta", MIXED: "mista", LOW: "baixa", NA: "não aplicável (1 evento)" };
+const PREV_LABEL: Record<string, string> = { agrees: "previous confirma", disagrees: "previous contradiz" };
 const DIR_LABEL: Record<string, string> = { BULLISH: "alta da moeda", BEARISH: "baixa da moeda", NEUTRAL: "neutro (medido)" };
 const EVIDENCE_LABEL: Record<string, string> = { WEAK: "evidência fraca", MODERATE: "evidência moderada", STRONG: "evidência sólida" };
 const EVIDENCE_TITLE: Record<string, string> = {
@@ -35,9 +38,12 @@ function DriverDetail({ d }: { d: ScoreDriver }) {
       </div>
       <p className="text-[10px] text-text-muted tabular-nums">
         {d.actual ? `atual ${d.actual}` : "atual —"}{ref && <> · {ref} {d.reference_basis === "FORECAST" ? d.forecast : d.previous}</>}
-        {d.surprise != null && <> · surpresa {d.surprise > 0 ? "+" : ""}{d.surprise.toFixed(2)}</>}
+        {d.surprise != null && <> · surpresa {d.surprise > 0 ? "+" : ""}{Math.abs(d.surprise) >= 1000 ? d.surprise.toExponential(2) : d.surprise.toFixed(2)}</>}
+        {d.surprise_ratio != null && <> · {d.surprise_ratio.toFixed(1)}× o ruído</>}
+        {d.event_score != null && <> · <b className="text-text-secondary">score do evento {d.event_score > 0 ? "+" : ""}{d.event_score.toFixed(2)}</b></>}
+        {d.previous_check && <> · {PREV_LABEL[d.previous_check]}</>}
         {" · "}{d.direction ? DIR_LABEL[d.direction] : d.classification}
-        {" · peso "}{d.weight.toFixed(3)}{" · "}{new Date(d.released_at).toLocaleDateString("pt-BR")}
+        {" · peso "}{d.weight.toFixed(2)}{" · "}{new Date(d.released_at).toLocaleDateString("pt-BR")}
       </p>
       {d.explanation && <p className="text-[10px] text-text-muted leading-snug">{d.explanation}</p>}
     </li>
@@ -84,11 +90,22 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
             </button>
             {open === s.currency && (
               <div className="px-3 pb-3 text-xs">
-                <p className="text-text-muted mb-1">
-                  Score <b className="text-text-secondary">{fmt5(v)}</b> · confiança {pct ?? "—"}% · massa de evidência {(s.evidence_mass ?? 0).toFixed(2)} ({s.evidence_level ? EVIDENCE_LABEL[s.evidence_level] : "—"}) · concordância {Math.round((s.agreement ?? 0) * 100)}%
-                  {s.conflict && <span className="text-amber font-semibold"> · viés misto (indicadores contraditórios)</span>}
-                </p>
-                <p className="text-[10px] text-text-muted mb-2">Por que este score: soma ponderada das contribuições medidas (surpresa × importância × impacto × confiança × atualidade), atenuada quando a evidência é escassa.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-3 gap-y-1 mb-2 text-[11px]">
+                  <div><p className="text-[9px] uppercase tracking-wider text-text-muted">Score</p><p className={`font-extrabold tabular-nums ${v > 0 ? "text-emerald" : v < 0 ? "text-rose" : "text-text-secondary"}`}>{fmt5(v)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wider text-text-muted">Viés</p><p className={`font-bold ${classColor(s.classification ?? "NEUTRAL")}`}>{s.classification ? CLASS_LABEL[s.classification] : "—"}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wider text-text-muted">Confiança da evidência</p><p className={`font-bold tabular-nums ${pct != null ? confColor(pct) : ""}`}>{pct ?? "—"}%</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wider text-text-muted">Evidências</p><p className="font-bold tabular-nums text-text-secondary">{s.live_events} ({s.evidence_level ? EVIDENCE_LABEL[s.evidence_level].replace("evidência ", "") : "—"})</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wider text-text-muted">Consistência</p><p className={`font-bold ${s.conflict ? "text-amber" : "text-text-secondary"}`}>{CONSISTENCY_LABEL[s.consistency ?? (s.live_events <= 1 ? "NA" : s.conflict ? "LOW" : "HIGH")]}{s.conflict && " · indicadores contraditórios"}</p></div>
+                </div>
+                {s.confidence_breakdown && (
+                  <p className="text-[10px] text-text-muted mb-1 tabular-nums">
+                    Confiança = 30% qualidade/impacto ({Math.round(s.confidence_breakdown.quality * 100)}) + 25% magnitude ({Math.round(s.confidence_breakdown.magnitude * 100)}) + 20% consistência ({Math.round(s.confidence_breakdown.consistency * 100)}) + 15% quantidade ({Math.round(s.confidence_breakdown.quantity * 100)}) + 10% certeza do dado ({Math.round(s.confidence_breakdown.certainty * 100)}) = {s.confidence_breakdown.raw_pct}%
+                    {s.confidence_breakdown.raw_pct > s.confidence_breakdown.cap_pct && <> → teto de {s.confidence_breakdown.cap_pct}% com {s.live_events} evidência{s.live_events > 1 ? "s" : ""}</>}
+                    {s.confidence_breakdown.conflict_penalty && <> → ×0.8 por conflito</>}
+                  </p>
+                )}
+                <p className="text-[10px] text-text-muted mb-2">Score = média ponderada dos scores dos eventos (direção × magnitude da surpresa normalizada × impacto × relevância). Confiança = robustez da evidência — <b>não</b> é probabilidade de o preço subir nem de lucro.</p>
+                <p className="text-[10px] font-semibold text-text-muted mb-1">Motivos:</p>
                 <ul className="space-y-1">{s.drivers.map((d) => <DriverDetail key={d.event_id} d={d} />)}</ul>
                 {s.excluded_events && s.excluded_events.length > 0 && (
                   <div className="mt-2">

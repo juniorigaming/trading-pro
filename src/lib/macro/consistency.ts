@@ -66,6 +66,24 @@ export function runConsistencyChecks(i: ConsistencyInput): { trusted: boolean; c
     add("visual_verification", "Eventos conferidos visualmente no screenshot", true, "Não se aplica (entrada manual/estruturada).");
   }
 
+  // 8. Ranking ordenado por FORÇA (score), nunca por confiança.
+  const ranked = [...evaluated].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+  const misordered = ranked.some((c, k) => k > 0 && (c.score_raw ?? 0) > (ranked[k - 1].score_raw ?? 0) + 1e-9);
+  add("ranking_by_strength", "Ranking ordenado por força macro (score), não por confiança", !misordered,
+    misordered ? "Há moeda com score maior abaixo de outra com score menor." : `${ranked.length} moeda(s) em ordem decrescente de score.`);
+
+  // 9. Confiança sempre 1–100 e limitada pelo teto por quantidade de evidências (1 ⇒ 70 · 2 ⇒ 80 · 3 ⇒ 90).
+  const caps = [70, 80, 90, 100];
+  const badConf = evaluated.filter((c) => c.confidence_pct === null || c.confidence_pct < 1 || c.confidence_pct > 100 || c.confidence_pct > caps[Math.min(3, Math.max(1, c.live_events) - 1)]);
+  add("confidence_bounds", "Confiança entre 1% e 100% e dentro do teto por nº de evidências", badConf.length === 0,
+    badConf.length === 0 ? "Nenhuma confiança fora da faixa; nenhum evento único com confiança artificialmente alta." : `Fora da faixa: ${badConf.map((c) => `${c.currency} ${c.confidence_pct}% (${c.live_events} ev.)`).join(", ")}`);
+
+  // 10. Conflito entre indicadores reduz a confiança (penalidade registrada na decomposição).
+  const conflicted = evaluated.filter((c) => c.conflict);
+  const unpenalized = conflicted.filter((c) => c.confidence_breakdown && !c.confidence_breakdown.conflict_penalty);
+  add("conflict_reduces_confidence", "Eventos conflitantes reduzem a confiança", unpenalized.length === 0,
+    conflicted.length === 0 ? "Nenhuma moeda com indicadores conflitantes." : unpenalized.length === 0 ? `${conflicted.length} moeda(s) com conflito penalizadas.` : `Sem penalidade: ${unpenalized.map((c) => c.currency).join(", ")}`);
+
   const trusted = checks.every((c) => c.passed);
   return { trusted, checks };
 }

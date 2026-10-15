@@ -192,7 +192,11 @@ export async function loadScoredEvents(cfg: ScoringConfig, scope?: { analysisId?
   return rows.map((r) => {
     const scoped = !!scope?.analysisId;
     const superseded = scoped ? r.scheduledAt.getTime() < (latestByKey.get(r.eventKey)?.getTime() ?? 0) : r.supersededBy !== null;
+    // Limiar de ruído do indicador (não persistido): recalculado pela MESMA regra determinística — permite normalizar a surpresa.
+    const det = r.actual ? classifyRelease({ event: r.event, impact: r.impact, actual: r.actual, forecast: r.forecast, previous: r.previous }) : null;
+    const threshold = det && det.direction !== "UNKNOWN" ? det.threshold : null;
     return {
+      threshold,
       event_id: r.id, currency: r.currency as AnyCurrency, event: r.event, impact: r.impact as ScoredEvent["impact"], released_at: r.scheduledAt,
       superseded, category: r.category as Category, importance: r.importance as Importance,
       classification: r.classification as Classification, confidence: r.confidence as Confidence,

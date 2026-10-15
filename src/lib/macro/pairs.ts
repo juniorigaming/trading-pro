@@ -112,6 +112,8 @@ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[
     const confPct = pairConfidencePct(b, q, rel, risk.level, cfg);
     const invalidation = risk.events.slice(0, 4).map((e) => `${e.currency} ${e.event} (${e.minutes_until < 60 ? `${e.minutes_until}min` : `${(e.minutes_until / 60).toFixed(1)}h`})`);
     const mixed = b.conflict || q.conflict;
+    // Evidência FRACA numa das pernas (um dado de impacto baixo / sem forecast) entra no ranking, mas não sustenta um par.
+    const weakLeg = b.evidence_level === "WEAK" ? b.currency : q.evidence_level === "WEAK" ? q.currency : null;
     list.push({
       symbol: p.symbol, bias, strong_currency: strong.currency, weak_currency: weak.currency,
       strong_score: strong.score, weak_score: weak.score, macro_divergence: Math.abs(div),
@@ -121,11 +123,12 @@ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[
       base_currency: p.base, quote_currency: p.quote,
       base_score: toDisplayScale(b.score, cfg), quote_score: toDisplayScale(q.score, cfg),
       invalidation_events: invalidation,
-      eligible: confPct >= cfg.candidate_min_confidence_pct && risk.level !== "EXTREME" && !mixed,
+      eligible: confPct >= cfg.candidate_min_confidence_pct && risk.level !== "EXTREME" && !mixed && !weakLeg,
       ineligible_reason:
         confPct < cfg.candidate_min_confidence_pct ? `Confiança ${confPct}% abaixo do mínimo de ${cfg.candidate_min_confidence_pct}% — evidência macro insuficiente`
         : risk.level === "EXTREME" ? "Event risk EXTREME — evento de alto impacto iminente"
         : mixed ? "Indicadores conflitantes (viés misto) numa das pernas"
+        : weakLeg ? `Evidência fraca em ${weakLeg} (um único dado secundário) — não sustenta par`
         : undefined,
       reason: `${p.base} ${fmt(toDisplayScale(b.score, cfg))} vs ${p.quote} ${fmt(toDisplayScale(q.score, cfg))} → força relativa ${fmt(rel)} (${divergenceLabel(rel, cfg)}), confiança ${confPct}%.` +
         `${mixed ? " Há indicadores conflitantes numa das pernas (viés misto) — convicção reduzida." : ""}` +

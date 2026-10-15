@@ -80,7 +80,9 @@ export default function RankingG8Page() {
                 <li><b>Toda moeda com dado divulgado entra no ranking.</b> Um único dado de impacto baixo (ou sem forecast) gera score pequeno com a etiqueta <i>evidência fraca</i> — aparece, mas não vira candidato de par.</li>
                 <li>Escala <b>−5..+5</b>: força da EVIDÊNCIA macro — <b>não</b> é probabilidade de o preço subir.</li>
                 <li>Força relativa do par = base − cotada. Bandas: &lt;0.5 neutro · 0.6–1.0 muito fraco · 1.1–1.5 moderado · 1.6–2.5 forte · 2.6+ muito forte.</li>
-                <li><b>Confiança 0–100%</b> cai com evidência escassa, indicadores conflitantes e evento de alto impacto iminente.</li>
+                <li><b>Score ≠ confiança.</b> Score = força/direção do viés (média ponderada dos eventos; um único dado relevante com surpresa grande pode dar score alto). Confiança 1–100% = robustez da evidência: 30% qualidade/impacto, 25% magnitude, 20% consistência, 15% quantidade, 10% certeza do dado; teto de 70/80/90% com 1/2/3 evidências.</li>
+                <li><b>Viés:</b> ≥ +1.50 forte positivo · +0.75 positivo · +0.25 levemente positivo · neutro · −0.25 levemente negativo · −0.75 negativo · ≤ −1.50 forte negativo.</li>
+                <li><b>Ordem do ranking = força macro</b> (score), nunca o percentual de confiança. Conflito entre indicadores reduz a confiança, não some com o dado.</li>
                 <li><b>NARRATIVE_SHIFT</b>: reavalie posições abertas naquela moeda.</li>
                 <li>Macro define <i>o que procurar</i> no SMC/ICT; <b>nunca</b> é gatilho de entrada.</li>
               </ul>

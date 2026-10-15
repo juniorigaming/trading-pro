@@ -39,10 +39,25 @@ export interface ScoringConfig {
   pair_bands: { neutral: number; weak: number; moderate: number; strong: number };
   /** Confiança mínima (0–100) para um par ser APRESENTÁVEL como candidato. Abaixo disso ele só aparece em 'pares a evitar'. */
   candidate_min_confidence_pct: number;
+  // ---------------- v3-strength: score do EVENTO (−5..+5) separado da CONFIANÇA (1–100) ----------------
+  /** Peso do impacto do calendário (FF): high 3 · medium 2 · low 1. Também normalizado (÷3) para atenuar o score do evento. */
+  impact_weight: Record<"high" | "medium" | "low" | "holiday" | "unknown", number>;
+  /** Relevância econômica por categoria (MUITO ALTA 1.0 · ALTA 0.8 · MÉDIA 0.6 · BAIXA 0.4). */
+  relevance_factor: Record<Category, number>;
+  /** Saturação da magnitude: mag = 5 · m / (m + magnitude_k), onde m = |surpresa| / limiar do indicador. */
+  magnitude_k: number;
+  /** Surpresa medida contra PREVIOUS (sem forecast) vale menos do que surpresa contra FORECAST. */
+  basis_factor: { FORECAST: number; PREVIOUS: number; NONE: number };
+  /** Qualidade do dado (OCR incerto, regra genérica, referência previous) no peso e na confiança. */
+  quality_factor: Record<Confidence, number>;
+  /** Tetos de confiança por quantidade de evidências válidas: [1 evento, 2, 3, 4+]. São MÁXIMOS, não valores automáticos. */
+  confidence_caps: [number, number, number, number];
+  /** Pesos dos componentes da confiança (somam 1). */
+  confidence_weights: { quality: number; magnitude: number; consistency: number; quantity: number; certainty: number };
 }
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
-  version: "v2-evidence",
+  version: "v3-strength",
   direction_value: { VERY_BULLISH: 2, BULLISH: 1, NEUTRAL: 0, BEARISH: -1, VERY_BEARISH: -2, UNKNOWN: 0 },
   importance_weight: { HIGH: 1.0, MEDIUM_HIGH: 0.7, MEDIUM: 0.45, LOW: 0.25 },
   category_multiplier: {
@@ -54,18 +69,35 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   half_life_days: { default: 5, CENTRAL_BANK: 14, INFLATION: 10, EMPLOYMENT: 8 },
   min_weight_alive: 0.06,
   max_age_days: 45,
-  score_step: 0.25,
+  // Passo fino (0.05 nativo = 0.125 na escala −5..+5): o score em passos é o que classifica/pareia; a UI mostra o contínuo.
+  score_step: 0.05,
   clamp: 2.0,
-  classification_thresholds: { very_strong: 1.5, strong: 1.0, moderately_strong: 0.5 },
+  // Escala NATIVA (−2..+2). Na escala de apresentação (×2.5): ±1.50 forte · ±0.75 positivo/negativo · ±0.25 leve · dentro = neutro.
+  classification_thresholds: { very_strong: 0.6, strong: 0.3, moderately_strong: 0.1 },
   narrative_shift_min_delta: 1.0,
   momentum_min_delta: 0.25,
   // 0.4 nativo = 1.0 na escala de apresentação (−5..+5): abaixo disso o par é considerado neutro.
   pair_min_divergence: 0.4,
   event_risk_hours: { intraday: 4, overnight: 14 },
-  evidence_k: 0.55,
+  // v3: evidence_k NÃO atenua mais o score (quantidade reduz a CONFIANÇA, não o score). Define só o rótulo de nível de evidência.
+  evidence_k: 3.0,
   display_scale: 2.5,
   pair_bands: { neutral: 0.5, weak: 1.0, moderate: 1.5, strong: 2.5 },
   candidate_min_confidence_pct: 40,
+  // Calibrado a partir da sugestão 3/2/1: impacto baixo em 0.75 evita que UM dado secundário com surpresa enorme (ex.: WPI)
+  // supere quatro dados de inflação de alto impacto. Normalizado ÷3 no score do evento (high = 1.0 · medium = 0.6 · low = 0.25).
+  impact_weight: { high: 3, medium: 1.8, low: 0.75, holiday: 0, unknown: 1.2 },
+  relevance_factor: {
+    CENTRAL_BANK: 1.0, INFLATION: 1.0, EMPLOYMENT: 1.0, GROWTH: 1.0,
+    ACTIVITY: 0.8, CONSUMPTION: 0.8, HOUSING: 0.8,
+    TRADE: 0.6, FISCAL: 0.6, SENTIMENT: 0.6,
+    OTHER: 0.4,
+  },
+  magnitude_k: 2,
+  basis_factor: { FORECAST: 1.0, PREVIOUS: 0.7, NONE: 0.5 },
+  quality_factor: { HIGH: 1.0, MEDIUM: 0.85, LOW: 0.6 },
+  confidence_caps: [70, 80, 90, 100],
+  confidence_weights: { quality: 0.30, magnitude: 0.25, consistency: 0.20, quantity: 0.15, certainty: 0.10 },
 };
 
 /** Mescla config vinda do banco com os defaults (campos ausentes caem no default). */
@@ -83,5 +115,10 @@ export function mergeScoringConfig(partial: Partial<ScoringConfig> | null | unde
     classification_thresholds: { ...d.classification_thresholds, ...(partial.classification_thresholds ?? {}) },
     event_risk_hours: { ...d.event_risk_hours, ...(partial.event_risk_hours ?? {}) },
     pair_bands: { ...d.pair_bands, ...(partial.pair_bands ?? {}) },
+    impact_weight: { ...d.impact_weight, ...(partial.impact_weight ?? {}) },
+    relevance_factor: { ...d.relevance_factor, ...(partial.relevance_factor ?? {}) },
+    basis_factor: { ...d.basis_factor, ...(partial.basis_factor ?? {}) },
+    quality_factor: { ...d.quality_factor, ...(partial.quality_factor ?? {}) },
+    confidence_weights: { ...d.confidence_weights, ...(partial.confidence_weights ?? {}) },
   };
 }

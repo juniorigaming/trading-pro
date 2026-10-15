@@ -54,8 +54,12 @@ describe("evidência fraca entra no ranking (print FF 12/10)", () => {
     // ordem: GBP (único positivo) em 1º; JPY (2 misses, PPI forte) abaixo de AUD (1 dado sem forecast, peso mínimo)
     const ranked = scores.filter((s) => s.status === "EVALUATED").sort((a, b) => a.rank! - b.rank!).map((s) => s.currency);
     expect(ranked[0]).toBe("GBP"); expect(ranked).toEqual(["GBP", "AUD", "JPY"]);
-    // etiquetas honestas: tudo evidência fraca, confiança baixa — nada vira candidato de par
-    for (const c of ["GBP", "JPY", "AUD"]) { expect(by[c].evidence_level).toBe("WEAK"); expect(by[c].confidence_pct!).toBeLessThan(40); }
+    // etiquetas honestas: tudo evidência fraca; confiança limitada pelo teto de 1–2 evidências (nunca 1–5% artificial, nunca acima do teto)
+    for (const c of ["GBP", "JPY", "AUD"]) { expect(by[c].evidence_level).toBe("WEAK"); expect(by[c].confidence_pct!).toBeGreaterThanOrEqual(10); expect(by[c].confidence_pct!).toBeLessThanOrEqual(80); }
+    // AUD (NAB sem forecast, referência previous) tem certeza do dado e qualidade menores que GBP (BRC com forecast)
+    expect(by.AUD.confidence_breakdown!.certainty).toBeLessThan(by.GBP.confidence_breakdown!.certainty);
+    expect(by.AUD.confidence_breakdown!.quality).toBeLessThan(by.GBP.confidence_breakdown!.quality);
+    expect(by.GBP.consistency).toBe("NA");
     console.log(scores.filter((s) => s.status === "EVALUATED").map((s) => `${s.rank} ${s.currency} ${s.score_display} (score ${s.score}, conf ${s.confidence_pct}%, massa ${s.evidence_mass}, ${s.evidence_level})`).join("\n"));
   });
   it("evento antigo com peso ínfimo continua sendo podado (min_weight_alive só para idade)", () => {
@@ -63,7 +67,7 @@ describe("evidência fraca entra no ranking (print FF 12/10)", () => {
     const s = computeCurrencyScores({ events: old, now }).find((x) => x.currency === "GBP")!;
     expect(s.status).toBe("INSUFFICIENT_EVIDENCE"); expect(s.excluded_events?.[0].reason).toMatch(/antigo/);
   });
-  it("evidenceLevel: massa alta = STRONG, primário = MODERATE, resto = WEAK", () => {
-    expect(evidenceLevel(0.6, false)).toBe("STRONG"); expect(evidenceLevel(0.1, true)).toBe("MODERATE"); expect(evidenceLevel(0.25, false)).toBe("MODERATE"); expect(evidenceLevel(0.05, false)).toBe("WEAK");
+  it("evidenceLevel (massa v3: impacto 3/1.8/0.75 × relevância × qualidade): massa alta = STRONG, primário = MODERATE, resto = WEAK", () => {
+    expect(evidenceLevel(3.2, false)).toBe("STRONG"); expect(evidenceLevel(0.5, true)).toBe("MODERATE"); expect(evidenceLevel(1.5, false)).toBe("MODERATE"); expect(evidenceLevel(0.75, false)).toBe("WEAK");
   });
 });
