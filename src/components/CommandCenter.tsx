@@ -7,6 +7,7 @@ import { getCurrentSession } from "@/lib/session";
 import { calculateMetrics } from "@/lib/calculations";
 import { formatCurrency, formatNumber, formatR } from "@/lib/utils";
 import { usePortfolio } from "@/components/PortfolioProvider";
+import TodayPanel from "@/components/TodayPanel";
 
 export default function CommandCenter() {
   const { trades } = useTrades();
@@ -18,7 +19,6 @@ export default function CommandCenter() {
   const session = useMemo(() => getCurrentSession(config, meta.id), [config, meta.id]);
 
   const riskLimit = (config?.riskPercent || 2.5) * (account.equity / 100) * (config?.maxTradesPerDay || 5);
-  const weeklyLimit = (config?.weeklyRiskLimit || 5) * (account.equity / 100);
   const riskUsedPct = riskLimit > 0 ? (account.riskUsedToday / riskLimit) * 100 : 0;
   const openRiskPct = account.equity > 0 ? (account.openRisk / account.equity) * 100 : 0;
   const accountState = metrics.currentLossSequence >= 3 ? "Em alerta" : metrics.netResult >= 0 ? "Positiva" : "Negativa";
@@ -94,6 +94,8 @@ export default function CommandCenter() {
           <p className="text-[10px] text-text-muted">max {formatNumber(config?.maxOpenRisk || 2)}%</p>
         </div>
       </div>
+
+      <TodayPanel trades={trades} account={account} config={config} portfolio={meta.id} />
 
       <div className="flex flex-wrap gap-3">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary">

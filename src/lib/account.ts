@@ -1,6 +1,7 @@
 import { Trade } from "./types";
 import { Config } from "./types";
 import { buildCalendarData } from "./calculations";
+import { dayOrdinal, localTodayKey, tradeDayKey } from "./date";
 
 export interface AccountState {
   initialBalance: number;
@@ -49,19 +50,19 @@ export function computeAccount(trades: Trade[], config: Config | null): AccountS
 
   // Daily / weekly PnL and R.
   const calendar = buildCalendarData(trades);
-  const todayKey = new Date().toISOString().split("T")[0];
+  const todayKey = localTodayKey();
   const today = calendar.get(todayKey);
   const pnlDaily = today?.result ?? 0;
   const rDaily = today?.resultR ?? 0;
 
   // Weekly: last 7 days.
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
+  const todayOrdinal = dayOrdinal(todayKey);
+  const weekStartOrdinal = todayOrdinal - 6; // hoje + 6 dias anteriores (sem deslocamento UTC)
   let pnlWeekly = 0;
   let rWeekly = 0;
   trades.forEach((t) => {
-    const d = new Date(t.date);
-    if (d >= weekAgo) {
+    const ordinal = dayOrdinal(tradeDayKey(t.date));
+    if (ordinal >= weekStartOrdinal && ordinal <= todayOrdinal) {
       pnlWeekly += t.resultAmount || 0;
       rWeekly += t.resultR || 0;
     }
@@ -73,9 +74,8 @@ export function computeAccount(trades: Trade[], config: Config | null): AccountS
     .reduce((s, t) => s + (t.riskAmount || 0), 0);
 
   // Risk used today = sum of risk on today's executed trades.
-  const riskUsedToday = today
-    ? trades.filter((t) => new Date(t.date).toISOString().split("T")[0] === todayKey).reduce((s, t) => s + (t.riskAmount || 0), 0)
-    : 0;
+  const executedToday = trades.filter((t) => tradeDayKey(t.date) === todayKey && (t.status == null || t.status === "OPEN" || t.status === "CLOSED"));
+  const riskUsedToday = executedToday.reduce((s, t) => s + (t.riskAmount || 0), 0);
 
   const dailyRiskLimit = (riskPercent / 100) * equity * maxTradesPerDay;
   const riskRemaining = Math.max(0, dailyRiskLimit - riskUsedToday);
@@ -97,7 +97,7 @@ export function computeAccount(trades: Trade[], config: Config | null): AccountS
     });
   const currentDrawdown = peak > 0 ? ((peak - runningCap) / peak) * 100 : 0;
 
-  const tradesToday = trades.filter((t) => new Date(t.date).toISOString().split("T")[0] === todayKey).length;
+  const tradesToday = executedToday.length;
 
   return {
     initialBalance,

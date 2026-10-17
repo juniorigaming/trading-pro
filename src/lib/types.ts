@@ -57,6 +57,8 @@ export interface Trade {
   whatWentWrong?: string;
   lesson?: string;
   notes?: string;
+  /** Etiquetas livres usadas pelo Edge Explorer (ex.: FOMO, notícia, A+ setup). */
+  tags?: string[];
   screenshotUrl?: string;
   preTradeScreenshotUrl?: string;
   postEntryScreenshotUrl?: string;

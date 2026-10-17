@@ -9,6 +9,39 @@ import { setDisplayCurrency } from "@/lib/utils";
 const CACHE_TTL = 30 * 1000; // 30 segundos
 const tradesCache = new Map<PortfolioId, { data: Trade[]; time: number }>();
 const configCache = new Map<PortfolioId, { data: Config; time: number }>();
+const PAGE_SIZE = 5000;
+const MAX_TRADE_ROWS = 250_000;
+// Evita 3 componentes dispararem o mesmo fetch ao montar o Dashboard.
+const tradesInFlight = new Map<PortfolioId, Promise<Trade[]>>();
+const tradeEpoch = new Map<PortfolioId, number>();
+let tradeFetchSequence = 0;
+
+async function fetchAllTrades(portfolio: PortfolioId): Promise<Trade[]> {
+  const existing = tradesInFlight.get(portfolio);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const all: Trade[] = [];
+    for (let offset = 0; offset <= MAX_TRADE_ROWS; offset += PAGE_SIZE) {
+      const requestLimit = Math.min(PAGE_SIZE, MAX_TRADE_ROWS - all.length + 1);
+      const res = await fetch(`/api/trades?portfolio=${portfolio}&limit=${requestLimit}&offset=${offset}&t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.details || errData.error || `Erro ${res.status}`);
+      }
+      const page = (await res.json()) as Trade[];
+      all.push(...page);
+      if (all.length > MAX_TRADE_ROWS) throw new Error(`O histórico excede ${MAX_TRADE_ROWS.toLocaleString("pt-BR")} operações; exporte/arquive períodos antigos para continuar.`);
+      if (page.length < requestLimit) return all;
+    }
+    // Não trunca silenciosamente: mensagem explica o teto seguro do cliente.
+    throw new Error(`O histórico excede ${MAX_TRADE_ROWS.toLocaleString("pt-BR")} operações; exporte/arquive períodos antigos para continuar.`);
+  })();
+
+  tradesInFlight.set(portfolio, request);
+  try { return await request; }
+  finally { if (tradesInFlight.get(portfolio) === request) tradesInFlight.delete(portfolio); }
+}
 
 function cachedTrades(p: PortfolioId): Trade[] | null {
   const c = tradesCache.get(p);
@@ -18,6 +51,8 @@ function cachedTrades(p: PortfolioId): Trade[] | null {
 /** Limpa todos os caches (após importação ou exclusão em massa). */
 export function invalidateTradeCaches() {
   tradesCache.clear();
+  tradesInFlight.clear();
+  for (const p of ["FOREX", "B3", "CRYPTO"] as const) tradeEpoch.set(p, (tradeEpoch.get(p) ?? 0) + 1);
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tradesChanged"));
 }
 
@@ -31,13 +66,13 @@ export function useTrades(override?: PortfolioId) {
   const [trades, setTrades] = useState<Trade[]>(() => cachedTrades(portfolio) ?? []);
   const [loading, setLoading] = useState(!cachedTrades(portfolio));
   const [error, setError] = useState<string | null>(null);
-  const fetchingRef = useRef<PortfolioId | null>(null);
+  const fetchingRef = useRef<{ portfolio: PortfolioId; id: number } | null>(null);
   const portfolioRef = useRef(portfolio);
   useEffect(() => { portfolioRef.current = portfolio; }, [portfolio]);
 
   const refetch = useCallback(async (force = false) => {
     const p = portfolio;
-    if (fetchingRef.current === p && !force) return;
+    if (fetchingRef.current?.portfolio === p && !force) return;
 
     const cached = cachedTrades(p);
     if (!force && cached) {
@@ -46,15 +81,16 @@ export function useTrades(override?: PortfolioId) {
       return;
     }
 
-    fetchingRef.current = p;
+    const requestId = ++tradeFetchSequence;
+    const requestEpoch = tradeEpoch.get(p) ?? 0;
+    fetchingRef.current = { portfolio: p, id: requestId };
     setLoading(true);
     try {
-      const res = await fetch(`/api/trades?portfolio=${p}&limit=200&t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.details || errData.error || `Erro ${res.status}`);
-      }
-      const data = (await res.json()) as Trade[];
+      // Busca em páginas, sem limite silencioso de 200/500 operações; requisições simultâneas por
+      // componente compartilham a mesma promise/cache da carteira.
+      const data = await fetchAllTrades(p);
+      // Uma importação/exclusão pode invalidar um fetch já em andamento.
+      if ((tradeEpoch.get(p) ?? 0) !== requestEpoch) return;
       tradesCache.set(p, { data, time: Date.now() });
       // só aplica se o usuário ainda está na mesma carteira (evita misturar respostas atrasadas)
       if (portfolioRef.current === p) {
@@ -63,10 +99,12 @@ export function useTrades(override?: PortfolioId) {
       }
     } catch (e) {
       console.error("[useTrades] error:", e);
-      if (portfolioRef.current === p) setError(e instanceof Error ? e.message : "Erro desconhecido");
+      if ((tradeEpoch.get(p) ?? 0) === requestEpoch && portfolioRef.current === p) setError(e instanceof Error ? e.message : "Erro desconhecido");
     } finally {
-      if (fetchingRef.current === p) fetchingRef.current = null;
-      if (portfolioRef.current === p) setLoading(false);
+      if (fetchingRef.current?.id === requestId) {
+        fetchingRef.current = null;
+        if (portfolioRef.current === p && (tradeEpoch.get(p) ?? 0) === requestEpoch) setLoading(false);
+      }
     }
   }, [portfolio]);
 

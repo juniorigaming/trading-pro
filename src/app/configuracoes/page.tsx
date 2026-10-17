@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Save, CheckCircle2, Palette, Wallet, ShieldAlert, Beaker, FileUp, Globe2, Landmark, Bitcoin } from "lucide-react";
+import { Save, CheckCircle2, Palette, Wallet, ShieldAlert, Beaker, FileUp, Globe2, Landmark, Bitcoin, DatabaseBackup, Lock, LockOpen, Download } from "lucide-react";
 import { useConfig, useTrades } from "@/hooks/useTradeData";
 import { useTheme } from "@/components/ThemeProvider";
 import { usePortfolio } from "@/components/PortfolioProvider";
@@ -145,6 +145,21 @@ export default function ConfiguracoesPage() {
         <BrokerConnect />
       </section>
 
+      {/* BACKUP + SEGURANÇA */}
+      <section className="glass-card-strong p-5 md:p-6 mb-6" id="backup">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-8 h-8 rounded-lg bg-accent-soft flex items-center justify-center"><DatabaseBackup size={16} className="text-accent" /></div>
+          <h2 className="text-base font-bold text-text-primary">Backup e Segurança</h2>
+        </div>
+        <p className="text-[11px] text-text-muted mb-4">Exporta todas as operações e configurações das 3 carteiras, sem limite de linhas. O JSON inclui screenshots (pode ficar grande); o CSV abre no Excel/Sheets e não inclui imagens.</p>
+        <div className="flex flex-wrap gap-2 mb-5">
+          <a href="/api/export?format=json&portfolio=ALL" download className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white text-xs font-bold rounded-xl shadow-lg shadow-accent/20 transition active:scale-[0.98]"><Download size={14} /> Backup completo (JSON)</a>
+          <a href="/api/export?format=csv&portfolio=ALL" download className="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border text-text-primary text-xs font-bold rounded-xl transition hover:bg-surface-3"><Download size={14} /> Planilha de todas (CSV)</a>
+          <a href={`/api/export?format=csv&portfolio=${selected}`} download className="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border text-text-primary text-xs font-bold rounded-xl transition hover:bg-surface-3"><Download size={14} /> CSV só {meta.label}</a>
+        </div>
+        <SecurityStatus />
+      </section>
+
       {/* APARÊNCIA */}
       <section className="glass-card-strong p-5 md:p-6 mb-6">
         <div className="flex items-center gap-2 mb-5">
@@ -156,7 +171,7 @@ export default function ConfiguracoesPage() {
       </section>
 
       {/* RISCO AVANÇADO */}
-      <section className="glass-card-strong p-5 md:p-6 mb-6">
+      <section className="glass-card-strong p-5 md:p-6 mb-6 scroll-mt-6" id="risk-engine">
         <div className="flex items-center gap-2 mb-4">
           <div className="w-8 h-8 rounded-lg bg-accent-soft flex items-center justify-center"><ShieldAlert size={16} className="text-accent" /></div>
           <h2 className="text-base font-bold text-text-primary">Limites de Risco (Risk Engine) · {meta.label}</h2>
@@ -215,6 +230,40 @@ export default function ConfiguracoesPage() {
         <button onClick={handleSave} disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent text-white text-sm font-bold rounded-xl shadow-lg shadow-accent/20 transition active:scale-[0.98] disabled:opacity-60">
           {saved ? <CheckCircle2 size={16} /> : <Save size={16} />} {saving ? "Salvando..." : saved ? "Salvo!" : `Salvar Configurações (${meta.label})`}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** Mostra se a proteção por senha (APP_PASSWORD) está ativa e como ligar. */
+function SecurityStatus() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetch("/api/auth/status", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { enabled?: boolean }) => setEnabled(Boolean(d?.enabled)))
+      .catch(() => setEnabled(null));
+  }, []);
+  if (enabled === null) return null;
+  if (enabled) {
+    return (
+      <div className="flex items-start gap-3 p-3 rounded-xl border border-emerald/30 bg-emerald/5">
+        <Lock size={16} className="text-emerald mt-0.5 shrink-0" />
+        <div>
+          <p className="text-xs font-bold text-emerald">Proteção por senha ativa</p>
+          <p className="text-[11px] text-text-muted mt-0.5">Todas as páginas e a API exigem login. Para trocar a senha, edite o secret <code className="font-mono">APP_PASSWORD</code> no painel da Cloudflare — isso encerra todas as sessões abertas.</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-xl border border-amber/40 bg-amber/5">
+      <LockOpen size={16} className="text-amber mt-0.5 shrink-0" />
+      <div>
+        <p className="text-xs font-bold text-amber">Site aberto — qualquer pessoa com o link vê e apaga seus dados</p>
+        <p className="text-[11px] text-text-muted mt-0.5">
+          Para proteger (grátis): Cloudflare → Workers &amp; Pages → trading-pro → Settings → Variables and Secrets → Add → tipo <b>Secret</b>, nome <code className="font-mono">APP_PASSWORD</code>, valor = sua senha → Deploy. O login aparece automaticamente.
+        </p>
       </div>
     </div>
   );

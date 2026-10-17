@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save, ImagePlus, X, AlertCircle } from "lucide-react";
 import { Trade, Config } from "@/lib/types";
+import { localTodayKey, tradeDayKey } from "@/lib/date";
 import { useConfig, useTrades } from "@/hooks/useTradeData";
 import { usePortfolio } from "@/components/PortfolioProvider";
 import { PORTFOLIOS, PORTFOLIO_META, type PortfolioId } from "@/lib/portfolio";
@@ -90,6 +91,7 @@ export interface TradeFormValues {
   whatWentWrong: string;
   lesson: string;
   notes: string;
+  tags: string;
   screenshotUrl: string;
   [key: string]: unknown;
 }
@@ -97,7 +99,7 @@ export interface TradeFormValues {
 function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRiskPercent: number): TradeFormValues {
   const now = new Date();
   return {
-    date: t ? new Date(t.date).toISOString().split("T")[0] : now.toISOString().split("T")[0],
+    date: t ? tradeDayKey(t.date) : localTodayKey(now),
     time: t?.time || now.toTimeString().slice(0, 5),
     asset: t?.asset || "EURUSD",
     portfolio: (t?.portfolio as PortfolioId) || "FOREX",
@@ -132,6 +134,7 @@ function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRis
     whatWentWrong: t?.whatWentWrong || "",
     lesson: t?.lesson || "",
     notes: t?.notes || "",
+    tags: (t?.tags || []).join(", "),
     screenshotUrl: t?.screenshotUrl || "",
     bos: t?.bos ?? false,
     choch: t?.choch ?? false,
@@ -361,6 +364,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         whatWentWrong: form.whatWentWrong,
         lesson: form.lesson,
         notes: form.notes,
+        tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean).slice(0, 20),
         screenshotUrl: form.screenshotUrl || null,
         setupScore: sScore,
         executionScore: eScore,
@@ -617,6 +621,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               <textarea placeholder="O que devo repetir?" value={form.lesson} onChange={(e) => update("lesson", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
               <textarea placeholder="Erros cometidos" value={form.mistakes} onChange={(e) => update("mistakes", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
             </div>
+            <input placeholder="Ex.: A+ setup, notícia, FOMO (separadas por vírgula)" value={form.tags} onChange={(e) => update("tags", e.target.value)} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition mb-3" aria-label="Etiquetas" />
             <textarea placeholder="Observações" value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={2} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
           </div>
         )}

@@ -32,8 +32,11 @@ export async function GET(request: Request) {
   const start = Date.now();
   try {
     const url = new URL(request.url);
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "100"), 500);
-    const offset = parseInt(url.searchParams.get("offset") || "0");
+    // Teto alto: o dashboard precisa do histórico inteiro para métricas corretas (antes: 500 → anos de trades sumiam)
+    const requestedLimit = Number.parseInt(url.searchParams.get("limit") || "100", 10);
+    const requestedOffset = Number.parseInt(url.searchParams.get("offset") || "0", 10);
+    const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 100, 1), 5000);
+    const offset = Math.max(0, Number.isFinite(requestedOffset) ? requestedOffset : 0);
     const rawPortfolio = (url.searchParams.get("portfolio") || "FOREX").toUpperCase();
     const all = rawPortfolio === "ALL";
     const portfolio: PortfolioId = normalizePortfolio(rawPortfolio);
@@ -53,7 +56,7 @@ export async function GET(request: Request) {
     try {
       const where = all ? eq(trades.isDemo, false) : and(eq(trades.isDemo, false), eq(trades.portfolio, portfolio));
       rows = await db
-        .select({ ...BASE_COLUMNS, portfolio: trades.portfolio, externalId: trades.externalId, notes: trades.notes })
+        .select({ ...BASE_COLUMNS, portfolio: trades.portfolio, externalId: trades.externalId, notes: trades.notes, tags: trades.tags })
         .from(trades)
         .where(where)
         .orderBy(desc(trades.date), desc(trades.id))

@@ -51,7 +51,9 @@ function DriverDetail({ d }: { d: ScoreDriver }) {
 }
 
 /** compact = sem expandir drivers (widgets). clean = só rank, moeda, barra, score e seta (página de análise). */
-export default function G8Ranking({ scores, compact = false, clean = false }: { scores: CurrencyScoreView[]; compact?: boolean; clean?: boolean }) {
+export interface MiniScorePoint { currency: string; score: number | null; computed_at: string; date?: string }
+
+export default function G8Ranking({ scores, compact = false, clean = false, history = [] }: { scores: CurrencyScoreView[]; compact?: boolean; clean?: boolean; history?: MiniScorePoint[] }) {
   const [open, setOpen] = useState<string | null>(null);
   const evaluated = scores.filter((s): s is EvaluatedCurrency => s.status === "EVALUATED" && s.score !== null).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
   const insufficient = scores.filter((s) => s.status !== "EVALUATED").sort((a, b) => a.currency.localeCompare(b.currency));
@@ -65,6 +67,7 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
             <button onClick={() => !compact && setOpen(open === s.currency ? null : s.currency)} className="w-full flex items-center gap-3 px-3 py-2 text-left">
               <span className="w-6 text-xs font-extrabold text-text-muted">#{s.rank}</span>
               <span className="w-10 text-sm font-extrabold text-text-primary">{s.currency}</span>
+              {!compact && history.length > 0 && <MiniSparkline points={history.filter((p) => p.currency === s.currency).slice(-12).map((p) => p.score).filter((v): v is number => v != null)} />}
               <div className="flex-1 h-2 rounded-full bg-surface-3 relative overflow-hidden">
                 <div className="absolute left-1/2 top-0 bottom-0 w-px bg-border" />
                 <div className={`absolute top-0 bottom-0 ${v >= 0 ? "bg-emerald" : "bg-rose"}`} style={{ left: v >= 0 ? "50%" : `${50 + (v / 5) * 50}%`, width: `${(Math.abs(v) / 5) * 50}%` }} />
@@ -134,4 +137,14 @@ export default function G8Ranking({ scores, compact = false, clean = false }: { 
       {evaluated.length === 0 && insufficient.length === 0 && <p className="text-xs text-text-muted">Nenhum score calculado ainda. Rode uma Análise Macro.</p>}
     </div>
   );
+}
+
+function MiniSparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return <span className="hidden sm:inline text-[9px] text-text-muted w-12 text-center">—</span>;
+  const min = points.reduce((a, b) => Math.min(a, b), 0);
+  const max = points.reduce((a, b) => Math.max(a, b), 0);
+  const span = Math.max(0.01, max - min);
+  const coords = points.map((v, i) => `${(i / (points.length - 1)) * 48},${14 - ((v - min) / span) * 12}`).join(" ");
+  const rising = points[points.length - 1] >= points[0];
+  return <svg className="hidden sm:inline w-12 h-4 shrink-0" viewBox="0 0 48 16" role="img" aria-label={`Momentum ${rising ? "positivo" : "negativo"}`}><polyline points={coords} fill="none" stroke={rising ? "#10b981" : "#f43f5e"} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }

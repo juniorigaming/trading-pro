@@ -1,4 +1,5 @@
 import { Trade } from "./types";
+import { tradeDayKey, weekdayIndex } from "./date";
 
 export interface GroupStat {
   key: string;
@@ -51,7 +52,7 @@ export function groupBySetup(trades: Trade[]) {
 const WEEKDAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 
 export function groupByWeekday(trades: Trade[]) {
-  const stats = buildGroupStats(trades, (t) => WEEKDAYS[new Date(t.date).getUTCDay()]);
+  const stats = buildGroupStats(trades, (t) => WEEKDAYS[weekdayIndex(tradeDayKey(t.date))]);
   return WEEKDAYS.filter((d) => d !== "Domingo" && d !== "Sábado").map(
     (day) => stats.find((s) => s.key === day) || { key: day, trades: 0, wins: 0, losses: 0, breakEven: 0, winRate: 0, result: 0, avgR: 0, profitFactor: 0 }
   );
@@ -78,7 +79,8 @@ export interface DayResult {
 export function buildCalendarData(trades: Trade[]): Map<string, DayResult> {
   const map = new Map<string, DayResult>();
   trades.forEach((t) => {
-    const key = new Date(t.date).toISOString().split("T")[0];
+    const key = tradeDayKey(t.date);
+    if (!key) return;
     if (!map.has(key)) {
       map.set(key, { date: key, result: 0, trades: 0, wins: 0, losses: 0, breakEven: 0, resultR: 0, assets: [], avgExecutionScore: null, planAdherence: null });
     }
@@ -109,8 +111,8 @@ export function rDistribution(trades: Trade[]) {
   return {
     avg: values.reduce((a, b) => a + b, 0) / values.length,
     median,
-    max: Math.max(...values),
-    min: Math.min(...values),
+    max: values.reduce((m, v) => Math.max(m, v), -Infinity),
+    min: values.reduce((m, v) => Math.min(m, v), Infinity),
     total: values.reduce((a, b) => a + b, 0),
   };
 }
@@ -196,8 +198,8 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
   const avgLossR = lossCount > 0 ? losses.reduce((s, t) => s + Math.abs(t.resultR || 0), 0) / lossCount : 0;
   const avgR = total > 0 ? trades.reduce((s, t) => s + (t.resultR || 0), 0) / total : 0;
 
-  const maxWin = Math.max(0, ...trades.map((t) => t.resultAmount || 0));
-  const maxLoss = Math.min(0, ...trades.map((t) => t.resultAmount || 0));
+  const maxWin = trades.reduce((m, t) => Math.max(m, t.resultAmount || 0), 0);
+  const maxLoss = trades.reduce((m, t) => Math.min(m, t.resultAmount || 0), 0);
   const maxLossAbs = Math.abs(maxLoss);
 
   // Sequence calculation
@@ -257,7 +259,8 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
   // Per day
   const dayResults = new Map<string, number>();
   trades.forEach((t) => {
-    const d = new Date(t.date).toISOString().split("T")[0];
+    const d = tradeDayKey(t.date);
+    if (!d) return;
     dayResults.set(d, (dayResults.get(d) || 0) + (t.resultAmount || 0));
   });
   const tradesPerDay = trades.length / Math.max(dayResults.size, 1);

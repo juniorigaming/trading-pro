@@ -1,6 +1,7 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { localTodayKey } from "@/lib/date";
 import { ArrowLeft, Save, Check, X, Target } from "lucide-react";
 import Link from "next/link";
 import { setupScore } from "@/lib/scores";
@@ -23,7 +24,7 @@ const READINESS_ITEMS: { key: string; label: string }[] = [
 export default function NovoPlanejamentoPage() {
   const router = useRouter();
   const [form, setForm] = useState({
-    date: new Date().toISOString().split("T")[0],
+    date: localTodayKey(),
     time: new Date().toTimeString().slice(0, 5),
     asset: "EURUSD",
     direction: "BUY" as "BUY" | "SELL",
@@ -47,6 +48,28 @@ export default function NovoPlanejamentoPage() {
   const [readiness, setReadiness] = useState<Record<string, boolean>>({ macro: true, dxy: true, htf: true, liquidity: true, poi: true, displacement: true, mss: false, retracement: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [macroCandidate, setMacroCandidate] = useState<string | null>(null);
+
+  // Preenche um plano a partir do Ranking G8 (apenas Forex; os demais campos continuam editáveis).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const symbol = (params.get("symbol") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+    if (!symbol) return;
+    const bias = params.get("bias") === "SHORT" ? "SHORT" : "LONG";
+    const div = Number(params.get("div"));
+    const eventRisk = (params.get("eventRisk") || "UNKNOWN").slice(0, 20);
+    const reason = (params.get("reason") || "").slice(0, 500);
+    const invalidations = (params.get("invalidations") || "").slice(0, 300);
+    Promise.resolve().then(() => setForm((prev) => ({
+      ...prev,
+      asset: symbol,
+      direction: bias === "LONG" ? "BUY" : "SELL",
+      macroBias: bias === "LONG" ? "Bullish" : "Bearish",
+      invalidation: invalidations,
+      notes: `Candidato Ranking G8 · ${bias} · divergência ${Number.isFinite(div) ? div.toFixed(2) : "—"} · risco de evento ${eventRisk}${reason ? `\n${reason}` : ""}${invalidations ? `\nEventos para revisar: ${invalidations}` : ""}`,
+    })));
+    Promise.resolve().then(() => setMacroCandidate(`${symbol} · ${bias} · evento ${eventRisk}`));
+  }, []);
 
   const score = useMemo(() => {
     const fake = {
@@ -119,6 +142,7 @@ export default function NovoPlanejamentoPage() {
         <Link href="/planejamento" className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary mb-3 transition"><ArrowLeft size={14} /> Voltar</Link>
         <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">Planejar Trade</h1>
         <p className="text-sm text-text-muted mt-1">Registre o contexto antes da entrada. Sem resultado financeiro nesta etapa.</p>
+        {macroCandidate && <div className="mt-3 p-3 rounded-xl border border-sky/30 bg-sky/5 text-xs text-sky"><b>Pré-preenchido pelo Ranking G8:</b> {macroCandidate}. Revise a evidência e o risco de evento; o viés macro não é gatilho de entrada.</div>}
       </header>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -127,7 +151,7 @@ export default function NovoPlanejamentoPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Data" type="date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
             <Field label="Horário" type="time" value={form.time} onChange={(v) => setForm({ ...form, time: v })} />
-            <Select label="Ativo" value={form.asset} onChange={(v) => setForm({ ...form, asset: v })} options={ASSETS} />
+            <Select label="Ativo" value={form.asset} onChange={(v) => setForm({ ...form, asset: v })} options={Array.from(new Set([...ASSETS, form.asset]))} />
             <Select label="Direção" value={form.direction} onChange={(v) => setForm({ ...form, direction: v as "BUY" | "SELL" })} options={["BUY", "SELL"]} />
             <Select label="Sessão" value={form.session} onChange={(v) => setForm({ ...form, session: v })} options={["Ásia", "Londres", "Nova York", "Outro"]} />
             <Select label="Playbook" value={form.playbook} onChange={(v) => setForm({ ...form, playbook: v })} options={PLAYBOOKS} />

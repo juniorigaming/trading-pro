@@ -7,6 +7,12 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 export const metadata: Metadata = {
   title: "Trading Pro — Trading Journal & Intelligence",
   description: "Diário profissional de trading com análise SMC, gestão de risco, planejamento de trades e dashboard completo.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Trading Pro", statusBarStyle: "black-translucent" },
+  icons: {
+    icon: [{ url: "/icons/icon.svg", type: "image/svg+xml" }, { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: "/icons/icon-192.png",
+  },
 };
 
 // Inline script runs before paint to avoid flash of incorrect theme (FOUC).

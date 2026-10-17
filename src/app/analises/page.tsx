@@ -17,6 +17,7 @@ interface EdgeFilters {
   mss: string;
   fvg: string;
   ob: string;
+  tag: string;
 }
 
 export default function AnalisesPage() {
@@ -25,7 +26,7 @@ export default function AnalisesPage() {
   const initialCapital = config?.initialCapital ?? 10000;
 
   const [edge, setEdge] = useState<EdgeFilters>({
-    asset: "all", session: "all", macroAligned: "all", dxyAligned: "all", sweep: "all", displacement: "all", mss: "all", fvg: "all", ob: "all",
+    asset: "all", session: "all", macroAligned: "all", dxyAligned: "all", sweep: "all", displacement: "all", mss: "all", fvg: "all", ob: "all", tag: "all",
   });
 
   const byAsset = useMemo(() => groupByAsset(trades), [trades]);
@@ -39,6 +40,7 @@ export default function AnalisesPage() {
   const edgeTrades = useMemo(() => {
     return trades.filter((t) => {
       if (edge.asset !== "all" && t.asset !== edge.asset) return false;
+      if (edge.tag !== "all" && !(t.tags || []).includes(edge.tag)) return false;
       if (edge.session !== "all" && t.session !== edge.session) return false;
       if (edge.macroAligned !== "all" && (!!t.macroBias && t.macroBias !== "Neutro") !== (edge.macroAligned === "yes")) return false;
       if (edge.dxyAligned !== "all" && !!t.dxyBias !== (edge.dxyAligned === "yes")) return false;
@@ -54,6 +56,7 @@ export default function AnalisesPage() {
   const edgeMetrics = useMemo(() => calculateMetrics(edgeTrades, initialCapital), [edgeTrades, initialCapital]);
   const edgeAssets = useMemo(() => Array.from(new Set(trades.map((t) => t.asset))).sort(), [trades]);
   const edgeSessions = useMemo(() => Array.from(new Set(trades.map((t) => t.session))).sort(), [trades]);
+  const edgeTags = useMemo(() => Array.from(new Set(trades.flatMap((t) => t.tags || []))).sort(), [trades]);
 
   // Execution score vs result
   const execAnalysis = useMemo(() => {
@@ -106,6 +109,7 @@ export default function AnalisesPage() {
         <div className="flex flex-wrap gap-2 mb-4">
           <Sel label="Ativo" value={edge.asset} onChange={(v) => setEdge({ ...edge, asset: v })} options={["all", ...edgeAssets]} />
           <Sel label="Sessão" value={edge.session} onChange={(v) => setEdge({ ...edge, session: v })} options={["all", ...edgeSessions]} />
+          <Sel label="Tag" value={edge.tag} onChange={(v) => setEdge({ ...edge, tag: v })} options={["all", ...edgeTags]} />
           <Sel label="Macro" value={edge.macroAligned} onChange={(v) => setEdge({ ...edge, macroAligned: v })} options={["all", "yes", "no"]} />
           <Sel label="DXY" value={edge.dxyAligned} onChange={(v) => setEdge({ ...edge, dxyAligned: v })} options={["all", "yes", "no"]} />
           <Sel label="Sweep" value={edge.sweep} onChange={(v) => setEdge({ ...edge, sweep: v })} options={["all", "yes", "no"]} />
@@ -231,7 +235,7 @@ function AnalysisTable({ title, icon: Icon, rows }: { title: string; icon: typeo
         <SampleSizeWarning n={rows.reduce((s, r) => s + r.trades, 0)} show={rows.length > 0} />
       </div>
       {rows.length === 0 ? <Empty /> : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm">
           <thead><tr className="text-[10px] uppercase text-text-muted border-b border-border"><th className="text-left py-2">{title.replace("Por ", "")}</th><th className="text-right py-2">WR</th><th className="text-right py-2">Resultado</th><th className="text-right py-2">Ops</th></tr></thead>
           <tbody>
             {rows.map((r) => (
@@ -243,7 +247,7 @@ function AnalysisTable({ title, icon: Icon, rows }: { title: string; icon: typeo
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   );

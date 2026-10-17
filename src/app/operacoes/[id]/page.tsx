@@ -6,6 +6,7 @@ import { ArrowLeft, Pencil, Gauge, Target, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Trade } from "@/lib/types";
 import { formatCurrency, formatR } from "@/lib/utils";
+import { formatTradeDate } from "@/lib/date";
 import { captureEfficiency } from "@/lib/scores";
 import { fetchTrade, TradeNotFoundError } from "@/lib/trade-fetch";
 
@@ -31,8 +32,7 @@ export default function OperacaoDetalhePage() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    Promise.resolve().then(() => { if (!cancelled) { setLoading(true); setError(null); } });
     fetchTrade(id)
       .then((t) => {
         if (!cancelled) setTrade(t);
@@ -71,7 +71,7 @@ export default function OperacaoDetalhePage() {
         <Link href={`/operacoes/${trade.id}/editar`} className="inline-flex items-center gap-1.5 text-xs font-bold text-amber hover:underline"><Pencil size={13} /> Editar</Link>
       </div>
       <h1 className="text-2xl font-extrabold text-text-primary mb-1">Detalhes da Operação #{trade.id} {trade.isDemo && <span className="text-xs text-sky font-medium ml-2">(Demonstração)</span>}</h1>
-      <p className="text-sm text-slate-muted mb-4">{trade.asset} · {new Date(trade.date).toLocaleDateString("pt-BR")} às {trade.time}</p>
+      <p className="text-sm text-slate-muted mb-4">{trade.asset} · {formatTradeDate(trade.date)} às {trade.time}</p>
 
       {/* Scores */}
       <div className="flex flex-wrap gap-3 mb-6">
@@ -106,7 +106,7 @@ export default function OperacaoDetalhePage() {
         <div className="glass-card p-5">
           <h3 className="text-xs font-bold text-slate-muted uppercase tracking-wider mb-3">Dados Básicos</h3>
           <div className="space-y-2 text-sm">
-            <p><span className="text-slate-muted">Data:</span> <span className="text-text-primary font-medium">{new Date(trade.date).toLocaleDateString("pt-BR")}</span></p>
+            <p><span className="text-slate-muted">Data:</span> <span className="text-text-primary font-medium">{formatTradeDate(trade.date)}</span></p>
             <p><span className="text-slate-muted">Hora:</span> <span className="text-text-primary font-medium">{trade.time}</span></p>
             <p><span className="text-slate-muted">Ativo:</span> <span className="text-text-primary font-bold">{trade.asset}</span></p>
             <p><span className="text-slate-muted">Direção:</span> <span className={`font-bold ${trade.direction === "BUY" ? "text-emerald" : "text-rose"}`}>{trade.direction}</span></p>

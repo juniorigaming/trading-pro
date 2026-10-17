@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Trophy, Grid3X3, Siren, LineChart as LineChartIcon, RefreshCw, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
-import G8Ranking from "@/components/ai/G8Ranking";
+import G8Ranking, { type MiniScorePoint } from "@/components/ai/G8Ranking";
 import MacroSummary from "@/components/ai/MacroSummary";
 import { DivergenceMatrix, TradeCandidates } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
@@ -18,6 +18,7 @@ export default function RankingG8Page() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("ranking");
   const [scores, setScores] = useState<CurrencyScoreView[] | null>(null);
+  const [scoreHistory, setScoreHistory] = useState<MiniScorePoint[]>([]);
   const [latest, setLatest] = useState<MacroAnalysisResult | null>(null);
   const [candidates, setCandidates] = useState<TradeCandidateView[] | null>(null);
   const [session, setSession] = useState<Session | "ALL">("ALL");
@@ -35,6 +36,13 @@ export default function RankingG8Page() {
     } catch (e) { setErr((e as Error).message); }
   }, [session]);
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
+  useEffect(() => {
+    let active = true;
+    apiFetch<MiniScorePoint[]>("/api/macro/scores/history?days=7")
+      .then((rows) => { if (active) setScoreHistory(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setScoreHistory([]); });
+    return () => { active = false; };
+  }, []);
 
   const recompute = async () => {
     setBusy("Recalculando scores com os eventos já interpretados (sem IA)..."); setErr(null);
@@ -65,7 +73,7 @@ export default function RankingG8Page() {
           {latest && <MacroSummary result={latest} />}
           <div className="grid gap-4 xl:grid-cols-3">
             <Section className="xl:col-span-2" title="Ranking de moedas" sub="Verde = forte · cinza = neutro · vermelho = fraca. Toque numa moeda para ver POR QUE ela recebeu esse score.">
-              {scores ? <G8Ranking scores={scores} /> : <Spinner />}
+              {scores ? <G8Ranking scores={scores} history={scoreHistory} /> : <Spinner />}
               {(latest?.extra_currencies?.length ?? 0) > 0 && (
                 <div className="mt-4 pt-4 border-t border-border">
                   <p className="text-xs font-bold text-text-primary">Moedas fora do G8 com evidência disponível</p>
@@ -91,7 +99,7 @@ export default function RankingG8Page() {
         </div>
       )}
       {tab === "matriz" && <Section title="Macro Divergence Matrix" sub="Todas as 56 combinações (escala nativa). A lista de candidatos aplica as bandas de força relativa e a confiança da evidência.">{scores ? <DivergenceMatrix scores={scores} /> : <Spinner />}</Section>}
-      {tab === "candidatos" && <Section title="Trade Candidates" sub="symbol · direction · strong/weak · divergência · confiança · prioridade · event risk. Clique para levar ao módulo SMC/ICT.">{candidates ? <TradeCandidates candidates={candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /> : <Spinner />}</Section>}
+      {tab === "candidatos" && <Section title="Trade Candidates" sub="symbol · direction · strong/weak · divergência · confiança · prioridade · event risk. Clique para levar ao módulo SMC/ICT.">{candidates ? <TradeCandidates candidates={candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} onPlan={(c) => router.push(`/planejamento/novo?symbol=${encodeURIComponent(c.symbol)}&bias=${c.bias}&div=${c.macro_divergence}&eventRisk=${c.event_risk}&reason=${encodeURIComponent(c.reason.slice(0, 500))}&invalidations=${encodeURIComponent((c.invalidation_events || []).join("; ").slice(0, 300))}`)} /> : <Spinner />}</Section>}
       {tab === "risco" && <Section title="Event Risk" sub="LOW · MEDIUM · HIGH · EXTREME (as duas pernas do par com evento de alto impacto iminente)">{latest ? <EventRiskPanel eventRisk={latest.event_risk} pending={latest.pending_events} pairsToAvoid={latest.pairs_to_avoid} /> : <p className="text-xs text-text-muted">Sem análise salva para esta sessão.</p>}</Section>}
       {tab === "historico" && <Section title="Evolução dos scores" sub="Um ponto por moeda a cada análise/recalculo persistido"><ScoreHistoryChart /></Section>}
     </div>

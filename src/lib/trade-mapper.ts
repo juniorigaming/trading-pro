@@ -68,6 +68,7 @@ export function mapTradeValues(input: TradeInput) {
     whatWentWrong: input.whatWentWrong,
     lesson: input.lesson,
     notes: input.notes,
+    tags: Array.isArray(input.tags) ? input.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 20) : undefined,
     screenshotUrl: input.screenshotUrl,
     preTradeScreenshotUrl: input.preTradeScreenshotUrl,
     postEntryScreenshotUrl: input.postEntryScreenshotUrl,

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Globe, Save, TrendingUp, TrendingDown, Minus, LayoutGrid, CalendarDays, Landmark, DollarSign } from "lucide-react";
 import { useTrades } from "@/hooks/useTradeData";
+import { localTodayKey } from "@/lib/date";
 
 const CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"];
 const BIAS_OPTS = ["Bullish", "Neutral", "Bearish"];
@@ -37,7 +38,7 @@ export default function MacroPage() {
   const [biases, setBiases] = useState<Record<string, never>[]>([]);
   const [savingCard, setSavingCard] = useState(false);
   const [daily, setDaily] = useState({
-    date: new Date().toISOString().split("T")[0],
+    date: localTodayKey(),
     currency: "USD",
     session: "Nova York",
     inflation: "Neutral",

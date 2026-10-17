@@ -13,7 +13,8 @@
     "db:migrate:ai": "node scripts/run-sql.mjs drizzle/0001_ai_module.sql",
     "db:migrate:b3": "node scripts/run-sql.mjs drizzle/0002_b3_module.sql",
     "db:migrate:portfolios": "node scripts/run-sql.mjs drizzle/0003_portfolios.sql",
-    "db:migrate:macro-v2": "node scripts/run-sql.mjs drizzle/0004_macro_checks_v2.sql"
+    "db:migrate:macro-v2": "node scripts/run-sql.mjs drizzle/0004_macro_checks_v2.sql",
+    "db:migrate:tags": "node scripts/run-sql.mjs drizzle/0005_trade_tags.sql"
   },
   "dependencies": {
     "date-fns": "^4.4.0",
@@ -41,6 +42,7 @@
     "postcss": "8.5.8",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.151.1"
   }
 }

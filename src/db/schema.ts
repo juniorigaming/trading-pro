@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   serial,
@@ -66,6 +67,7 @@ export const trades = pgTable("trades", {
   whatWentWrong: text("what_went_wrong"),
   lesson: text("lesson"),
   notes: text("notes"),
+  tags: text("tags").array().notNull().default(sql`ARRAY[]::text[]`),
   screenshotUrl: text("screenshot_url"),
   preTradeScreenshotUrl: text("pre_trade_screenshot_url"),
   postEntryScreenshotUrl: text("post_entry_screenshot_url"),

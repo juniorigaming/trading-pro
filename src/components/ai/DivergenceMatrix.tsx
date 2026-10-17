@@ -39,7 +39,7 @@ export function DivergenceMatrix({ scores }: { scores: CurrencyScoreView[] }) {
   );
 }
 
-export function TradeCandidates({ candidates, onPick }: { candidates: TradeCandidateView[]; onPick?: (c: TradeCandidateView) => void }) {
+export function TradeCandidates({ candidates, onPick, onPlan }: { candidates: TradeCandidateView[]; onPick?: (c: TradeCandidateView) => void; onPlan?: (c: TradeCandidateView) => void }) {
   if (!candidates.length) return <p className="text-xs text-text-muted">Nenhum par com divergência ≥ 1.0 no momento — sem candidatos macro.</p>;
   return (
     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -62,7 +62,10 @@ export function TradeCandidates({ candidates, onPick }: { candidates: TradeCandi
           </div>
           {c.event_risk_events.length > 0 && <p className="mt-1.5 text-[10px] text-amber">⚠ {c.event_risk_events.slice(0, 2).map((e) => `${e.currency} ${e.event} em ${e.minutes_until < 60 ? `${e.minutes_until}min` : `${(e.minutes_until / 60).toFixed(1)}h`}`).join(" · ")}</p>}
           <p className="mt-1.5 text-[11px] text-text-secondary leading-snug line-clamp-4">{c.reason}</p>
-          {onPick && <button onClick={() => onPick(c)} className="mt-2 text-[11px] font-bold text-accent hover:underline">Analisar no SMC/ICT →</button>}
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {onPick && <button onClick={() => onPick(c)} className="text-[11px] font-bold text-accent hover:underline">Analisar no SMC/ICT →</button>}
+            {onPlan && <button onClick={() => onPlan(c)} className="text-[11px] font-bold text-sky hover:underline">Criar plano pré-preenchido →</button>}
+          </div>
         </div>
       ))}
     </div>

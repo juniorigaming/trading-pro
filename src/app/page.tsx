@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, BarChart3, Target, Clock, ShieldCheck, ChevronRight } from "lucide-react";
+import { Plus, Zap, Filter as FilterIcon, ShieldCheck, ChevronRight } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import CapitalChart from "@/components/CapitalChart";
 import GlobalFilters, { FilterState, defaultFilters, applyFilters } from "@/components/GlobalFilters";
@@ -9,39 +9,44 @@ import AlertCard from "@/components/AlertCard";
 import MetricTile from "@/components/MetricTile";
 import CommandCenter from "@/components/CommandCenter";
 import DashboardAiWidgets from "@/components/ai/DashboardAiWidgets";
+import QuickTradeModal from "@/components/QuickTradeModal";
+import DashboardInsights from "@/components/DashboardInsights";
 import PortfolioSwitcher from "@/components/PortfolioSwitcher";
 import { usePortfolio } from "@/components/PortfolioProvider";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
-import { calculateMetrics, groupByAsset, groupBySession, groupBySetup, disciplineStats, buildCalendarData } from "@/lib/calculations";
+import { calculateMetrics, disciplineStats, buildCalendarData } from "@/lib/calculations";
 import { computeAccount } from "@/lib/account";
 import { formatCurrency, formatPercent, formatR, formatNumber } from "@/lib/utils";
+import { comparePeriods, describeDelta } from "@/lib/period-compare";
+import { localTodayKey, shiftDayKey } from "@/lib/date";
 
 export default function DashboardPage() {
-  const { trades, loading } = useTrades();
+  const { trades, loading, error } = useTrades();
   const { config } = useConfig();
   const { meta, ready } = usePortfolio();
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
+  const [quickOpen, setQuickOpen] = useState(false);
 
   const filteredTrades = useMemo(() => applyFilters(trades, filters), [trades, filters]);
   const initialCapital = config?.initialCapital ?? 10000;
   const account = useMemo(() => computeAccount(trades, config), [trades, config]);
   const metrics = useMemo(() => calculateMetrics(filteredTrades, initialCapital), [filteredTrades, initialCapital]);
-  const byAsset = useMemo(() => groupByAsset(filteredTrades).slice(0, 5), [filteredTrades]);
-  const bySetup = useMemo(() => groupBySetup(filteredTrades).slice(0, 5), [filteredTrades]);
-  const bySession = useMemo(() => groupBySession(filteredTrades), [filteredTrades]);
   const discipline = useMemo(() => disciplineStats(filteredTrades), [filteredTrades]);
   const calendarMap = useMemo(() => buildCalendarData(filteredTrades), [filteredTrades]);
+  const periodComparison = comparePeriods(trades, initialCapital, 30);
+  const delta30d = (current: number, previous: number, kind: "percent-change" | "points", higherIsBetter = true) => {
+    if (!periodComparison.comparable) return null;
+    const d = describeDelta(current, previous, { kind, higherIsBetter, decimals: 1 });
+    return { ...d, label: "30d vs. 30d anteriores" };
+  };
 
-  // Last 14 days for calendar preview (based on the most recent trade date, or today)
+  // Últimos 14 dias até HOJE (calendário civil local, sem voltar para a última operação antiga)
   const previewDays = useMemo(() => {
-    const dates = Array.from(calendarMap.keys()).sort();
-    const lastDate = dates.length > 0 ? new Date(dates[dates.length - 1]) : new Date();
     const days: { label: string; data: ReturnType<typeof buildCalendarData> extends Map<string, infer V> ? V | null : null }[] = [];
+    const today = localTodayKey();
     for (let i = 13; i >= 0; i--) {
-      const d = new Date(lastDate);
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().split("T")[0];
-      days.push({ label: String(d.getDate()), data: calendarMap.get(key) || null });
+      const key = shiftDayKey(today, -i);
+      days.push({ label: String(Number(key.slice(8, 10))), data: calendarMap.get(key) || null });
     }
     return days;
   }, [calendarMap]);
@@ -66,18 +71,24 @@ export default function DashboardPage() {
             </h1>
             <p className="text-sm text-slate-muted mt-1">{meta.description}</p>
           </div>
-          <Link
-            href="/operacoes/novo"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-lg shadow-accent/20 transition-all duration-300 active:scale-[0.98]"
-          >
-            <Plus size={18} />
-            Nova Operação
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setQuickOpen(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-lg shadow-accent/20 transition-all active:scale-[0.98]">
+              <Zap size={17} /> Registro rápido
+            </button>
+            <Link href="/operacoes/novo" className="inline-flex items-center gap-2 px-4 py-2.5 border border-border bg-surface-2 hover:bg-surface-3 text-text-primary text-sm font-bold rounded-xl transition">
+              <Plus size={17} /> Completo
+            </Link>
+          </div>
         </div>
       </header>
 
+      {error && <div className="mb-4 p-3 rounded-xl border border-rose/30 bg-rose/5 text-xs text-rose">Não foi possível carregar o histórico completo: {error}</div>}
+
       {/* Carteiras: Forex · B3 · Cripto */}
       <PortfolioSwitcher />
+
+      <div className="mb-2 flex items-center gap-2 text-[10px] text-text-muted"><FilterIcon size={12} /> Filtros abaixo afetam as métricas e análises desta página; Status da Conta e IA mostram a carteira completa.</div>
+      <GlobalFilters trades={trades} filters={filters} onChange={setFilters} />
 
       {/* Command Center (conta da carteira ativa) */}
       <CommandCenter />
@@ -99,9 +110,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Global Filters */}
-      <GlobalFilters trades={trades} filters={filters} onChange={setFilters} />
-
       {/* Key Metrics Row */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
@@ -109,24 +117,28 @@ export default function DashboardPage() {
           value={metrics.totalTrades > 0 ? `${metrics.expectancy >= 0 ? "+" : ""}${formatCurrency(metrics.expectancy)}` : "—"}
           sub={`${metrics.totalTrades} operações · Payoff ${metrics.payoffRatio > 0 ? formatNumber(metrics.payoffRatio) : "—"}`}
           positive={metrics.expectancy >= 0}
+          delta={delta30d(periodComparison.current.expectancy, periodComparison.previous.expectancy, "percent-change")}
         />
         <StatCard
           label="Resultado Acumulado"
           value={`${account.realizedPnl >= 0 ? "+" : ""}${formatCurrency(account.realizedPnl)}`}
           sub={`Dep: ${formatCurrency(account.totalDeposits)} · Ret: ${formatCurrency(account.totalWithdrawals)}`}
           positive={account.realizedPnl >= 0}
+          delta={delta30d(periodComparison.current.pnl, periodComparison.previous.pnl, "percent-change")}
         />
         <StatCard
           label="Win Rate"
           value={metrics.totalTrades > 0 ? formatPercent(metrics.winRate) : "—"}
           sub={`${metrics.wins} wins / ${metrics.losses} losses / ${metrics.breakEven} BE`}
           positive={metrics.winRate >= 50}
+          delta={delta30d(periodComparison.current.winRate, periodComparison.previous.winRate, "points")}
         />
         <StatCard
           label="Drawdown Máximo"
           value={`-${formatNumber(metrics.maxDrawdown)}%`}
           sub={`Atual: -${formatNumber(metrics.currentDrawdown)}%`}
           neutral
+          delta={delta30d(periodComparison.current.maxDrawdown, periodComparison.previous.maxDrawdown, "points", false)}
         />
       </section>
 
@@ -167,81 +179,17 @@ export default function DashboardPage() {
         <MetricTile label="R Médio por Operação" value={metrics.totalTrades > 0 ? formatR(metrics.avgR) : "—"} sub="Todas as operações" color="sky" />
       </section>
 
-      {/* Analysis Sections */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* By Asset */}
-        <div className="glass-card-strong p-5 md:p-6">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
-              <BarChart3 size={16} className="text-violet" />
-            </div>
-            <h2 className="text-base font-bold text-text-primary">Por Ativo</h2>
-          </div>
-          <div className="space-y-3">
-            {byAsset.length === 0 && <EmptyRow />}
-            {byAsset.map((item) => (
-              <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
-                <div>
-                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
-                  <p className="text-[10px] text-slate-muted">{item.trades} operações</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-sm font-extrabold ${item.result >= 0 ? "text-emerald" : "text-rose"}`}>{item.result >= 0 ? "+" : ""}{formatCurrency(item.result)}</p>
-                  <p className="text-[10px] text-slate-muted">WR: {formatNumber(item.winRate, 0)}%</p>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Visão executiva: detalhes por dimensão ficam na página Análises */}
+      <DashboardInsights trades={filteredTrades} />
+      <section className="glass-card p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-text-primary">Quer investigar a performance?</h2>
+          <p className="text-[11px] text-text-muted">Ativo, setup, sessão, MAE/MFE, disciplina e Edge Explorer com filtros estão em Análises.</p>
         </div>
-
-        {/* By Setup */}
-        <div className="glass-card-strong p-5 md:p-6">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
-              <Target size={16} className="text-violet" />
-            </div>
-            <h2 className="text-base font-bold text-text-primary">Por Setup</h2>
-          </div>
-          <div className="space-y-3">
-            {bySetup.length === 0 && <EmptyRow />}
-            {bySetup.map((item) => (
-              <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
-                <div>
-                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
-                  <p className="text-[10px] text-slate-muted">{item.trades} ops · PF: {item.profitFactor === Infinity ? "∞" : formatNumber(item.profitFactor)}</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-sm font-extrabold ${item.result >= 0 ? "text-emerald" : "text-rose"}`}>{item.result >= 0 ? "+" : ""}{formatCurrency(item.result)}</p>
-                  <p className="text-[10px] text-slate-muted">WR: {formatNumber(item.winRate, 0)}%</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* By Session */}
-        <div className="glass-card-strong p-5 md:p-6">
-          <div className="flex items-center gap-2 mb-5">
-            <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
-              <Clock size={16} className="text-violet" />
-            </div>
-            <h2 className="text-base font-bold text-text-primary">Por Sessão</h2>
-          </div>
-          <div className="space-y-3">
-            {bySession.length === 0 && <EmptyRow />}
-            {bySession.map((item) => (
-              <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
-                <div>
-                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
-                  <p className="text-[10px] text-slate-muted">{item.trades} operações</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-sm font-extrabold ${item.result >= 0 ? "text-emerald" : "text-rose"}`}>{item.result >= 0 ? "+" : ""}{formatCurrency(item.result)}</p>
-                  <p className="text-[10px] text-slate-muted">WR: {formatNumber(item.winRate, 0)}%</p>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/analises" className="text-xs font-bold text-accent hover:underline">Abrir Análises →</Link>
+          <Link href="/estatisticas" className="text-xs font-bold text-sky hover:underline">Estatísticas</Link>
+          <Link href="/setup" className="text-xs font-bold text-violet hover:underline">Playbook</Link>
         </div>
       </section>
 
@@ -311,6 +259,7 @@ export default function DashboardPage() {
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky" /> Sem operação</span>
         </div>
       </section>
+      {quickOpen && <QuickTradeModal onClose={() => setQuickOpen(false)} />}
     </div>
   );
 }

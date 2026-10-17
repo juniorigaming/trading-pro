@@ -54,6 +54,7 @@ export interface TradeInput {
   whatWentWrong?: string;
   lesson?: string;
   notes?: string;
+  tags?: string[];
   screenshotUrl?: string;
   preTradeScreenshotUrl?: string;
   postEntryScreenshotUrl?: string;

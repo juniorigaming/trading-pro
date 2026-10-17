@@ -1,6 +1,6 @@
 /** E2E real do módulo B3: Postgres em memória (PGlite) + migrations 0001/0002 + provedor de IA MOCK (zero tokens).
  *  Roda só quando @electric-sql/pglite está instalado: `npm i --no-save @electric-sql/pglite && npx vitest run tests/e2e-b3.pglite.test.ts` */
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { setEnvOverrides } from "@/lib/env";
 const PGLITE_PKG = "@electric-sql/pglite"; // import dinâmico por string: não quebra o typecheck quando o pacote (opcional) não está instalado
 vi.mock("@/db", async () => {
@@ -21,6 +21,7 @@ vi.mock("@/db", async () => {
 });
 const hasPglite = await import(/* @vite-ignore */ PGLITE_PKG).then(() => true).catch(() => false);
 beforeAll(() => setEnvOverrides({ AI_PROVIDER: "mock" }));
+afterEach(() => vi.useRealTimers());
 const J = (b: unknown) => new Request("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
 const PUT = (b: unknown) => new Request("http://x", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
 
@@ -46,6 +47,10 @@ describe.skipIf(!hasPglite)("B3 e2e (PGlite + mock AI)", () => {
     const l = await (await GET(new Request("http://x"))).json(); expect(l[0].captured_at).toBeTruthy();
   });
   it("analyze com eventos BRL/USD/CNY (mock) → resultado estruturado + persistência", async () => {
+    // Fixar o relógio a meio do dia mantém os dois eventos futuros no horizonte ?hours=24,
+    // independente do horário em que o CI/usuário executar a suíte.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-14T12:00:00.000Z"));
     const { POST } = await import("@/app/api/ai/b3/analyze/route");
     const today = new Date().toISOString().slice(0, 10);
     const ev = (currency: string, event: string, actual: string | null, forecast: string | null, previous: string | null, time = "09:00") => ({ date: today, time, currency, event, impact: "high", actual, forecast, previous, source: "manual" });

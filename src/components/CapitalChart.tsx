@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Trade } from "@/lib/types";
 import { formatCurrency, formatNumber } from "@/lib/utils";
+import { formatTradeDate } from "@/lib/date";
 
 interface Props {
   trades: Trade[];
@@ -22,7 +23,7 @@ export default function CapitalChart({ trades, initialCapital }: Props) {
     const points = [{ date: "Início", balance: initialCapital }];
     sorted.forEach((t) => {
       running += t.resultAmount || 0;
-      const label = new Date(t.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+      const label = formatTradeDate(t.date).slice(0, 5);
       points.push({ date: label, balance: Math.round(running * 100) / 100 });
     });
 

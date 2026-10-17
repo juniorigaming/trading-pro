@@ -3,6 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import TradeForm from "@/components/TradeForm";
+import LimitBanner from "@/components/LimitBanner";
 
 export default function NovaOperacaoPage() {
   return (
@@ -15,6 +16,7 @@ export default function NovaOperacaoPage() {
         <p className="text-sm text-slate-muted mt-1">Registre todos os detalhes da sua operação — as métricas do dashboard serão atualizadas automaticamente.</p>
       </header>
 
+      <LimitBanner />
       <TradeForm />
     </div>
   );

@@ -6,6 +6,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Filter, X } from "lucide-react
 import { useTrades } from "@/hooks/useTradeData";
 import { buildCalendarData, DayResult } from "@/lib/calculations";
 import { formatCurrency, formatR } from "@/lib/utils";
+import { localTodayKey, shiftDayKey } from "@/lib/date";
 
 const monthNames = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const monthShort = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -22,8 +23,6 @@ const PERIODS: { id: Period; label: string; days?: number }[] = [
 const STORAGE_KEY = "tp.calendar.period";
 
 /** Chave de dia no mesmo padrão do calendário (YYYY-MM-DD, UTC — igual a buildCalendarData). */
-const dayKey = (d: Date) => d.toISOString().split("T")[0];
-const addDays = (d: Date, n: number) => { const x = new Date(d); x.setUTCDate(x.getUTCDate() + n); return x; };
 const fmtShort = (key: string) => `${key.slice(8, 10)}/${key.slice(5, 7)}`;
 const fmtLong = (key: string) => `${key.slice(8, 10)}/${key.slice(5, 7)}/${key.slice(0, 4)}`;
 
@@ -67,14 +66,14 @@ export default function CalendarioPage() {
   // Intervalo do filtro (inclusivo): [hoje − (N−1), hoje]
   const range = useMemo(() => {
     if (period === "MONTH") return null;
-    const end = new Date(); const start = addDays(end, -(period - 1));
-    return { start: dayKey(start), end: dayKey(end), days: period };
+    const end = localTodayKey();
+    return { start: shiftDayKey(end, -(period - 1)), end, days: period };
   }, [period]);
   const inRange = (key: string) => !range || (key >= range.start && key <= range.end);
 
   const initialDate = useMemo(() => {
     const dates = Array.from(calendarMap.keys()).sort();
-    return dates.length > 0 ? new Date(dates[dates.length - 1]) : new Date();
+    return dates.length > 0 ? new Date(`${dates[dates.length - 1]}T12:00:00`) : new Date();
   }, [calendarMap]);
 
   const [viewDate, setViewDate] = useState(initialDate);
@@ -195,7 +194,7 @@ export default function CalendarioPage() {
               const key = `${monthPrefix}-${String(day).padStart(2, "0")}`;
               const data = calendarMap.get(key);
               const active = inRange(key);
-              const isToday = key === dayKey(new Date());
+              const isToday = key === localTodayKey();
               return (
                 <button
                   key={day}

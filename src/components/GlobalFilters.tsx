@@ -1,6 +1,7 @@
 "use client";
 import { Search } from "lucide-react";
 import { Trade } from "@/lib/types";
+import { dayOrdinal, localTodayKey, tradeDayKey } from "@/lib/date";
 
 export interface FilterState {
   period: string;
@@ -21,19 +22,20 @@ export const defaultFilters: FilterState = {
 };
 
 export function applyFilters(trades: Trade[], filters: FilterState): Trade[] {
-  const now = new Date();
+  const today = localTodayKey();
+  const todayOrdinal = dayOrdinal(today);
+  const [year, month] = today.split("-");
   return trades.filter((t) => {
-    const tradeDate = new Date(t.date);
+    const key = tradeDayKey(t.date);
+    const tradeOrdinal = dayOrdinal(key);
+    const diffDays = todayOrdinal - tradeOrdinal;
 
     if (filters.period !== "all") {
-      const diffDays = (now.getTime() - tradeDate.getTime()) / (1000 * 60 * 60 * 24);
-      if (filters.period === "today" && diffDays > 1) return false;
-      if (filters.period === "weekly" && diffDays > 7) return false;
-      if (filters.period === "monthly" && diffDays > 30) return false;
-      if (filters.period === "this_month") {
-        if (tradeDate.getMonth() !== now.getMonth() || tradeDate.getFullYear() !== now.getFullYear()) return false;
-      }
-      if (filters.period === "this_year" && tradeDate.getFullYear() !== now.getFullYear()) return false;
+      if (filters.period === "today" && diffDays !== 0) return false;
+      if (filters.period === "weekly" && (diffDays < 0 || diffDays > 6)) return false;
+      if (filters.period === "monthly" && (diffDays < 0 || diffDays > 29)) return false;
+      if (filters.period === "this_month" && key.slice(0, 7) !== `${year}-${month}`) return false;
+      if (filters.period === "this_year" && key.slice(0, 4) !== year) return false;
     }
     if (filters.asset !== "all" && t.asset !== filters.asset) return false;
     if (filters.session !== "all" && t.session !== filters.session) return false;
