@@ -61,6 +61,20 @@ export function mockStructured(schema: SchemaName, user: string): unknown {
         wait_for: ["Configure OPENAI_API_KEY para análise real"], invalidation: "n/a", targets: [], risk_recommendation: "NONE",
         management_notes: "MOCK", intermarket_note: null, warnings: ["Provedor MOCK ativo"], confidence: "LOW",
       };
+    case "macro_market_analysis": {
+      const ids = ["executive_summary", "source_reliability", "market_strength_1d", "fundamental_background", "monetary_policy_g8", "external_factors", "horizon_persistence", "actual_vs_forecast", "price_fundamental_divergences", "pair_asymmetries", "currency_by_currency", "macro_catalysts", "risk_scenarios", "confidence_and_limitations", "methodology_and_disclaimer"];
+      return {
+        headline: "MOCK — nenhuma conclusão fundamental real foi gerada.",
+        executiveSummary: "Provedor MOCK ativo. Os dados determinísticos podem ser apresentados, mas a leitura qualitativa da IA está indisponível até configurar um provider real.",
+        sections: ids.map((id) => ({ id, summary: "MOCK: análise qualitativa indisponível; não usar como conclusão de mercado.", observations: ["Configure AI_PROVIDER e a chave do provider no backend para gerar uma análise real."], evidenceRefs: [] })),
+        currencyViews: ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"].map((currency) => ({
+          currency, fundamentalBias: "INSUFFICIENT_DATA", fundamentalQuality: "INSUFFICIENT_DATA", policyStance: "UNAVAILABLE", confidence: "LOW",
+          summary: "MOCK: sem avaliação fundamental real.", drivers: [], risks: [], evidenceRefs: [],
+        })),
+        externalFactors: [{ name: "Fatores externos", status: "UNAVAILABLE", impact: "UNKNOWN", currencies: [], detail: "MOCK: não houve leitura qualitativa real.", evidenceRefs: [] }],
+        keyRisks: [],
+      };
+    }
     case "trade_review":
       return { process_grade: "B", process_grade_reasoning: "MOCK", execution_vs_plan: "FOLLOWED", error_tags: [], what_went_right: [], what_went_wrong: [], stop_placement: "UNKNOWN", mae_mfe_comment: "MOCK", management_assessment: "MOCK", lesson: "Configure a chave de IA.", confidence: "LOW" };
   }

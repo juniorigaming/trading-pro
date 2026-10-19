@@ -11,10 +11,12 @@ import { CandidateList } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
 import { apiFetch, getToken, setToken, uid, type LocalImage } from "@/lib/ai/client";
-import { ALL_CURRENCIES, SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
+import { ALL_CURRENCIES, G8, SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
+import MacroMarketAnalysisView from "@/components/ai/MacroMarketAnalysisView";
+import type { MarketMacroAnalysisResponse } from "@/lib/macro/market-analysis-types";
 import { useRouter } from "next/navigation";
 
-type Step = "upload" | "validate" | "result";
+type Step = "upload" | "validate" | "result" | "market";
 interface AnalysisListItem { id: number; analysisDate: string; session: string; createdAt: string; inputType: string; imagesCount: number; eventsCount: number; model: string | null; promptVersion: string | null; scoringVersion: string | null; warnings: string[] }
 
 function guessSession(): Session { const h = new Date().getUTCHours(); return h >= 22 || h < 7 ? "ASIA" : h < 12 ? "LONDON" : "NEW_YORK"; }
@@ -28,8 +30,9 @@ export default function AnaliseMacroPage() {
   const [rows, setRows] = useState<OcrRow[]>([]);
   const [ocrMeta, setOcrMeta] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<MacroAnalysisResult | null>(null);
+  const [marketResult, setMarketResult] = useState<MarketMacroAnalysisResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [busyKind, setBusyKind] = useState<"extract" | "analyze" | "open" | null>(null);
+  const [busyKind, setBusyKind] = useState<"extract" | "analyze" | "market" | "open" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [history, setHistory] = useState<AnalysisListItem[] | null>(null);
   const [token, setTok] = useState("");
@@ -68,17 +71,38 @@ export default function AnaliseMacroPage() {
       for (const r of rows) if (r.user_edited) userEdits[`${r.currency}|${r.event}`] = { from: r._original ?? null, to: { actual: r.actual, forecast: r.forecast, previous: r.previous, event: r.event } };
       const events = rows.filter((r) => r.event.trim()).map(({ _id, _confirmed, _original, ...e }) => { void _id; void _confirmed; void _original; return e; });
       const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief, extraction: extractionAudit }) });
-      setResult(r); setStep("result");
+      setMarketResult(null); setResult(r); setStep("result");
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
+  };
+
+  const analyzeMarket = async () => {
+    const excludedUnconfirmedCount = rows.filter((r) => r.event.trim() && (G8 as readonly string[]).includes(r.currency) && !r._confirmed).length;
+    const supplementalEvents = rows
+      .filter((r) => r._confirmed && (G8 as readonly string[]).includes(r.currency) && r.event.trim())
+      .map((r) => ({
+        date: r.date, time: r.time, currency: r.currency as (typeof G8)[number], event: r.event.trim(), impact: r.impact,
+        actual: r.actual, forecast: r.forecast, previous: r.previous, source: r.source,
+        ocrConfidence: r.ocr_confidence ?? null, userConfirmed: true as const,
+      }));
+    setErr(null);
+    setBusy("Lendo o Currency Strength Meter 1D/Today, taxas oficiais e evidências macro confirmadas...");
+    setBusyKind("market");
+    try {
+      const report = await apiFetch<MarketMacroAnalysisResponse>("/api/ai/macro/market-analysis", {
+        method: "POST",
+        body: JSON.stringify({ supplementalEvents, excludedUnconfirmedCount }),
+      });
+      setResult(null); setMarketResult(report); setStep("market");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
   const openAnalysis = async (id: number) => {
     setErr(null); setBusy("Carregando análise..."); setBusyKind("open");
-    try { const r = await apiFetch<{ resultJson: MacroAnalysisResult }>(`/api/macro/analyses?id=${id}`); setResult(r.resultJson); setStep("result"); setTab("nova"); }
+    try { const r = await apiFetch<{ resultJson: MacroAnalysisResult }>(`/api/macro/analyses?id=${id}`); setMarketResult(null); setResult(r.resultJson); setStep("result"); setTab("nova"); }
     catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
-  const reset = () => { setStep("upload"); setImages([]); setRows([]); setResult(null); setOcrMeta(null); setErr(null); };
+  const reset = () => { setStep("upload"); setImages([]); setRows([]); setResult(null); setMarketResult(null); setOcrMeta(null); setErr(null); };
   const brief = result?.warnings.find((w) => w.startsWith("Brief: "));
 
   return (
@@ -125,7 +149,21 @@ export default function AnaliseMacroPage() {
           />
         </div>
       )}
-      {busy && busyKind !== "extract" && busyKind !== "analyze" && <div className="mb-4"><Spinner label={busy} /></div>}
+      {busyKind === "market" && (
+        <div className="mb-4">
+          <AiWaitPanel
+            steps={[
+              "Consultando o Currency Strength Meter 1D/Today na fonte primária",
+              "Validando a data de atualização e filtrando somente AUD, CAD, NZD, USD, GBP, CHF, JPY e EUR",
+              "Lendo taxas e comunicados oficiais dos oito bancos centrais",
+              "Consultando eventos confirmados e interpretações salvas em modo somente leitura",
+              "Separando força de preço, fundamentos e confiança — sem alterar scores existentes",
+              "Gerando os 15 blocos da análise macro",
+            ]}
+          />
+        </div>
+      )}
+      {busy && busyKind !== "extract" && busyKind !== "analyze" && busyKind !== "market" && <div className="mb-4"><Spinner label={busy} /></div>}
 
       {tab === "historico" && (
         <Section title="Análises anteriores" sub="RAW e interpretação ficam separados; cada análise guarda modelo, prompt_version, scoring_version e suas edições." right={<Btn variant="ghost" onClick={loadHistory}><RefreshCw size={14} /></Btn>}>
@@ -148,9 +186,11 @@ export default function AnaliseMacroPage() {
           <Section className="lg:col-span-2" title="1. Screenshots do calendário (Forex Factory ou similar)" sub="Envie quantos prints precisar (semana inteira, páginas diferentes). Eventos sem 'Actual' são tratados como pendentes.">
             <ImageDropzone images={images} onChange={setImages} max={10} />
             <div className="flex flex-wrap items-center gap-3 mt-4">
+              <Btn onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />ANALISAR MACRO COM IA</Btn>
               <Btn onClick={extract} disabled={!images.length || !!busy} loading={busyKind === "extract"} loadingLabel="Aguarde, analisando as informações..."><ScanText size={16} />Ler com IA ({images.length})</Btn>
               <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Inserir eventos manualmente</Btn>
             </div>
+            <p className="text-[10px] text-text-muted mt-2">A análise consulta o ranking atual do Exchange Rates UK e fontes oficiais. Prints selecionados só complementam a análise depois de OCR, conferência e confirmação; não substituem o ranking 1D/Today.</p>
           </Section>
           <Section title="Como funciona" sub="Pipeline determinístico com IA só onde é necessária">
             <ol className="text-xs text-text-secondary space-y-1.5 list-decimal pl-4">
@@ -171,10 +211,14 @@ export default function AnaliseMacroPage() {
           <div className="flex flex-wrap items-center gap-3 mt-4">
             {extractionRejected > 0 && <p className="text-[11px] text-amber mb-2">{extractionRejected} linha(s) foram rejeitadas pela validação do código (moeda/evento/valor não constam no texto transcrito ou não foram confirmadas na imagem). Veja no modo auditoria após analisar.</p>}
             <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Aguarde, analisando as informações..."><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
+            <Btn variant="ghost" onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />ANALISAR MACRO COM IA</Btn>
             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
+            <p className="w-full text-[10px] text-text-muted">Consulta somente leitura: não salva eventos, histórico de chamadas ou scores. Eventos só entram se estiverem confirmados e permanecem complementares ao ranking 1D/Today.</p>
           </div>
         </Section>
       )}
+
+      {tab === "nova" && step === "market" && marketResult && <MacroMarketAnalysisView report={marketResult} onBack={() => setStep(rows.length ? "validate" : "upload")} />}
 
       {tab === "nova" && step === "result" && result && (() => {
         const otherWarnings = result.warnings.filter((w) => !w.startsWith("Brief: "));

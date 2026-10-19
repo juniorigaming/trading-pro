@@ -3,7 +3,7 @@
  * Todas as respostas da IA são validadas aqui antes de alimentar o dashboard.
  */
 import { z } from "zod";
-import { CATEGORIES, CLASSIFICATIONS, CONFIDENCE, DISQUALIFIERS, ERROR_TAGS, IMPORTANCE, TIMEFRAMES } from "./types";
+import { CATEGORIES, CLASSIFICATIONS, CONFIDENCE, DISQUALIFIERS, ERROR_TAGS, G8, IMPORTANCE, TIMEFRAMES } from "./types";
 
 const nullableStr = z.string().nullable();
 const currencyOcr = z.enum(["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "BRL", "CNY", "OTHER"]);
@@ -229,6 +229,54 @@ export const B3BriefSchema = z.object({
 });
 export type B3Brief = z.infer<typeof B3BriefSchema>;
 
+// ---------------------------------------------------------------------------
+// 6) Análise macro de mercado G8 — narrativa separada da força de preço e do score existente
+// ---------------------------------------------------------------------------
+const marketCurrency = z.enum(G8);
+export const MARKET_REPORT_SECTION_IDS = [
+  "executive_summary", "source_reliability", "market_strength_1d", "fundamental_background", "monetary_policy_g8",
+  "external_factors", "horizon_persistence", "actual_vs_forecast", "price_fundamental_divergences", "pair_asymmetries",
+  "currency_by_currency", "macro_catalysts", "risk_scenarios", "confidence_and_limitations", "methodology_and_disclaimer",
+] as const;
+
+export const MacroMarketAnalysisSchema = z.object({
+  headline: z.string(),
+  executiveSummary: z.string(),
+  sections: z.array(z.object({
+    id: z.enum(MARKET_REPORT_SECTION_IDS),
+    summary: z.string(),
+    observations: z.array(z.string()),
+    evidenceRefs: z.array(z.string()),
+  })),
+  currencyViews: z.array(z.object({
+    currency: marketCurrency,
+    fundamentalBias: z.enum(["BULLISH", "NEUTRAL", "BEARISH", "INSUFFICIENT_DATA"]),
+    fundamentalQuality: z.enum(["STRONG", "MIXED", "WEAK", "INSUFFICIENT_DATA"]),
+    policyStance: z.enum(["HAWKISH", "NEUTRAL", "DOVISH", "MIXED", "UNCLEAR", "UNAVAILABLE"]),
+    confidence: z.enum(CONFIDENCE),
+    summary: z.string(),
+    drivers: z.array(z.string()),
+    risks: z.array(z.string()),
+    evidenceRefs: z.array(z.string()),
+  })),
+  externalFactors: z.array(z.object({
+    name: z.string(),
+    status: z.enum(["EVIDENCED", "UNAVAILABLE"]),
+    impact: z.enum(["SUPPORTIVE", "NEUTRAL", "ADVERSE", "MIXED", "UNKNOWN"]),
+    currencies: z.array(marketCurrency),
+    detail: z.string(),
+    evidenceRefs: z.array(z.string()),
+  })),
+  keyRisks: z.array(z.object({
+    risk: z.string(),
+    trigger: z.string(),
+    currencies: z.array(marketCurrency),
+    confidence: z.enum(CONFIDENCE),
+    evidenceRefs: z.array(z.string()),
+  })),
+});
+export type MacroMarketAnalysis = z.infer<typeof MacroMarketAnalysisSchema>;
+
 export const SCHEMAS = {
   calendar_extraction: CalendarExtractionSchema,
   calendar_visibility: CalendarVisibilitySchema,
@@ -238,5 +286,6 @@ export const SCHEMAS = {
   session_brief: SessionBriefSchema,
   technical_analysis: TechnicalAnalysisSchema,
   trade_review: TradeReviewSchema,
+  macro_market_analysis: MacroMarketAnalysisSchema,
 } as const;
 export type SchemaName = keyof typeof SCHEMAS;

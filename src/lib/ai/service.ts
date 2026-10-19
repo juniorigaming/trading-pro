@@ -21,7 +21,9 @@ export interface AIImage {
 }
 
 export interface StructuredRequest {
-  purpose: string; // macro_extract | macro_interpret | session_brief | technical_analysis | trade_review
+  purpose: string; // macro_extract | macro_interpret | macro_market_analysis | session_brief | technical_analysis | trade_review
+  /** Desativa gravação opcional em ai_calls para análises que devem permanecer somente leitura. */
+  logCall?: boolean;
   prompt: PromptDef;
   user: string;
   images?: AIImage[];
@@ -127,7 +129,7 @@ export async function generateStructured<N extends SchemaName>(
   let outputTokens: number | null = null;
 
   const log = async (ok: boolean, err: string | null) => {
-    if (!logger) return;
+    if (req.logCall === false || !logger) return;
     try {
       await logger({
         purpose: req.purpose, provider, model, promptVersion: req.prompt.version, schemaName: req.schemaName,
