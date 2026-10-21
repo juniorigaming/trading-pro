@@ -18,7 +18,7 @@ type Tab = "ranking" | "preco" | "matriz" | "candidatos" | "risco" | "historico"
 
 export default function RankingG8Page() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("ranking");
+  const [tab, setTab] = useState<Tab>("preco");
   const [scores, setScores] = useState<CurrencyScoreView[] | null>(null);
   const [scoreHistory, setScoreHistory] = useState<MiniScorePoint[]>([]);
   const [latest, setLatest] = useState<MacroAnalysisResult | null>(null);
@@ -76,7 +76,7 @@ export default function RankingG8Page() {
     catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   const tabs = [
-    { id: "ranking" as Tab, label: "Macro por eventos", icon: Trophy }, { id: "preco" as Tab, label: "Preço 1D/1W", icon: BarChart3 }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
+    { id: "preco" as Tab, label: "Pares 1D/1W", icon: BarChart3 }, { id: "ranking" as Tab, label: "Macro por eventos", icon: Trophy }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
     { id: "risco" as Tab, label: "Event Risk", icon: Siren }, { id: "historico" as Tab, label: "Histórico 7D/30D/90D", icon: LineChartIcon }
   ];
 
@@ -92,7 +92,7 @@ export default function RankingG8Page() {
       <div className="mb-4"><Tabs tabs={tabs} value={tab} onChange={setTab} /></div>
       {err && <div className="mb-4"><Notice kind="error">{err}</Notice></div>}
       {busy && <div className="mb-4"><Spinner label={busy} /></div>}
-      {latest && <p className="text-[11px] text-text-muted mb-3">Base do score macro: análise #{latest.analysis_id} · {latest.date} · {SESSION_LABEL[latest.session]} · scoring {latest.meta.scoring_version}</p>}
+      {latest && tab !== "preco" && <p className="text-[11px] text-text-muted mb-3">Base do score macro: análise #{latest.analysis_id} · {latest.date} · {SESSION_LABEL[latest.session]} · scoring {latest.meta.scoring_version}</p>}
 
       {tab === "ranking" && (
         <div className="space-y-4">
@@ -125,7 +125,7 @@ export default function RankingG8Page() {
         </div>
       )}
       {tab === "preco" && (
-        <Section title="Força de preço — Exchange Rates UK Currency Strength Meter" sub="Scores originais, em rankings independentes 1D/Today e 1W. Este dado não substitui nem é somado ao score macro por eventos.">
+        <Section title="Pares por força de preço — Currency Strength Meter" sub="A shortlist 1D/1W aparece primeiro; o ranking completo das moedas fica logo abaixo. Métrica separada do score macro por eventos.">
           {priceErr && <div className="mb-3"><Notice kind="error">{priceErr}</Notice></div>}
           {priceBusy && <div className="mb-3"><Spinner label="Consultando Exchange Rates UK…" /></div>}
           {marketStrength && <CurrencyStrengthRankings market={marketStrength} />}

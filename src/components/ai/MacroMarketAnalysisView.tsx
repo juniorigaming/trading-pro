@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeft, ExternalLink, ShieldAlert } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import type { Currency } from "@/lib/ai/types";
 import {
   MARKET_REPORT_SECTION_IDS,
@@ -184,7 +184,7 @@ function renderSectionExtra(id: MarketReportSectionId, report: MarketMacroAnalys
     <p className="text-text-muted">Atualização: {report.marketStrength.updatedAt ? new Date(report.marketStrength.updatedAt).toLocaleString("pt-BR") : "não validada"} · captura: {new Date(report.marketStrength.retrievedAt).toLocaleString("pt-BR")}</p>
     <p><b>Eventos salvos:</b> {report.evidence.status === "available" ? "consulta somente leitura concluída" : "indisponíveis"}. {report.evidence.message ?? ""}</p>
   </div>;
-  if (id === "market_strength_1d") return <CurrencyStrengthRankings market={report.marketStrength} />;
+  if (id === "market_strength_1d") return <CurrencyStrengthRankings market={report.marketStrength} compact showPairCandidates={false} />;
   if (id === "fundamental_background") return <div className="space-y-2"><Notice kind="info">Qualidade dos fundamentos, viés e confiança são campos distintos. A força de preço 1D não compõe o julgamento fundamental.</Notice><p className="text-[10px] text-text-muted">Visão geral por moeda disponível também no bloco 11, com evidências e riscos individuais.</p></div>;
   if (id === "monetary_policy_g8") return <div className="space-y-2"><PolicyTable policies={report.policyRates} /><p className="text-[10px] text-text-muted">Taxas oficiais atuais não equivalem a expectativas de mercado; probabilidades/preços de cortes ou altas só seriam informados se uma fonte específica os fornecesse.</p></div>;
   if (id === "external_factors") return <div className="grid gap-2 md:grid-cols-2">{report.narrative.externalFactors.map((factor, index) => <article key={index} className="rounded-lg border border-border p-3"><div className="flex flex-wrap items-center gap-2"><b className="text-xs">{factor.name}</b><Badge className={factor.status === "EVIDENCED" ? "border-emerald/40 text-emerald" : "border-amber/40 text-amber"}>{factor.status === "EVIDENCED" ? factor.impact : "sem fonte validada"}</Badge></div><p className="mt-1 text-[11px] text-text-muted">{factor.detail}</p>{factor.currencies.length > 0 && <p className="mt-1 text-[10px] text-text-muted">Moedas: {factor.currencies.join(", ")}</p>}</article>)}</div>;
@@ -210,30 +210,41 @@ function renderSectionExtra(id: MarketReportSectionId, report: MarketMacroAnalys
 export default function MacroMarketAnalysisView({ report, onBack }: { report: MarketMacroAnalysisResponse; onBack: () => void }) {
   const mock = report.analysisStatus === "mock";
   const unavailable = report.analysisStatus === "unavailable";
+  const statusText = mock ? "Narrativa indisponível" : unavailable ? "IA indisponível" : "Análise concluída";
+  const detailedSectionIds = MARKET_REPORT_SECTION_IDS.filter((id) => id !== "executive_summary");
+
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center gap-2">
       <Btn variant="ghost" onClick={onBack}><ArrowLeft size={15} />Voltar</Btn>
-      <Badge className={mock || unavailable ? "border-amber/40 bg-amber/10 text-amber" : "border-emerald/40 bg-emerald/10 text-emerald"}>{mock ? "IA MOCK — narrativa não real" : unavailable ? "IA indisponível" : "análise qualitativa gerada"}</Badge>
-      <span className="text-[11px] text-text-muted">{new Date(report.generatedAt).toLocaleString("pt-BR")} · {report.ai.provider} / {report.ai.model}</span>
+      <Badge className={mock || unavailable ? "border-amber/40 bg-amber/10 text-amber" : "border-emerald/40 bg-emerald/10 text-emerald"}>{statusText}</Badge>
+      <span className="text-[11px] text-text-muted">Atualizada em {new Date(report.generatedAt).toLocaleString("pt-BR")}</span>
+      <span className="text-[11px] text-text-muted">· fonte de preço: {report.marketStrength.updatedAt ? new Date(report.marketStrength.updatedAt).toLocaleString("pt-BR") : "sem atualização validada"}</span>
     </div>
-    {mock && <Notice kind="warn"><b>Modo MOCK.</b> Nenhuma leitura qualitativa real foi gerada. Os dados determinísticos da fonte continuam identificados separadamente; configure um provider real antes de usar a narrativa.</Notice>}
-    {unavailable && <Notice kind="error">A chamada de IA falhou. O sistema manteve os dados das fontes, mas não fabricou conclusões fundamentais.</Notice>}
-    {!report.marketStrength.currentRankingAvailable && <Notice kind="warn"><ShieldAlert size={14} className="inline mr-1" />1D: {report.marketStrength.rankingMessage} Nenhum score foi estimado.</Notice>}
-    {!report.marketStrength.weeklyRankingAvailable && <Notice kind="warn"><ShieldAlert size={14} className="inline mr-1" />1W: {report.marketStrength.weeklyRankingMessage} Nenhum score foi estimado.</Notice>}
-    <div className="glass-card p-4 md:p-5 border border-accent/30">
-      <p className="text-[10px] uppercase tracking-wider text-text-muted">Resumo da execução</p>
+    {mock && <Notice kind="warn"><b>Narrativa IA indisponível.</b> Os dados tabulares da fonte continuam separados e identificados.</Notice>}
+    {unavailable && <Notice kind="warn">A chamada de IA não foi concluída. O sistema não fabricou conclusões; consulte os dados e a fonte indicados abaixo.</Notice>}
+
+    <section className="glass-card border border-accent/30 p-4 md:p-5">
+      <p className="text-[10px] uppercase tracking-wider text-text-muted">Resumo executivo</p>
       <h2 className="mt-1 text-lg font-extrabold text-text-primary">{report.narrative.headline}</h2>
       <p className="mt-2 text-sm leading-relaxed text-text-secondary">{report.narrative.executiveSummary}</p>
-    </div>
-    <div className="grid gap-3">
-      {MARKET_REPORT_SECTION_IDS.map((id) => {
-        const section = report.narrative.sections.find((item) => item.id === id);
-        return <Section key={id} title={MARKET_REPORT_SECTION_TITLES[id]} sub={section?.evidenceRefs.length ? `Evidências: ${section.evidenceRefs.join(" · ")}` : "Sem referência numérica além dos dados tabulares exibidos abaixo."}>
-          <p className="text-xs leading-relaxed text-text-secondary">{section?.summary ?? "Bloco não retornado pela IA."}</p>
-          {!!section?.observations.length && <ul className="mt-2 space-y-1">{section.observations.map((observation, i) => <li key={i} className="text-[11px] leading-snug text-text-muted">• {observation}</li>)}</ul>}
-          <div className="mt-3">{renderSectionExtra(id, report)}</div>
-        </Section>;
-      })}
-    </div>
+    </section>
+
+    <CurrencyStrengthRankings market={report.marketStrength} compact />
+
+    <p className="text-[10px] text-text-muted">Força de preço e fundamentos econômicos são dimensões distintas. Os pares acima são filtros informativos de 1D/1W, não ordens de operação.</p>
+
+    <details className="glass-card p-4 md:p-5">
+      <summary className="cursor-pointer text-sm font-extrabold text-text-primary">Abrir relatório detalhado: eventos, fundamentos, bancos centrais e riscos</summary>
+      <div className="mt-4 grid gap-3">
+        {detailedSectionIds.map((id) => {
+          const section = report.narrative.sections.find((item) => item.id === id);
+          return <Section key={id} title={MARKET_REPORT_SECTION_TITLES[id]} sub={section?.evidenceRefs.length ? `Evidências: ${section.evidenceRefs.join(" · ")}` : undefined}>
+            {section?.summary && <p className="text-xs leading-relaxed text-text-secondary">{section.summary}</p>}
+            {!!section?.observations.length && <ul className="mt-2 space-y-1">{section.observations.map((observation, i) => <li key={i} className="text-[11px] leading-snug text-text-muted">• {observation}</li>)}</ul>}
+            <div className="mt-3">{renderSectionExtra(id, report)}</div>
+          </Section>;
+        })}
+      </div>
+    </details>
   </div>;
 }

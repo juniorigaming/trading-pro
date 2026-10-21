@@ -85,7 +85,7 @@ export default function AnaliseMacroPage() {
         ocrConfidence: r.ocr_confidence ?? null, userConfirmed: true as const,
       }));
     setErr(null);
-    setBusy("Lendo o Currency Strength Meter 1D/Today, taxas oficiais e evidências macro confirmadas...");
+    setBusy("Consultando o Meter e as fontes macro disponíveis...");
     setBusyKind("market");
     try {
       const report = await apiFetch<MarketMacroAnalysisResponse>("/api/ai/macro/market-analysis", {
@@ -107,7 +107,7 @@ export default function AnaliseMacroPage() {
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      <PageHeader icon={BrainCircuit} title="Análise Macro IA" sub="Screenshots do calendário → OCR validado por você → interpretação ACTUAL vs FORECAST → Ranking G8, candidatos e risco de eventos. A IA apoia; não executa." right={
+      <PageHeader icon={BrainCircuit} title="Análise Macro IA" sub="Resumo atual do mercado e pares G8. Print do calendário é opcional; a análise principal funciona sem imagem." right={
         <div className="flex items-center gap-2">
           <button onClick={() => setShowToken((s) => !s)} className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary" title="Token de acesso às rotas IA (APP_API_TOKEN)"><KeyRound size={14} />{token ? "token ok" : "token"}</button>
           {showToken && <input value={token} onChange={(e) => { setTok(e.target.value); setToken(e.target.value); }} placeholder="APP_API_TOKEN (opcional)" className={`${inputCls} w-56`} type="password" />}
@@ -116,10 +116,10 @@ export default function AnaliseMacroPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <Tabs tabs={[{ id: "nova", label: "Nova análise", icon: Sparkles }, { id: "historico", label: "Histórico", icon: History }]} value={tab} onChange={setTab} />
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-text-muted">Sessão</span>
+        {tab === "nova" && step === "validate" && <div className="flex items-center gap-2 text-xs">
+          <span className="text-text-muted">Sessão do calendário</span>
           {SESSIONS.map((s) => <button key={s} onClick={() => setSession(s)} className={`px-3 py-1.5 rounded-lg border font-bold ${session === s ? "border-accent bg-accent-soft text-accent" : "border-border text-text-secondary"}`}>{SESSION_LABEL[s]}</button>)}
-        </div>
+        </div>}
       </div>
 
       {err && <div className="mb-4"><Notice kind="error">{err}</Notice></div>}
@@ -158,7 +158,7 @@ export default function AnaliseMacroPage() {
               "Lendo taxas e comunicados oficiais dos oito bancos centrais",
               "Consultando eventos confirmados e interpretações salvas em modo somente leitura",
               "Separando força de preço, fundamentos e confiança — sem alterar scores existentes",
-              "Gerando os 15 blocos da análise macro",
+              "Montando um resumo objetivo e a shortlist de pares 1D/1W",
             ]}
           />
         </div>
@@ -182,26 +182,34 @@ export default function AnaliseMacroPage() {
       )}
 
       {tab === "nova" && step === "upload" && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Section className="lg:col-span-2" title="1. Screenshots do calendário (Forex Factory ou similar)" sub="Envie quantos prints precisar (semana inteira, páginas diferentes). Eventos sem 'Actual' são tratados como pendentes.">
-            <ImageDropzone images={images} onChange={setImages} max={10} />
-            <div className="flex flex-wrap items-center gap-3 mt-4">
-              <Btn onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />ANALISAR MACRO COM IA</Btn>
-              <Btn onClick={extract} disabled={!images.length || !!busy} loading={busyKind === "extract"} loadingLabel="Aguarde, analisando as informações..."><ScanText size={16} />Ler com IA ({images.length})</Btn>
-              <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Inserir eventos manualmente</Btn>
+        <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Section className="lg:col-span-2" title="Leitura atual do mercado" sub="Gere o resumo e a shortlist de pares agora. Nenhum print é necessário.">
+              <p className="max-w-3xl text-xs leading-relaxed text-text-secondary">A leitura consulta a força de preço 1D/1W, dados macro disponíveis e fontes oficiais. Prints do calendário são apenas um complemento opcional e não bloqueiam a análise.</p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <Btn onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />Gerar análise atual</Btn>
+                <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Adicionar eventos manualmente (opcional)</Btn>
+              </div>
+              <p className="mt-3 text-[10px] text-text-muted">Consulta somente leitura. Não salva eventos, scores nem histórico de chamadas.</p>
+            </Section>
+            <Section title="O que você verá" sub="Visão resumida e acionável">
+              <ul className="space-y-2 text-xs text-text-secondary">
+                <li><b>Pares G8:</b> shortlist quando a força de preço concorda em 1D e 1W.</li>
+                <li><b>Resumo macro:</b> fundamentos em dimensão separada do preço.</li>
+                <li><b>Detalhes:</b> fontes, eventos e metodologia ficam disponíveis sob demanda.</li>
+              </ul>
+            </Section>
+          </div>
+
+          <details className="glass-card p-4 md:p-5">
+            <summary className="cursor-pointer text-sm font-bold text-text-primary">Complementar com print ou evento de calendário (opcional)</summary>
+            <p className="mt-2 text-xs text-text-muted">Use somente se quiser acrescentar eventos confirmados. O print não substitui os dados do Currency Strength Meter.</p>
+            <div className="mt-3"><ImageDropzone images={images} onChange={setImages} max={10} /></div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Btn onClick={extract} disabled={!images.length || !!busy} loading={busyKind === "extract"} loadingLabel="Lendo print..."> <ScanText size={16} />Ler print e revisar eventos{images.length ? ` (${images.length})` : ""}</Btn>
+              <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Adicionar evento sem print</Btn>
             </div>
-            <p className="text-[10px] text-text-muted mt-2">A análise consulta o ranking atual do Exchange Rates UK e fontes oficiais. Prints selecionados só complementam a análise depois de OCR, conferência e confirmação; não substituem o ranking 1D/Today.</p>
-          </Section>
-          <Section title="Como funciona" sub="Pipeline determinístico com IA só onde é necessária">
-            <ol className="text-xs text-text-secondary space-y-1.5 list-decimal pl-4">
-              <li><b>OCR estruturado</b>: a IA lê data, hora, moeda, evento, impacto, actual/forecast/previous. Nunca inventa — campos ilegíveis ficam <i>null</i> com confiança baixa.</li>
-              <li><b>Validação</b>: você confere, edita, adiciona ou remove. Suas edições são auditadas.</li>
-              <li><b>RAW salvo</b> em <code>economic_events</code> (deduplicado por evento/horário; revisões substituem a versão anterior).</li>
-              <li><b>Interpretação</b> (IA, 1x por evento): ACTUAL vs FORECAST prioritário, categoria, importância, confiança, implicação para a moeda. Nada de regra simplista “juros sobem = moeda sobe”.</li>
-              <li><b>Score G8</b> (backend, sem IA): pesos por categoria/impacto/confiança, decaimento temporal, revisão por evento. Persistido com previous_score/delta/momentum.</li>
-              <li><b>Candidatos</b>: 28 pares, divergência ≥ 1.0, prioridade por divergência × confiança, risco de eventos por perna.</li>
-            </ol>
-          </Section>
+          </details>
         </div>
       )}
 
@@ -210,8 +218,8 @@ export default function AnaliseMacroPage() {
           <OcrValidationTable rows={rows} onChange={setRows} currencies={ALL_CURRENCIES} />
           <div className="flex flex-wrap items-center gap-3 mt-4">
             {extractionRejected > 0 && <p className="text-[11px] text-amber mb-2">{extractionRejected} linha(s) foram rejeitadas pela validação do código (moeda/evento/valor não constam no texto transcrito ou não foram confirmadas na imagem). Veja no modo auditoria após analisar.</p>}
-            <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Aguarde, analisando as informações..."><Sparkles size={16} />Confirmar e analisar ({SESSION_LABEL[session]})</Btn>
-            <Btn variant="ghost" onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />ANALISAR MACRO COM IA</Btn>
+            <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Salvando e recalculando..."><Sparkles size={16} />Salvar eventos e atualizar Ranking G8</Btn>
+            <Btn variant="ghost" onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />Gerar resumo atual com estes eventos</Btn>
             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
             <p className="w-full text-[10px] text-text-muted">Consulta somente leitura: não salva eventos, histórico de chamadas ou scores. Eventos só entram se estiverem confirmados e permanecem complementares ao ranking 1D/Today.</p>
           </div>

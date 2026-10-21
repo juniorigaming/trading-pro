@@ -1,6 +1,7 @@
 import { G8 } from "@/lib/ai/types";
 import type { ExchangeRatesMarketSnapshot, MarketStrengthEntry } from "@/lib/macro/market-analysis-types";
 import { Badge, Notice } from "./ui";
+import PricePairCandidates from "./PricePairCandidates";
 
 type Period = "1D" | "1W";
 
@@ -66,7 +67,7 @@ function PeriodTable({
               <th className="px-2 py-2 text-right">Score {period} (%)</th>
               <th className="px-2 py-2 text-right">Rank fonte</th>
               <th className="px-2 py-2 text-right">W / L / F</th>
-              <th className="px-2 py-2 text-right">Pares</th>
+              <th className="px-2 py-2 text-right">Comparações</th>
             </tr>
           </thead>
           <tbody>
@@ -88,26 +89,44 @@ function PeriodTable({
   );
 }
 
-export default function CurrencyStrengthRankings({ market }: { market: ExchangeRatesMarketSnapshot }) {
+export default function CurrencyStrengthRankings({
+  market,
+  compact = false,
+  showPairCandidates = true,
+}: {
+  market: ExchangeRatesMarketSnapshot;
+  compact?: boolean;
+  showPairCandidates?: boolean;
+}) {
+  const tables = (
+    <div className="grid gap-3 xl:grid-cols-2">
+      <PeriodTable
+        period="1D"
+        entries={market.primaryRanking}
+        available={market.currentRankingAvailable}
+        message={market.rankingMessage}
+        sourceStatus={market.status}
+      />
+      <PeriodTable
+        period="1W"
+        entries={market.weeklyRanking}
+        available={market.weeklyRankingAvailable}
+        message={market.weeklyRankingMessage}
+        sourceStatus={market.status}
+      />
+    </div>
+  );
+
   return (
     <div className="space-y-3">
-      <Notice kind="info">Força de preço original do Currency Strength Meter (desempenho mediano percentual por horizonte). É distinta dos scores macro por eventos econômicos mostrados na aba “Macro por eventos”; os rankings 1D e 1W são separados e nenhum é somado ao score macro.</Notice>
-      <div className="grid gap-3 xl:grid-cols-2">
-        <PeriodTable
-          period="1D"
-          entries={market.primaryRanking}
-          available={market.currentRankingAvailable}
-          message={market.rankingMessage}
-          sourceStatus={market.status}
-        />
-        <PeriodTable
-          period="1W"
-          entries={market.weeklyRanking}
-          available={market.weeklyRankingAvailable}
-          message={market.weeklyRankingMessage}
-          sourceStatus={market.status}
-        />
-      </div>
+      {!compact && <Notice kind="info">Força de preço original do Currency Strength Meter. É distinta dos scores macro por eventos econômicos; os rankings 1D e 1W não são somados ao score macro.</Notice>}
+      {showPairCandidates && <PricePairCandidates market={market} compact={compact} />}
+      {compact ? (
+        <details className="rounded-xl border border-border bg-surface-2/30 p-3">
+          <summary className="cursor-pointer text-xs font-bold text-text-primary">Ver ranking completo das oito moedas (1D e 1W)</summary>
+          <div className="mt-3">{tables}</div>
+        </details>
+      ) : tables}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-muted">
         <a href={market.sourceUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">Exchange Rates UK — abrir Currency Strength Meter</a>
         <span>Atualização: {market.updatedAt ? new Date(market.updatedAt).toLocaleString("pt-BR") : "não validada"}</span>
