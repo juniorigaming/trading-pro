@@ -44,10 +44,14 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-col gap-2 rounded-xl border border-sky/30 bg-sky/10 px-3 py-2 text-xs text-sky sm:flex-row sm:items-center sm:justify-between">
+        <span><b>Este bloco é o score macro por eventos econômicos.</b> Não é força de preço do Currency Strength Meter e não deve ser comparado como se fosse a mesma métrica.</span>
+        <a href="/ranking-g8" className="shrink-0 font-bold underline underline-offset-2">Abrir Ranking G8 → escolha “Preço 1D/1W”</a>
+      </div>
       {/* 1. Resumo macro */}
       <div className="glass-card p-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-text-muted">Moeda mais forte</p>
+          <p className="text-[10px] uppercase tracking-wider text-text-muted">Maior score macro — eventos</p>
           {s.strongest ? (
             <>
               <p className="text-xl font-extrabold text-emerald">{s.strongest.currency} <span className="text-sm tabular-nums">{fmt5(s.strongest.score)}</span></p>
@@ -57,7 +61,7 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
           ) : <p className="text-sm text-text-muted">sem dado</p>}
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-text-muted">Moeda mais fraca</p>
+          <p className="text-[10px] uppercase tracking-wider text-text-muted">Menor score macro — eventos</p>
           {s.weakest ? (
             <>
               <p className="text-xl font-extrabold text-rose">{s.weakest.currency} <span className="text-sm tabular-nums">{fmt5(s.weakest.score)}</span></p>
@@ -123,7 +127,7 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
       <div className="flex items-start gap-2 rounded-xl border border-sky/30 bg-sky/10 px-3 py-2 text-xs text-sky">
         <Info size={14} className="mt-0.5 shrink-0" />
         <p>
-          <b>Viés macro não representa entrada operacional.</b> A força indica a qualidade da EVIDÊNCIA macro, não probabilidade de lucro.
+          <b>Viés macro não representa entrada operacional.</b> O score mede a direção/qualidade da evidência macro por eventos; não é a força de preço nem probabilidade de lucro.
           {s.top_long.length + s.top_short.length > 0 && <> Priorize a observação técnica (SMC/ICT) em: <b>{[...s.top_long, ...s.top_short].map((c) => c.symbol).join(", ")}</b>.</>}
         </p>
       </div>

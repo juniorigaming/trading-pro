@@ -316,6 +316,7 @@ function emptyNarrative(message: string) {
 function buildAllowedRefs(evidence: MacroEvidenceSnapshot, market: ExchangeRatesMarketSnapshot, policies: CentralBankPolicySnapshot[]): Set<string> {
   const refs = new Set<string>();
   if (market.currentRankingAvailable) refs.add("strength:1d");
+  if (market.weeklyRankingAvailable) refs.add("strength:1w");
   if (market.currentRankingAvailable && market.persistence.fiveDay.some((row) => row.value !== null)) refs.add("heatmap:5d");
   if (market.currentRankingAvailable && market.persistence.monthToDate.some((row) => row.value !== null)) refs.add("heatmap:mtd");
   for (const policy of policies) if (policy.status === "available") refs.add(`policy:${policy.currency}`);
@@ -339,6 +340,7 @@ function rawPairAsymmetry(market: ExchangeRatesMarketSnapshot) {
 
 function modelInput(market: ExchangeRatesMarketSnapshot, policies: CentralBankPolicySnapshot[], evidence: MacroEvidenceSnapshot, refs: Set<string>, now: Date) {
   const currentRanking = market.currentRankingAvailable ? market.primaryRanking : [];
+  const weeklyRanking = market.weeklyRankingAvailable ? market.weeklyRanking : [];
   const recentEvents = evidence.released.slice(0, MODEL_RELEASED_EVENTS);
   const upcomingEvents = evidence.upcoming.slice(0, MODEL_UPCOMING_EVENTS);
   return {
@@ -351,15 +353,19 @@ function modelInput(market: ExchangeRatesMarketSnapshot, policies: CentralBankPo
       status: market.status,
       currentRankingAvailable: market.currentRankingAvailable,
       rankingMessage: market.rankingMessage,
-      requiredPeriod: "1D / Today",
-      g8Ranking: currentRanking,
-      persistence: market.currentRankingAvailable ? {
+      weeklyRankingAvailable: market.weeklyRankingAvailable,
+      weeklyRankingMessage: market.weeklyRankingMessage,
+      requiredPeriods: ["1D / Today", "1W"],
+      g8Ranking1D: currentRanking,
+      g8Ranking1W: weeklyRanking,
+      persistence: {
         oneDayOfficial: currentRanking.map((row) => ({ currency: row.currency, score: row.score, g8Rank: row.g8Rank, sourceRank: row.sourceRank })),
+        oneWeekOfficial: weeklyRanking.map((row) => ({ currency: row.currency, score: row.score, g8Rank: row.g8Rank, sourceRank: row.sourceRank })),
         fiveDayDerivedHeatmapMedian: market.persistence.fiveDay,
         monthToDateDerivedHeatmapMedian: market.persistence.monthToDate,
         yearToDateOfficialMeter: market.persistence.yearToDate,
         methodNotes: market.persistence.notes,
-      } : { unavailable: true, message: market.rankingMessage },
+      },
     },
     officialCentralBanks: policies.map((policy) => ({
       currency: policy.currency,

@@ -11,6 +11,7 @@ import {
   type MarketReportSectionId,
 } from "@/lib/macro/market-analysis-types";
 import { Badge, Btn, Notice, Section } from "./ui";
+import CurrencyStrengthRankings from "./CurrencyStrengthRankings";
 
 const CURRENCIES: Currency[] = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"];
 const CURRENCY_NAMES: Record<Currency, string> = {
@@ -39,6 +40,10 @@ function signedScore(value: number | null | undefined, digits?: number): string 
   const text = digits === undefined ? String(value).replace(".", ",") : numberText(value, digits);
   return `${value > 0 ? "+" : ""}${text}`;
 }
+function signedMarketScore(value: number | null | undefined): string {
+  const text = signedScore(value);
+  return text === "—" ? text : `${text}%`;
+}
 function signedPct(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${value > 0 ? "+" : ""}${numberText(value, 6)}%`;
@@ -63,52 +68,28 @@ function BiasText({ value }: { value: string }) {
   return <span className={`font-bold ${color}`}>{BIAS_LABEL[value] ?? value}</span>;
 }
 
-function RankingTable({ market }: { market: ExchangeRatesMarketSnapshot }) {
-  if (!market.primaryRanking.length) return <p className="text-xs text-text-muted">Ranking atual não obtido. Nenhum score foi estimado.</p>;
-  return (
-    <div className="space-y-2">
-      {!market.currentRankingAvailable && <Notice kind="warn">{market.status === "stale" ? "Os valores abaixo são apenas a última captura conhecida e não são tratados como ranking atual." : "O snapshot 1D está incompleto ou não foi validado como ranking G8 atual; scores ausentes ficam sem valor e nenhum foi estimado."}</Notice>}
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full text-xs">
-          <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr>
-            <th className="px-2 py-2 text-left">Rank G8</th><th className="px-2 py-2 text-left">Rank fonte</th><th className="px-2 py-2 text-left">Moeda</th><th className="px-2 py-2 text-right">Score 1D</th><th className="px-2 py-2 text-right">Vitórias</th><th className="px-2 py-2 text-right">Derrotas</th><th className="px-2 py-2 text-right">Empates</th><th className="px-2 py-2 text-right">Pares</th>
-          </tr></thead>
-          <tbody>{market.primaryRanking.map((row) => <tr key={row.currency} className="border-t border-border">
-            <td className="px-2 py-2 font-bold">{row.g8Rank == null ? "—" : `#${row.g8Rank}`}</td>
-            <td className="px-2 py-2 text-text-muted">{row.sourceRank == null ? "—" : `#${row.sourceRank}`}</td>
-            <td className="px-2 py-2 font-extrabold text-text-primary">{row.currency}</td>
-            <td className="px-2 py-2 text-right font-extrabold tabular-nums">{signedScore(row.score)}</td>
-            <td className="px-2 py-2 text-right tabular-nums">{row.wins ?? "—"}</td><td className="px-2 py-2 text-right tabular-nums">{row.losses ?? "—"}</td>
-            <td className="px-2 py-2 text-right tabular-nums">{row.flat ?? "—"}</td><td className="px-2 py-2 text-right tabular-nums">{row.comparisons ?? "—"}</td>
-          </tr>)}</tbody>
-        </table>
-      </div>
-      <p className="text-[10px] text-text-muted">Score 1D e posição original da fonte não são alterados. A posição G8 é recalculada após filtrar NOK/SEK; a coluna “Rank fonte” mantém a posição publicada entre as moedas comparadas pela fonte.</p>
-      {market.updatedAt && <p className="text-[10px] text-text-muted">Atualizado pela fonte: {new Date(market.updatedAt).toLocaleString("pt-BR")} · idade {market.ageHours ?? "—"}h.</p>}
-    </div>
-  );
-}
-
 function PersistenceTable({ market }: { market: ExchangeRatesMarketSnapshot }) {
   const oneDay = new Map(market.primaryRanking.map((row) => [row.currency, row.score]));
+  const oneWeek = new Map(market.weeklyRanking.map((row) => [row.currency, row.score]));
   const fiveDay = new Map(market.persistence.fiveDay.map((row) => [row.currency, row]));
   const monthToDate = new Map(market.persistence.monthToDate.map((row) => [row.currency, row]));
   const yearToDate = new Map(market.persistence.yearToDate.map((row) => [row.currency, row.score]));
   return (
     <div className="space-y-2">
       {!market.currentRankingAvailable && <Notice kind="warn">Os dados 1D desta tabela não são tratados como ranking atual validado.</Notice>}
+      {!market.weeklyRankingAvailable && <Notice kind="warn">{market.weeklyRankingMessage}</Notice>}
       <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-xs">
-          <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr><th className="px-2 py-2 text-left">Moeda</th><th className="px-2 py-2 text-right">1D oficial</th><th className="px-2 py-2 text-right">5D heatmap</th><th className="px-2 py-2 text-right">MTD heatmap</th><th className="px-2 py-2 text-right">YTD oficial</th><th className="px-2 py-2 text-left">Base</th></tr></thead>
+          <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr><th className="px-2 py-2 text-left">Moeda</th><th className="px-2 py-2 text-right">1D oficial (%)</th><th className="px-2 py-2 text-right">1W oficial (%)</th><th className="px-2 py-2 text-right">5D heatmap</th><th className="px-2 py-2 text-right">MTD heatmap</th><th className="px-2 py-2 text-right">YTD oficial (%)</th><th className="px-2 py-2 text-left">Base</th></tr></thead>
           <tbody>{CURRENCIES.map((currency) => {
             const five = fiveDay.get(currency), mtd = monthToDate.get(currency);
             const fiveStatus = five && five.observations < five.expectedObservations ? `parcial ${five.observations}/7` : "mediana G8";
             const mtdStatus = mtd && mtd.observations < mtd.expectedObservations ? `parcial ${mtd.observations}/7` : "mediana G8";
             return <tr key={currency} className="border-t border-border">
-              <td className="px-2 py-2 font-bold">{currency}</td><td className="px-2 py-2 text-right tabular-nums">{signedScore(oneDay.get(currency))}</td>
+              <td className="px-2 py-2 font-bold">{currency}</td><td className="px-2 py-2 text-right tabular-nums">{signedMarketScore(oneDay.get(currency))}</td><td className="px-2 py-2 text-right tabular-nums">{signedMarketScore(oneWeek.get(currency))}</td>
               <td className="px-2 py-2 text-right tabular-nums" title={five?.method}>{signedPct(five?.value)} <span className="text-[9px] text-text-muted">({fiveStatus})</span></td>
               <td className="px-2 py-2 text-right tabular-nums" title={mtd?.method}>{signedPct(mtd?.value)} <span className="text-[9px] text-text-muted">({mtdStatus})</span></td>
-              <td className="px-2 py-2 text-right tabular-nums">{signedScore(yearToDate.get(currency))}</td><td className="px-2 py-2 text-[10px] text-text-muted">1D/YTD: Meter · 5D/MTD: heatmap G8</td>
+              <td className="px-2 py-2 text-right tabular-nums">{signedMarketScore(yearToDate.get(currency))}</td><td className="px-2 py-2 text-[10px] text-text-muted">1D/1W/YTD: Meter · 5D/MTD: heatmap G8</td>
             </tr>;
           })}</tbody>
         </table>
@@ -151,8 +132,8 @@ function EventTable({ events }: { events: MacroEvidenceEvent[] }) {
 function DivergenceTable({ report }: { report: MarketMacroAnalysisResponse }) {
   return <div className="overflow-x-auto rounded-xl border border-border">
     <table className="w-full text-xs min-w-[820px]">
-      <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr><th className="px-2 py-2 text-left">Moeda</th><th className="px-2 py-2 text-left">Força 1D de preço</th><th className="px-2 py-2 text-left">Fundamento</th><th className="px-2 py-2 text-left">Qualidade</th><th className="px-2 py-2 text-left">Confiança</th><th className="px-2 py-2 text-left">Leitura separada</th></tr></thead>
-      <tbody>{report.divergences.map((row) => <tr key={row.currency} className="border-t border-border align-top"><td className="px-2 py-2 font-bold">{row.currency}</td><td className="px-2 py-2">{row.marketDirection} {signedScore(row.marketScore)}</td><td className="px-2 py-2"><BiasText value={row.fundamentalBias} /></td><td className="px-2 py-2">{QUALITY_LABEL[row.fundamentalQuality] ?? row.fundamentalQuality}</td><td className="px-2 py-2">{row.confidence}</td><td className="px-2 py-2"><Badge className={row.status === "DIVERGENT" ? "border-amber/40 bg-amber/10 text-amber" : row.status === "ALIGNED" ? "border-emerald/40 bg-emerald/10 text-emerald" : "border-border text-text-muted"}>{ALIGNMENT_LABEL[row.status]}</Badge><p className="mt-1 text-[10px] text-text-muted">{row.explanation}</p></td></tr>)}</tbody>
+      <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr><th className="px-2 py-2 text-left">Moeda</th><th className="px-2 py-2 text-left">Força 1D de preço (%)</th><th className="px-2 py-2 text-left">Fundamento</th><th className="px-2 py-2 text-left">Qualidade</th><th className="px-2 py-2 text-left">Confiança</th><th className="px-2 py-2 text-left">Leitura separada</th></tr></thead>
+      <tbody>{report.divergences.map((row) => <tr key={row.currency} className="border-t border-border align-top"><td className="px-2 py-2 font-bold">{row.currency}</td><td className="px-2 py-2">{row.marketDirection} {signedMarketScore(row.marketScore)}</td><td className="px-2 py-2"><BiasText value={row.fundamentalBias} /></td><td className="px-2 py-2">{QUALITY_LABEL[row.fundamentalQuality] ?? row.fundamentalQuality}</td><td className="px-2 py-2">{row.confidence}</td><td className="px-2 py-2"><Badge className={row.status === "DIVERGENT" ? "border-amber/40 bg-amber/10 text-amber" : row.status === "ALIGNED" ? "border-emerald/40 bg-emerald/10 text-emerald" : "border-border text-text-muted"}>{ALIGNMENT_LABEL[row.status]}</Badge><p className="mt-1 text-[10px] text-text-muted">{row.explanation}</p></td></tr>)}</tbody>
     </table>
   </div>;
 }
@@ -162,9 +143,9 @@ function PairTable({ report }: { report: MarketMacroAnalysisResponse }) {
   return <div className="space-y-2">
     <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full text-xs min-w-[900px]">
-        <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr><th className="px-2 py-2 text-left">Par (ordem G8)</th><th className="px-2 py-2 text-left">Assimetria 1D</th><th className="px-2 py-2 text-left">Mais forte por preço</th><th className="px-2 py-2 text-left">Alinhamento fundamentos</th><th className="px-2 py-2 text-left">Spread taxa oficial</th></tr></thead>
+        <thead className="bg-surface-2 text-[10px] uppercase text-text-muted"><tr><th className="px-2 py-2 text-left">Par (ordem G8)</th><th className="px-2 py-2 text-left">Assimetria 1D (p.p.)</th><th className="px-2 py-2 text-left">Mais forte por preço</th><th className="px-2 py-2 text-left">Alinhamento fundamentos</th><th className="px-2 py-2 text-left">Spread taxa oficial</th></tr></thead>
         <tbody>{report.pairAsymmetries.map((row) => <tr key={row.pair} className="border-t border-border">
-          <td className="px-2 py-2 font-bold">{row.pair}</td><td className="px-2 py-2 tabular-nums">{signedScore(row.marketSpread, 4)} <span className="text-[10px] text-text-muted">({row.base}: {signedScore(row.baseMarketScore)} · {row.quote}: {signedScore(row.quoteMarketScore)})</span></td>
+          <td className="px-2 py-2 font-bold">{row.pair}</td><td className="px-2 py-2 tabular-nums">{signedScore(row.marketSpread, 4)} p.p. <span className="text-[10px] text-text-muted">({row.base}: {signedMarketScore(row.baseMarketScore)} · {row.quote}: {signedMarketScore(row.quoteMarketScore)})</span></td>
           <td className="px-2 py-2">{row.strongerByMarket === "TIED" ? "empate" : row.strongerByMarket}</td><td className="px-2 py-2">{ALIGNMENT_LABEL[row.fundamentalAlignment]}<span className="block text-[10px] text-text-muted">confiança {row.base}: {row.baseConfidence} · {row.quote}: {row.quoteConfidence}</span></td>
           <td className="px-2 py-2">{ppSpread(row.policyRateSpreadLow, row.policyRateSpreadHigh)}</td>
         </tr>)}</tbody>
@@ -184,7 +165,7 @@ function CurrencyDetails({ report }: { report: MarketMacroAnalysisResponse }) {
       const policy = policies.get(currency);
       return <article key={currency} className="rounded-xl border border-border bg-surface-2/50 p-3">
         <div className="flex flex-wrap items-center gap-2"><b className="text-sm text-text-primary">{currency}</b><span className="text-[10px] text-text-muted">{CURRENCY_NAMES[currency]}</span></div>
-        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]"><Badge className="border-border text-text-secondary">1D {signedScore(report.marketStrength.currentRankingAvailable ? scores.get(currency) : null)}</Badge><Badge className="border-border text-text-secondary">fund. <BiasText value={view?.fundamentalBias ?? "INSUFFICIENT_DATA"} /></Badge></div>
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]"><Badge className="border-border text-text-secondary">1D {signedMarketScore(report.marketStrength.currentRankingAvailable ? scores.get(currency) : null)}</Badge><Badge className="border-border text-text-secondary">1W {signedMarketScore(report.marketStrength.weeklyRankingAvailable ? report.marketStrength.weeklyRanking.find((row) => row.currency === currency)?.score : null)}</Badge><Badge className="border-border text-text-secondary">fund. <BiasText value={view?.fundamentalBias ?? "INSUFFICIENT_DATA"} /></Badge></div>
         <p className="mt-2 text-[10px] text-text-muted">Qualidade: <b>{QUALITY_LABEL[view?.fundamentalQuality ?? "INSUFFICIENT_DATA"]}</b> · confiança: <b>{view?.confidence ?? "LOW"}</b></p>
         <p className="mt-1 text-[10px] text-text-muted">Política: <b>{POLICY_LABEL[view?.policyStance ?? "UNAVAILABLE"]}</b>{policy?.status === "available" ? ` · ${policy.rateText}` : " · taxa indisponível"}</p>
         <p className="mt-2 text-xs leading-snug text-text-secondary">{view?.summary ?? "Sem leitura qualitativa disponível."}</p>
@@ -198,11 +179,12 @@ function CurrencyDetails({ report }: { report: MarketMacroAnalysisResponse }) {
 function renderSectionExtra(id: MarketReportSectionId, report: MarketMacroAnalysisResponse) {
   if (id === "source_reliability") return <div className="space-y-2 rounded-xl border border-border bg-surface-2/50 p-3 text-xs">
     <p><b>Exchange Rates UK:</b> {statusBadge(report.marketStrength.status)} <a href={report.marketStrength.sourceUrl} target="_blank" rel="noreferrer" className="ml-2 text-accent hover:underline">abrir fonte</a></p>
-    <p className="text-text-muted">{report.marketStrength.rankingMessage}</p>
+    <p className="text-text-muted"><b>1D/Today:</b> {report.marketStrength.rankingMessage}</p>
+    <p className="text-text-muted"><b>1W:</b> {report.marketStrength.weeklyRankingMessage}</p>
     <p className="text-text-muted">Atualização: {report.marketStrength.updatedAt ? new Date(report.marketStrength.updatedAt).toLocaleString("pt-BR") : "não validada"} · captura: {new Date(report.marketStrength.retrievedAt).toLocaleString("pt-BR")}</p>
     <p><b>Eventos salvos:</b> {report.evidence.status === "available" ? "consulta somente leitura concluída" : "indisponíveis"}. {report.evidence.message ?? ""}</p>
   </div>;
-  if (id === "market_strength_1d") return <RankingTable market={report.marketStrength} />;
+  if (id === "market_strength_1d") return <CurrencyStrengthRankings market={report.marketStrength} />;
   if (id === "fundamental_background") return <div className="space-y-2"><Notice kind="info">Qualidade dos fundamentos, viés e confiança são campos distintos. A força de preço 1D não compõe o julgamento fundamental.</Notice><p className="text-[10px] text-text-muted">Visão geral por moeda disponível também no bloco 11, com evidências e riscos individuais.</p></div>;
   if (id === "monetary_policy_g8") return <div className="space-y-2"><PolicyTable policies={report.policyRates} /><p className="text-[10px] text-text-muted">Taxas oficiais atuais não equivalem a expectativas de mercado; probabilidades/preços de cortes ou altas só seriam informados se uma fonte específica os fornecesse.</p></div>;
   if (id === "external_factors") return <div className="grid gap-2 md:grid-cols-2">{report.narrative.externalFactors.map((factor, index) => <article key={index} className="rounded-lg border border-border p-3"><div className="flex flex-wrap items-center gap-2"><b className="text-xs">{factor.name}</b><Badge className={factor.status === "EVIDENCED" ? "border-emerald/40 text-emerald" : "border-amber/40 text-amber"}>{factor.status === "EVIDENCED" ? factor.impact : "sem fonte validada"}</Badge></div><p className="mt-1 text-[11px] text-text-muted">{factor.detail}</p>{factor.currencies.length > 0 && <p className="mt-1 text-[10px] text-text-muted">Moedas: {factor.currencies.join(", ")}</p>}</article>)}</div>;
@@ -218,7 +200,7 @@ function renderSectionExtra(id: MarketReportSectionId, report: MarketMacroAnalys
     {report.warnings.map((warning, index) => <Notice key={index} kind="warn">{warning}</Notice>)}
   </div>;
   if (id === "methodology_and_disclaimer") return <div className="space-y-2 text-xs text-text-secondary">
-    <p>Ranking primário: Currency Strength Meter 1D/Today do Exchange Rates UK. Scores originais preservados; NOK/SEK são removidas apenas da lista G8. 5D/MTD, quando disponíveis, são medianas derivadas da heatmap G8; YTD usa score publicado do Meter.</p>
+    <p>Força de preço: Currency Strength Meter 1D/Today e 1W do Exchange Rates UK, em rankings separados; scores originais preservados e NOK/SEK removidas apenas da lista G8. A divergência preço-fundamentos e a assimetria de pares usam somente o 1D atual validado. 5D/MTD, quando disponíveis, são medianas derivadas da heatmap G8; YTD usa score publicado do Meter.</p>
     <p>Eventos existentes são consultados sem atualizar interpretações ou scores. Eventos de screenshots enviados agora só entram se confirmados e permanecem complementares. Taxas oficiais e textos de política são leitura pontual das páginas oficiais, cada uma com status e data.</p>
     <p><b>Assimetria não é recomendação de compra/venda.</b> Esta análise é informativa, pode estar incompleta e não substitui validação de dados, gestão de risco ou avaliação independente.</p>
   </div>;
@@ -236,7 +218,8 @@ export default function MacroMarketAnalysisView({ report, onBack }: { report: Ma
     </div>
     {mock && <Notice kind="warn"><b>Modo MOCK.</b> Nenhuma leitura qualitativa real foi gerada. Os dados determinísticos da fonte continuam identificados separadamente; configure um provider real antes de usar a narrativa.</Notice>}
     {unavailable && <Notice kind="error">A chamada de IA falhou. O sistema manteve os dados das fontes, mas não fabricou conclusões fundamentais.</Notice>}
-    {!report.marketStrength.currentRankingAvailable && <Notice kind="warn"><ShieldAlert size={14} className="inline mr-1" />{report.marketStrength.rankingMessage} Nenhum ranking foi estimado.</Notice>}
+    {!report.marketStrength.currentRankingAvailable && <Notice kind="warn"><ShieldAlert size={14} className="inline mr-1" />1D: {report.marketStrength.rankingMessage} Nenhum score foi estimado.</Notice>}
+    {!report.marketStrength.weeklyRankingAvailable && <Notice kind="warn"><ShieldAlert size={14} className="inline mr-1" />1W: {report.marketStrength.weeklyRankingMessage} Nenhum score foi estimado.</Notice>}
     <div className="glass-card p-4 md:p-5 border border-accent/30">
       <p className="text-[10px] uppercase tracking-wider text-text-muted">Resumo da execução</p>
       <h2 className="mt-1 text-lg font-extrabold text-text-primary">{report.narrative.headline}</h2>

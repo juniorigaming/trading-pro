@@ -5,7 +5,7 @@ export type MarketNarrativeStatus = "available" | "mock" | "unavailable";
 
 export interface MarketStrengthEntry {
   currency: Currency;
-  /** Score original publicado no período pela Currency Strength Meter; não reescalado. */
+  /** Desempenho mediano (%) original publicado no período pela Currency Strength Meter; não reescalado. */
   score: number | null;
   /** Posição original na fonte, que inclui NOK/SEK. */
   sourceRank: number | null;
@@ -34,8 +34,12 @@ export interface ExchangeRatesMarketSnapshot {
   ageHours: number | null;
   currentRankingAvailable: boolean;
   rankingMessage: string;
+  weeklyRankingAvailable: boolean;
+  weeklyRankingMessage: string;
   /** Valores 1D originais do Currency Strength Meter; ranking de exibição filtra NOK/SEK. */
   primaryRanking: MarketStrengthEntry[];
+  /** Valores 1W originais do Currency Strength Meter; ranking de exibição filtra NOK/SEK. */
+  weeklyRanking: MarketStrengthEntry[];
   /** 5D e MTD vêm da mediana das variações percentuais dos 7 pares G8; YTD é o score original do meter. */
   persistence: {
     fiveDay: HorizonMarketEntry[];
@@ -124,11 +128,11 @@ export type MarketReportSectionId = (typeof MARKET_REPORT_SECTION_IDS)[number];
 export const MARKET_REPORT_SECTION_TITLES: Record<MarketReportSectionId, string> = {
   executive_summary: "1. Resumo executivo",
   source_reliability: "2. Fonte primária e atualização",
-  market_strength_1d: "3. Força de mercado — Currency Strength Meter 1D/Today",
+  market_strength_1d: "3. Força de preço — Currency Strength Meter 1D e 1W",
   fundamental_background: "4. Qualidade e pano de fundo dos fundamentos",
   monetary_policy_g8: "5. Bancos centrais, taxas e orientação oficial",
   external_factors: "6. Fatores externos: risco, commodities e geopolítica",
-  horizon_persistence: "7. Persistência: 1D, 5D, MTD e YTD",
+  horizon_persistence: "7. Persistência: 1D, 1W, 5D, MTD e YTD",
   actual_vs_forecast: "8. Divulgações: Actual × Forecast × Previous",
   price_fundamental_divergences: "9. Divergências entre preço e fundamentos",
   pair_asymmetries: "10. Combinações com assimetria de força",

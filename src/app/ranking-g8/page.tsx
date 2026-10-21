@@ -1,18 +1,20 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Trophy, Grid3X3, Siren, LineChart as LineChartIcon, RefreshCw, Target } from "lucide-react";
+import { BarChart3, Trophy, Grid3X3, Siren, LineChart as LineChartIcon, RefreshCw, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
 import G8Ranking, { type MiniScorePoint } from "@/components/ai/G8Ranking";
 import MacroSummary from "@/components/ai/MacroSummary";
+import CurrencyStrengthRankings from "@/components/ai/CurrencyStrengthRankings";
 import { DivergenceMatrix, TradeCandidates } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import ScoreHistoryChart from "@/components/ai/ScoreHistoryChart";
 import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL } from "@/components/ai/ui";
 import { apiFetch } from "@/lib/ai/client";
 import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView } from "@/lib/ai/types";
+import type { ExchangeRatesMarketSnapshot } from "@/lib/macro/market-analysis-types";
 import { SESSIONS, type Session } from "@/lib/ai/types";
 
-type Tab = "ranking" | "matriz" | "candidatos" | "risco" | "historico";
+type Tab = "ranking" | "preco" | "matriz" | "candidatos" | "risco" | "historico";
 
 export default function RankingG8Page() {
   const router = useRouter();
@@ -21,6 +23,9 @@ export default function RankingG8Page() {
   const [scoreHistory, setScoreHistory] = useState<MiniScorePoint[]>([]);
   const [latest, setLatest] = useState<MacroAnalysisResult | null>(null);
   const [candidates, setCandidates] = useState<TradeCandidateView[] | null>(null);
+  const [marketStrength, setMarketStrength] = useState<ExchangeRatesMarketSnapshot | null>(null);
+  const [priceBusy, setPriceBusy] = useState(false);
+  const [priceErr, setPriceErr] = useState<string | null>(null);
   const [session, setSession] = useState<Session | "ALL">("ALL");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -44,35 +49,56 @@ export default function RankingG8Page() {
     return () => { active = false; };
   }, []);
 
+  const loadPriceStrength = useCallback(async () => {
+    setPriceBusy(true);
+    setPriceErr(null);
+    try {
+      const snapshot = await apiFetch<ExchangeRatesMarketSnapshot>("/api/ai/macro/market-strength");
+      setMarketStrength(snapshot);
+    } catch (e) {
+      setPriceErr((e as Error).message);
+    } finally {
+      setPriceBusy(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (tab === "preco" && marketStrength === null && !priceBusy && !priceErr) void Promise.resolve().then(loadPriceStrength);
+  }, [tab, marketStrength, priceBusy, priceErr, loadPriceStrength]);
+
+  const refresh = () => {
+    void load();
+    if (tab === "preco") void loadPriceStrength();
+  };
+
   const recompute = async () => {
     setBusy("Recalculando scores com os eventos já interpretados (sem IA)..."); setErr(null);
     try { const r = await apiFetch<MacroAnalysisResult>("/api/macro/scores/recompute", { method: "POST", body: JSON.stringify({ session: session === "ALL" ? "LONDON" : session, persist: true }) }); setLatest({ ...r, analysis_id: r.analysis_id ?? "recalc" }); setScores(r.currencies); setCandidates(r.trade_candidates); }
     catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   const tabs = [
-    { id: "ranking" as Tab, label: "Ranking G8", icon: Trophy }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
+    { id: "ranking" as Tab, label: "Macro por eventos", icon: Trophy }, { id: "preco" as Tab, label: "Preço 1D/1W", icon: BarChart3 }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
     { id: "risco" as Tab, label: "Event Risk", icon: Siren }, { id: "historico" as Tab, label: "Histórico 7D/30D/90D", icon: LineChartIcon }
   ];
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      <PageHeader icon={Trophy} title="Ranking G8" sub="Força relativa das 8 moedas calculada no backend a partir da QUALIDADE da evidência (nunca da quantidade de eventos). Escala −5..+5, com confiança 0–100%, momentum, drivers e histórico." right={
+      <PageHeader icon={Trophy} title="Ranking G8" sub="Duas métricas separadas: score macro por eventos e força de preço original do Currency Strength Meter (1D/1W). Ausências são mostradas sem estimar valores." right={
         <div className="flex items-center gap-2">
           <select value={session} onChange={(e) => setSession(e.target.value as Session | "ALL")} className="bg-surface-2 border border-border rounded-lg px-2 py-1.5 text-xs text-text-primary"><option value="ALL">Última análise</option>{SESSIONS.map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}</select>
-          <Btn variant="ghost" onClick={load}><RefreshCw size={14} /></Btn>
+          <Btn variant="ghost" onClick={refresh} title="Atualiza os rankings carregados"><RefreshCw size={14} /></Btn>
           <Btn variant="ghost" onClick={recompute} disabled={!!busy} title="Reaplica pesos/decaimento aos eventos já interpretados — não chama IA nem reenvia imagens">Recalcular</Btn>
         </div>
       } />
       <div className="mb-4"><Tabs tabs={tabs} value={tab} onChange={setTab} /></div>
       {err && <div className="mb-4"><Notice kind="error">{err}</Notice></div>}
       {busy && <div className="mb-4"><Spinner label={busy} /></div>}
-      {latest && <p className="text-[11px] text-text-muted mb-3">Base: análise #{latest.analysis_id} · {latest.date} · {SESSION_LABEL[latest.session]} · scoring {latest.meta.scoring_version}</p>}
+      {latest && <p className="text-[11px] text-text-muted mb-3">Base do score macro: análise #{latest.analysis_id} · {latest.date} · {SESSION_LABEL[latest.session]} · scoring {latest.meta.scoring_version}</p>}
 
       {tab === "ranking" && (
         <div className="space-y-4">
           {latest && <MacroSummary result={latest} />}
           <div className="grid gap-4 xl:grid-cols-3">
-            <Section className="xl:col-span-2" title="Ranking de moedas" sub="Verde = forte · cinza = neutro · vermelho = fraca. Toque numa moeda para ver POR QUE ela recebeu esse score.">
+            <Section className="xl:col-span-2" title="Score macro por eventos" sub="Evidência econômica confirmada, não força de preço. Moedas sem evidência ficam em “sem dado”, sem posição macro.">
               {scores ? <G8Ranking scores={scores} history={scoreHistory} /> : <Spinner />}
               {(latest?.extra_currencies?.length ?? 0) > 0 && (
                 <div className="mt-4 pt-4 border-t border-border">
@@ -84,11 +110,11 @@ export default function RankingG8Page() {
             </Section>
             <Section title="Como ler" sub="Evidência, não contagem de eventos">
               <ul className="text-xs text-text-secondary space-y-1.5 list-disc pl-4">
-                <li><b>Poucos eventos ≠ moeda fraca.</b> Sem dado vivo a moeda fica <i>neutra por ausência de evidência</i>, nunca penalizada.</li>
-                <li><b>Toda moeda com dado divulgado entra no ranking.</b> Um único dado de impacto baixo (ou sem forecast) gera score pequeno com a etiqueta <i>evidência fraca</i> — aparece, mas não vira candidato de par.</li>
+                <li><b>Poucos eventos ≠ moeda fraca.</b> Sem dado vivo, a moeda fica sem score macro e nunca é penalizada.</li>
+                <li><b>Moedas sem evidência ficam em “sem dado”.</b> Para ver as oito moedas G8 no meter de preço, use a aba <i>Preço 1D/1W</i>.</li>
                 <li>Escala <b>−5..+5</b>: força da EVIDÊNCIA macro — <b>não</b> é probabilidade de o preço subir.</li>
                 <li>Força relativa do par = base − cotada. Bandas: &lt;0.5 neutro · 0.6–1.0 muito fraco · 1.1–1.5 moderado · 1.6–2.5 forte · 2.6+ muito forte.</li>
-                <li><b>Score ≠ confiança.</b> Score = força/direção do viés (média ponderada dos eventos; um único dado relevante com surpresa grande pode dar score alto). Confiança 1–100% = robustez da evidência: 30% qualidade/impacto, 25% magnitude, 20% consistência, 15% quantidade, 10% certeza do dado; teto de 70/80/90% com 1/2/3 evidências.</li>
+                <li><b>Score ≠ confiança.</b> Score expressa direção/força média ponderada dos eventos; confiança mede robustez da evidência e não é probabilidade de alta, lucro ou acerto.</li>
                 <li><b>Viés:</b> ≥ +1.50 forte positivo · +0.75 positivo · +0.25 levemente positivo · neutro · −0.25 levemente negativo · −0.75 negativo · ≤ −1.50 forte negativo.</li>
                 <li><b>Ordem do ranking = força macro</b> (score), nunca o percentual de confiança. Conflito entre indicadores reduz a confiança, não some com o dado.</li>
                 <li><b>NARRATIVE_SHIFT</b>: reavalie posições abertas naquela moeda.</li>
@@ -97,6 +123,14 @@ export default function RankingG8Page() {
             </Section>
           </div>
         </div>
+      )}
+      {tab === "preco" && (
+        <Section title="Força de preço — Exchange Rates UK Currency Strength Meter" sub="Scores originais, em rankings independentes 1D/Today e 1W. Este dado não substitui nem é somado ao score macro por eventos.">
+          {priceErr && <div className="mb-3"><Notice kind="error">{priceErr}</Notice></div>}
+          {priceBusy && <div className="mb-3"><Spinner label="Consultando Exchange Rates UK…" /></div>}
+          {marketStrength && <CurrencyStrengthRankings market={marketStrength} />}
+          {!marketStrength && !priceBusy && !priceErr && <Spinner label="Preparando rankings de preço…" />}
+        </Section>
       )}
       {tab === "matriz" && <Section title="Macro Divergence Matrix" sub="Todas as 56 combinações (escala nativa). A lista de candidatos aplica as bandas de força relativa e a confiança da evidência.">{scores ? <DivergenceMatrix scores={scores} /> : <Spinner />}</Section>}
       {tab === "candidatos" && <Section title="Trade Candidates" sub="symbol · direction · strong/weak · divergência · confiança · prioridade · event risk. Clique para levar ao módulo SMC/ICT.">{candidates ? <TradeCandidates candidates={candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} onPlan={(c) => router.push(`/planejamento/novo?symbol=${encodeURIComponent(c.symbol)}&bias=${c.bias}&div=${c.macro_divergence}&eventRisk=${c.event_risk}&reason=${encodeURIComponent(c.reason.slice(0, 500))}&invalidations=${encodeURIComponent((c.invalidation_events || []).join("; ").slice(0, 300))}`)} /> : <Spinner />}</Section>}

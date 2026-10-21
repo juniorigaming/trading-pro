@@ -6,11 +6,16 @@ const currencyMeta = [
   ["AUD", 0.56, 1], ["CAD", 0.36, 2], ["NZD", 0.28, 3], ["NOK", 0.14, 4], ["SEK", 0.05, 5],
   ["USD", -0.05, 6], ["GBP", -0.14, 7], ["EUR", -0.25, 8], ["CHF", -0.27, 9], ["JPY", -0.32, 10],
 ] as const;
+const weeklyMeta = [
+  ["NZD", 0.42, 1], ["GBP", 0.31, 2], ["AUD", 0.20, 3], ["USD", 0.12, 4], ["CAD", 0.05, 5],
+  ["JPY", -0.08, 6], ["CHF", -0.14, 7], ["EUR", -0.30, 8], ["NOK", 0.10, 9], ["SEK", 0.08, 10],
+] as const;
 
-function page(updated = "19 Oct 2026, 16:01 BST", missingCurrency?: string, pairUpdatedAt = "2026-10-19 15:00:00") {
+function page(updated = "19 Oct 2026, 16:01 BST", missingCurrency?: string, pairUpdatedAt = "2026-10-19 15:00:00", missingWeeklyCurrency?: string) {
   const strengthRow = (currency: string, score: number, rank: number) => ({ iso: currency, score, rank, wins: 9 - rank, losses: rank - 1, flat: 0, comparisons: 9 });
   const strength = Object.fromEntries([
     ["1d", currencyMeta.filter(([currency]) => currency !== missingCurrency).map(([currency, score, rank]) => strengthRow(currency, score, rank))],
+    ["1w", weeklyMeta.filter(([currency]) => currency !== missingWeeklyCurrency).map(([currency, score, rank]) => strengthRow(currency, score, rank))],
     ["ytd", G8.map((currency, index) => strengthRow(currency, index * 0.25 - 0.5, index + 1))],
   ]);
   const heatmap = Object.fromEntries(G8.map((currency) => [currency, G8.filter((quote) => quote !== currency).map((quote, index) => ({
@@ -37,7 +42,20 @@ describe("Exchange Rates UK Currency Strength Meter parser", () => {
     expect(result.primaryRanking.map((row) => row.currency)).not.toContain("SEK");
     expect(result.primaryRanking[0]).toMatchObject({ currency: "AUD", score: 0.56, sourceRank: 1, g8Rank: 1 });
     expect(result.primaryRanking.find((row) => row.currency === "USD")).toMatchObject({ score: -0.05, sourceRank: 6, g8Rank: 4 });
+    expect(result.weeklyRankingAvailable).toBe(true);
+    expect(result.weeklyRanking).toHaveLength(8);
+    expect(result.weeklyRanking[0]).toMatchObject({ currency: "NZD", score: 0.42, sourceRank: 1, g8Rank: 1 });
+    expect(result.weeklyRanking.find((row) => row.currency === "GBP")).toMatchObject({ score: 0.31, sourceRank: 2, g8Rank: 2 });
     expect(result.persistence.yearToDate.find((row) => row.currency === "AUD")?.score).toBe(1);
+  });
+
+  it("keeps the 1D and 1W rankings independent and leaves missing weekly currencies unranked", () => {
+    const result = parseExchangeRatesUKHtml(page("19 Oct 2026, 16:01 BST", undefined, "2026-10-19 15:00:00", "JPY"), new Date("2026-10-19T15:02:00.000Z"));
+    expect(result.currentRankingAvailable).toBe(true);
+    expect(result.weeklyRankingAvailable).toBe(false);
+    expect(result.weeklyRanking).toHaveLength(8);
+    expect(result.weeklyRanking.find((row) => row.currency === "JPY")).toMatchObject({ score: null, sourceRank: null, g8Rank: null });
+    expect(result.weeklyRankingMessage).toContain("7/8 scores");
   });
 
   it("uses exact 5D and MTD heatmap observations as labeled G8 medians, not meter scores", () => {
@@ -59,7 +77,7 @@ describe("Exchange Rates UK Currency Strength Meter parser", () => {
     expect(result.status).toBe("stale");
     expect(result.currentRankingAvailable).toBe(false);
     expect(result.primaryRanking).toHaveLength(8);
-    expect(result.rankingMessage).toContain("não como ranking atual");
+    expect(result.rankingMessage).toContain("não devem ser tratados como rankings atuais");
   });
 
   it("does not invent a missing currency score or silently label an incomplete ranking complete", () => {

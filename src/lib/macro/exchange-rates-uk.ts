@@ -184,7 +184,10 @@ function emptySnapshot(now: Date, status: MarketSourceStatus, message: string, u
     ageHours,
     currentRankingAvailable: false,
     rankingMessage: message,
+    weeklyRankingAvailable: false,
+    weeklyRankingMessage: message,
     primaryRanking: [],
+    weeklyRanking: [],
     persistence: { fiveDay: [], monthToDate: [], yearToDate: [], notes: [message] },
   };
 }
@@ -208,38 +211,51 @@ export function parseExchangeRatesUKHtml(html: string, now = new Date()): Exchan
   if (ageMs < -10 * 60_000) return emptySnapshot(now, "unavailable", "O horário da fonte está no futuro em relação ao servidor; ranking atual não validado.", updatedAt, ageHours);
 
   const primary = makeOfficialStrengthEntries(model, "1d");
+  const weekly = makeOfficialStrengthEntries(model, "1w");
   const withScore = primary.filter((row) => row.score !== null).length;
   const withSourceRank = primary.filter((row) => row.sourceRank !== null).length;
-  if (withScore === 0) return emptySnapshot(now, "unavailable", "A página respondeu, mas não continha scores 1D válidos para moedas G8.", updatedAt, ageHours);
+  const withWeeklyScore = weekly.filter((row) => row.score !== null).length;
+  const withWeeklySourceRank = weekly.filter((row) => row.sourceRank !== null).length;
+  if (withScore === 0 && withWeeklyScore === 0) {
+    return emptySnapshot(now, "unavailable", "A página respondeu, mas não continha scores 1D nem 1W válidos para moedas G8.", updatedAt, ageHours);
+  }
 
   const fiveDay = heatmapMedian(model, "5d", now);
   const monthToDate = heatmapMedian(model, "mtd", now);
   const yearToDate = makeOfficialStrengthEntries(model, "ytd");
   const notes = [
-    "A ordem G8 é recalculada apenas após filtrar NOK e SEK; os scores e sourceRank do 1D permanecem exatamente os publicados pela fonte.",
-    "5D e MTD são medianas calculadas dos retornos percentuais da heatmap para os sete pares G8 de cada moeda; não são apresentados como scores originais do Currency Strength Meter.",
+    "Os scores originais 1D e 1W do Currency Strength Meter permanecem inalterados; a ordem G8 é recalculada depois de filtrar NOK/SEK, e o rank da fonte é mantido à parte.",
+    "1D e 1W são horizontes oficiais separados do Meter; diferenças entre eles descrevem janelas distintas e não são combinadas em um score único.",
+    "5D e MTD são medianas calculadas dos retornos percentuais dos pares G8 publicados na heatmap; não são scores originais do Currency Strength Meter.",
     "YTD usa o score original do Currency Strength Meter; o ranking da fonte pode incluir NOK/SEK, que são removidas apenas da lista G8 exibida.",
     "A fonte não publica MTD no array do Currency Strength Meter; por isso o MTD abaixo é derivado dos retornos publicados na heatmap.",
   ];
 
   const stale = ageMs > MAX_AGE_MS;
   const primaryComplete = withScore === G8.length && withSourceRank === G8.length;
+  const weeklyComplete = withWeeklyScore === G8.length && withWeeklySourceRank === G8.length;
   const persistenceComplete = fiveDay.every((row) => row.observations === row.expectedObservations)
     && monthToDate.every((row) => row.observations === row.expectedObservations)
     && yearToDate.every((row) => row.score !== null);
   let status: MarketSourceStatus = "available";
   if (stale) status = "stale";
-  else if (!primaryComplete || !persistenceComplete) status = "partial";
+  else if (!primaryComplete || !weeklyComplete || !persistenceComplete) status = "partial";
   const currentRankingAvailable = !stale && primaryComplete;
+  const weeklyRankingAvailable = !stale && weeklyComplete;
   const rankingMessage = stale
-    ? !primaryComplete
-      ? `A fonte está desatualizada (${ageHours}h) e o snapshot é parcial (${withScore}/${G8.length} scores, ${withSourceRank}/${G8.length} posições de origem 1D); os valores são apenas referência, não ranking atual. Nenhum score foi estimado.`
-      : `A fonte está desatualizada (${ageHours}h); o último snapshot é mostrado apenas como referência, não como ranking atual.`
+    ? `A fonte está desatualizada (${ageHours}h); cobertura lida: 1D ${withScore}/${G8.length} scores e ${withSourceRank}/${G8.length} posições de origem, 1W ${withWeeklyScore}/${G8.length} scores e ${withWeeklySourceRank}/${G8.length} posições. Os valores são apenas referência e não devem ser tratados como rankings atuais. Nenhum score foi estimado.`
     : !primaryComplete
-      ? `Ranking G8 parcial: ${withScore}/${G8.length} scores e ${withSourceRank}/${G8.length} posições de origem 1D foram lidos. Moedas/campos ausentes ficam sem posição; nenhum score ou rank foi estimado.`
-      : !persistenceComplete
-        ? "Ranking 1D/Today completo; uma ou mais séries complementares estão incompletas e foram marcadas sem dado."
-        : "Ranking 1D/Today completo e atualizado; scores originais preservados e NOK/SEK fora da lista G8.";
+      ? `Ranking 1D/Today parcial: ${withScore}/${G8.length} scores e ${withSourceRank}/${G8.length} posições de origem. Moedas/campos ausentes ficam sem posição; nenhum score ou rank foi estimado.`
+      : !weeklyComplete
+        ? `Ranking 1D/Today completo; ranking 1W parcial: ${withWeeklyScore}/${G8.length} scores e ${withWeeklySourceRank}/${G8.length} posições de origem. Valores ausentes não foram estimados.`
+        : !persistenceComplete
+          ? "Rankings 1D/Today e 1W completos e atualizados; uma ou mais séries complementares estão incompletas e foram marcadas sem dado."
+          : "Rankings G8 1D/Today e 1W completos e atualizados; scores originais preservados e NOK/SEK fora da lista G8.";
+  const weeklyRankingMessage = stale
+    ? `A fonte está desatualizada (${ageHours}h); o snapshot 1W não é tratado como ranking atual. Nenhum score foi estimado.`
+    : !weeklyComplete
+      ? `Ranking G8 1W parcial: ${withWeeklyScore}/${G8.length} scores e ${withWeeklySourceRank}/${G8.length} posições de origem. Moedas/campos ausentes permanecem sem posição.`
+      : "Ranking G8 1W completo e atualizado; scores originais preservados e NOK/SEK fora da lista G8.";
 
   return {
     status,
@@ -249,7 +265,10 @@ export function parseExchangeRatesUKHtml(html: string, now = new Date()): Exchan
     ageHours,
     currentRankingAvailable,
     rankingMessage,
+    weeklyRankingAvailable,
+    weeklyRankingMessage,
     primaryRanking: primary,
+    weeklyRanking: weekly,
     persistence: { fiveDay, monthToDate, yearToDate, notes },
   };
 }
