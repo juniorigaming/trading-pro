@@ -45,8 +45,8 @@ export default function MacroSummary({ result }: { result: MacroAnalysisResult }
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 rounded-xl border border-sky/30 bg-sky/10 px-3 py-2 text-xs text-sky sm:flex-row sm:items-center sm:justify-between">
-        <span><b>Este bloco é o score macro por eventos econômicos.</b> Não é força de preço do Currency Strength Meter e não deve ser comparado como se fosse a mesma métrica.</span>
-        <a href="/ranking-g8" className="shrink-0 font-bold underline underline-offset-2">Abrir Ranking G8 → escolha “Preço 1D/1W”</a>
+        <span><b>Este bloco é o score macro por eventos econômicos.</b> Não é força de preço D1/W1; as métricas permanecem separadas.</span>
+        <a href="/ranking-g8" className="shrink-0 font-bold underline underline-offset-2">Abrir Ranking G8 → escolha “Pares D1/W1”</a>
       </div>
       {/* 1. Resumo macro */}
       <div className="glass-card p-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

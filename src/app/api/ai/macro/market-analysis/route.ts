@@ -1,6 +1,6 @@
-/** POST JSON com eventos confirmados opcionais → leitura atual do ranking Exchange Rates UK, taxas oficiais e evidências macro somente leitura. */
+/** POST JSON com eventos confirmados opcionais → leitura de força D1/W1 e contexto macro em modo somente leitura. */
 import { z } from "zod";
-import { authorize, errorResponse, json } from "@/lib/api-utils";
+import { authorize, json } from "@/lib/api-utils";
 import { G8 } from "@/lib/ai/types";
 import { runMarketMacroAnalysis } from "@/lib/macro/market-analysis";
 
@@ -38,7 +38,8 @@ export async function POST(request: Request) {
     });
     return json(report);
   } catch (error) {
-    return errorResponse(error, "Falha ao executar a análise macro de mercado");
+    console.error("[api] Falha ao executar a análise macro de mercado", error);
+    return json({ error: "Não foi possível carregar o resumo agora. Tente novamente." }, 502);
   }
 }
 

@@ -33,24 +33,24 @@ function unavailableResult(status: PricePairCandidateStatus, message: string): P
 }
 
 /**
- * Gera até três pares candidatos somente quando o melhor lado em 1D também vence em 1W.
- * Usa os scores percentuais originais do Meter; não consulta nem combina scores macro.
+ * Gera até três pares candidatos quando a direção mais forte em D1 também vence em W1.
+ * Usa scores de preço; não consulta nem combina scores macro.
  */
 export function buildPricePairCandidates(
   market: ExchangeRatesMarketSnapshot,
   limit = 3,
 ): PricePairCandidateResult {
   if (market.status === "stale") {
-    return unavailableResult("stale", "A captura do Currency Strength Meter está desatualizada. Nenhum par foi sugerido.");
+    return unavailableResult("stale", "Dados desatualizados. Nenhum par foi incluído na shortlist.");
   }
   if (!market.currentRankingAvailable || !market.weeklyRankingAvailable) {
     const missingPeriods = [
-      !market.currentRankingAvailable ? `1D: ${market.rankingMessage}` : null,
-      !market.weeklyRankingAvailable ? `1W: ${market.weeklyRankingMessage}` : null,
+      !market.currentRankingAvailable ? "D1 parcial ou indisponível" : null,
+      !market.weeklyRankingAvailable ? "W1 parcial ou indisponível" : null,
     ].filter((message): message is string => Boolean(message));
     return unavailableResult(
       market.status === "unavailable" ? "unavailable" : "partial",
-      `É necessário ter rankings atuais e completos em 1D e 1W para montar a shortlist. ${missingPeriods.join(" ")} Nenhum valor foi estimado.`,
+      `A shortlist exige dados atuais e completos em D1 e W1 (${missingPeriods.join("; ")}). Nenhum valor foi estimado.`,
     );
   }
 
@@ -62,7 +62,7 @@ export function buildPricePairCandidates(
   if (missingCurrencies.length) {
     return unavailableResult(
       "partial",
-      `Não foi possível validar 1D e 1W para ${missingCurrencies.join(", ")}. Nenhum par foi estimado ou incluído na shortlist.`,
+      `Não foi possível validar D1 e W1 para ${missingCurrencies.join(", ")}. Nenhum par foi estimado ou incluído na shortlist.`,
     );
   }
 
@@ -109,7 +109,7 @@ export function buildPricePairCandidates(
   if (!candidates.length) {
     return unavailableResult(
       "no-alignment",
-      "Nenhum par G8 tem a mesma moeda mais forte em 1D e 1W agora. A shortlist fica vazia para evitar forçar uma operação.",
+      "Nenhum par G8 mantém a mesma moeda mais forte em D1 e W1. A shortlist fica vazia para não forçar candidatos.",
     );
   }
 

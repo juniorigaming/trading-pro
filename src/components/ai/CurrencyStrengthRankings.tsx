@@ -1,16 +1,17 @@
+"use client";
+import { useState } from "react";
 import { G8 } from "@/lib/ai/types";
 import type { ExchangeRatesMarketSnapshot, MarketStrengthEntry } from "@/lib/macro/market-analysis-types";
 import { Badge, Notice } from "./ui";
-import PricePairCandidates from "./PricePairCandidates";
 
 type Period = "1D" | "1W";
 
-function originalScore(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "—";
-  return `${value > 0 ? "+" : ""}${String(value).replace(".", ",")}%`;
-}
+const FLAGS: Record<string, string> = {
+  USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", JPY: "🇯🇵",
+  CHF: "🇨🇭", CAD: "🇨🇦", AUD: "🇦🇺", NZD: "🇳🇿",
+};
 
-function displayRows(entries: MarketStrengthEntry[]): MarketStrengthEntry[] {
+export function rankG8StrengthEntries(entries: MarketStrengthEntry[], hideValues = false): MarketStrengthEntry[] {
   const byCurrency = new Map(entries.map((row) => [row.currency, row]));
   return G8.map((currency) => byCurrency.get(currency) ?? ({
     currency,
@@ -21,117 +22,92 @@ function displayRows(entries: MarketStrengthEntry[]): MarketStrengthEntry[] {
     losses: null,
     flat: null,
     comparisons: null,
-  } satisfies MarketStrengthEntry)).sort((a, b) =>
-    (a.g8Rank ?? Number.MAX_SAFE_INTEGER) - (b.g8Rank ?? Number.MAX_SAFE_INTEGER)
-    || G8.indexOf(a.currency) - G8.indexOf(b.currency),
-  );
+  } satisfies MarketStrengthEntry)).map((row) => {
+    const score = row.score !== null && Number.isFinite(row.score) ? row.score : null;
+    return hideValues || score === null ? { ...row, score: null, g8Rank: null } : { ...row, score };
+  }).sort((a, b) => {
+    if (a.score === null && b.score === null) return G8.indexOf(a.currency) - G8.indexOf(b.currency);
+    if (a.score === null) return 1;
+    if (b.score === null) return -1;
+    return b.score - a.score || G8.indexOf(a.currency) - G8.indexOf(b.currency);
+  });
 }
 
-function PeriodTable({
-  period,
-  entries,
-  available,
-  message,
-  sourceStatus,
-}: {
-  period: Period;
-  entries: MarketStrengthEntry[];
-  available: boolean;
-  message: string;
-  sourceStatus: ExchangeRatesMarketSnapshot["status"];
-}) {
-  const rows = displayRows(entries);
-  const label = sourceStatus === "stale" ? "snapshot antigo" : available ? "atual" : entries.some((row) => row.score !== null) ? "parcial" : "indisponível";
-  const badgeClass = sourceStatus === "stale"
-    ? "border-orange-500/40 text-orange-400 bg-orange-500/10"
-    : available
-      ? "border-emerald/40 text-emerald bg-emerald/10"
-      : "border-amber/40 text-amber bg-amber/10";
+function scoreText(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  const formatted = value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${value > 0 ? "+" : ""}${formatted}%`;
+}
+
+export default function CurrencyStrengthRankings({ market }: { market: ExchangeRatesMarketSnapshot }) {
+  const [period, setPeriod] = useState<Period>("1D");
+  const isDaily = period === "1D";
+  const entries = isDaily ? market.primaryRanking : market.weeklyRanking;
+  const available = isDaily ? market.currentRankingAvailable : market.weeklyRankingAvailable;
+  const rows = rankG8StrengthEntries(entries, market.status === "stale");
+  const scores = rows.flatMap((row) => row.score !== null && Number.isFinite(row.score) ? [Math.abs(row.score)] : []);
+  const maxMagnitude = Math.max(0, ...scores);
+  const hasValues = rows.some((row) => row.score !== null);
+  const periodComplete = available && rows.every((row) => row.score !== null);
+  const statusText = market.status === "stale"
+    ? "Desatualizado"
+    : periodComplete
+      ? "Atualizado"
+      : hasValues
+        ? "Parcial"
+        : "Indisponível";
 
   return (
-    <section className="min-w-0 rounded-xl border border-border bg-surface-2/40 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <section className="rounded-xl border border-border bg-surface-2/40 p-3 md:p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-extrabold text-text-primary">{period === "1D" ? "Diário — 1D / Today" : "Semanal — 1W"}</h3>
-          <p className="text-[10px] text-text-muted">Currency Strength Meter · valores originais</p>
+          <h3 className="text-sm font-extrabold text-text-primary">Força das moedas G8</h3>
+          <p className="text-[11px] text-text-muted">Ordenadas da mais forte para a mais fraca no período selecionado.</p>
         </div>
-        <Badge className={badgeClass}>{label}</Badge>
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 p-1" role="tablist" aria-label="Período do ranking">
+          {(["1D", "1W"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={period === value}
+              onClick={() => setPeriod(value)}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold transition ${period === value ? "bg-accent text-white" : "text-text-muted hover:text-text-primary"}`}
+            >
+              {value === "1D" ? "D1" : "W1"}
+            </button>
+          ))}
+        </div>
       </div>
-      {!available && <div className="mb-2"><Notice kind={sourceStatus === "unavailable" ? "error" : "warn"}>{message} Nenhum valor ausente foi estimado.</Notice></div>}
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[540px] text-xs">
-          <thead className="bg-surface-2 text-[10px] uppercase text-text-muted">
-            <tr>
-              <th className="px-2 py-2 text-left">Rank G8</th>
-              <th className="px-2 py-2 text-left">Moeda</th>
-              <th className="px-2 py-2 text-right">Score {period} (%)</th>
-              <th className="px-2 py-2 text-right">Rank fonte</th>
-              <th className="px-2 py-2 text-right">W / L / F</th>
-              <th className="px-2 py-2 text-right">Comparações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${period}-${row.currency}`} className="border-t border-border">
-                <td className="px-2 py-2 font-bold tabular-nums">{row.g8Rank == null ? "—" : `#${row.g8Rank}`}</td>
-                <td className="px-2 py-2 font-extrabold text-text-primary">{row.currency}</td>
-                <td className="px-2 py-2 text-right font-extrabold tabular-nums">{originalScore(row.score)}</td>
-                <td className="px-2 py-2 text-right text-text-muted tabular-nums">{row.sourceRank == null ? "—" : `#${row.sourceRank}`}</td>
-                <td className="px-2 py-2 text-right text-text-secondary tabular-nums">{row.wins ?? "—"} / {row.losses ?? "—"} / {row.flat ?? "—"}</td>
-                <td className="px-2 py-2 text-right text-text-secondary tabular-nums">{row.comparisons ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-[10px] text-text-muted">Período: <b className="text-text-secondary">{isDaily ? "D1" : "W1"}</b></span>
+        <Badge className={market.status === "stale" || !periodComplete ? "border-amber/40 bg-amber/10 text-amber" : "border-emerald/40 bg-emerald/10 text-emerald"}>{statusText}</Badge>
       </div>
-      <p className="mt-2 text-[10px] text-text-muted">Sempre lista as 8 moedas G8. “—” = campo não publicado/indisponível; não significa zero. O rank da fonte pode incluir NOK/SEK; o rank G8 é reordenado somente entre as oito moedas.</p>
+
+      {market.status === "stale" && <div className="mb-2"><Notice kind="warn">Dados desatualizados. Os scores foram ocultados para não apresentá-los como atuais.</Notice></div>}
+      {market.status !== "stale" && !periodComplete && <div className="mb-2"><Notice kind={hasValues ? "warn" : "error"}>{hasValues ? "Dados parciais. Valores indisponíveis permanecem sem score." : `Dados de força indisponíveis para ${isDaily ? "D1" : "W1"}.`}</Notice></div>}
+
+      <ol className="space-y-1.5" aria-label={`Ranking G8 ${isDaily ? "D1" : "W1"}`}>
+        {rows.map((row, index) => {
+          const score = row.score;
+          const magnitude = score === null || maxMagnitude === 0 ? 0 : Math.max(3, Math.abs(score) / maxMagnitude * 100);
+          const color = score === null || score === 0 ? "bg-slate-400" : score > 0 ? "bg-emerald" : "bg-rose";
+          return (
+            <li key={`${period}-${row.currency}`} className="grid grid-cols-[2rem_1.75rem_2.5rem_minmax(3rem,1fr)_4.5rem] items-center gap-2 rounded-lg border border-border/70 bg-surface-2/50 px-2.5 py-2">
+              <span className="text-center text-[11px] font-bold tabular-nums text-text-muted">{score === null ? "—" : `#${index + 1}`}</span>
+              <span className="text-base leading-none" aria-hidden="true">{FLAGS[row.currency]}</span>
+              <span className="text-xs font-extrabold text-text-primary">{row.currency}</span>
+              <span className="block h-2 overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
+                <span className={`block h-full rounded-full ${color}`} style={{ width: `${magnitude}%` }} />
+              </span>
+              <span className={`text-right text-xs font-bold tabular-nums ${score === null ? "text-text-muted" : score > 0 ? "text-emerald" : score < 0 ? "text-rose" : "text-text-secondary"}`}>{scoreText(score)}</span>
+            </li>
+          );
+        })}
+      </ol>
+
+      <p className="mt-2 text-[10px] text-text-muted">“—” indica dado indisponível; não representa zero. As barras mostram magnitude relativa dentro do período.</p>
     </section>
-  );
-}
-
-export default function CurrencyStrengthRankings({
-  market,
-  compact = false,
-  showPairCandidates = true,
-}: {
-  market: ExchangeRatesMarketSnapshot;
-  compact?: boolean;
-  showPairCandidates?: boolean;
-}) {
-  const tables = (
-    <div className="grid gap-3 xl:grid-cols-2">
-      <PeriodTable
-        period="1D"
-        entries={market.primaryRanking}
-        available={market.currentRankingAvailable}
-        message={market.rankingMessage}
-        sourceStatus={market.status}
-      />
-      <PeriodTable
-        period="1W"
-        entries={market.weeklyRanking}
-        available={market.weeklyRankingAvailable}
-        message={market.weeklyRankingMessage}
-        sourceStatus={market.status}
-      />
-    </div>
-  );
-
-  return (
-    <div className="space-y-3">
-      {!compact && <Notice kind="info">Força de preço original do Currency Strength Meter. É distinta dos scores macro por eventos econômicos; os rankings 1D e 1W não são somados ao score macro.</Notice>}
-      {showPairCandidates && <PricePairCandidates market={market} compact={compact} />}
-      {compact ? (
-        <details className="rounded-xl border border-border bg-surface-2/30 p-3">
-          <summary className="cursor-pointer text-xs font-bold text-text-primary">Ver ranking completo das oito moedas (1D e 1W)</summary>
-          <div className="mt-3">{tables}</div>
-        </details>
-      ) : tables}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-muted">
-        <a href={market.sourceUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">Exchange Rates UK — abrir Currency Strength Meter</a>
-        <span>Atualização: {market.updatedAt ? new Date(market.updatedAt).toLocaleString("pt-BR") : "não validada"}</span>
-        {market.ageHours !== null && <span>idade da captura: {market.ageHours}h</span>}
-      </div>
-    </div>
   );
 }

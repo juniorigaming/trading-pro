@@ -27,7 +27,7 @@ function snapshot(): ExchangeRatesMarketSnapshot {
   };
   return {
     status: "available",
-    sourceUrl: "https://www.exchangerates.org.uk/performance-trends",
+    sourceUrl: "https://example.test/strength",
     retrievedAt: "2026-10-20T18:00:00.000Z",
     updatedAt: "2026-10-20T17:55:00.000Z",
     ageHours: 0.1,
@@ -42,10 +42,14 @@ function snapshot(): ExchangeRatesMarketSnapshot {
 }
 
 describe("price-based G8 pair candidates", () => {
-  it("returns conventional pairs aligned in 1D and 1W, ranked by 1D spread", () => {
+  it("returns the top three pairs with D1/W1 agreement, ordered by D1 spread", () => {
     const result = buildPricePairCandidates(snapshot());
     expect(result.status).toBe("ready");
-    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(result.candidates).toHaveLength(3);
+    expect(result.candidates.map((candidate) => candidate.symbol)).toEqual(["GBPUSD", "AUDUSD", "GBPJPY"]);
+    expect(result.candidates[0]!.oneDaySpread).toBeGreaterThan(result.candidates[1]!.oneDaySpread);
+    expect(result.candidates[1]!.oneDaySpread).toBeGreaterThan(result.candidates[2]!.oneDaySpread);
+    expect(result.candidates.every((candidate) => candidate.oneWeekSpread > 0)).toBe(true);
     expect(result.candidates[0]).toMatchObject({
       symbol: "GBPUSD",
       pair: "GBP/USD",

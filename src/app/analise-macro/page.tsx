@@ -85,7 +85,7 @@ export default function AnaliseMacroPage() {
         ocrConfidence: r.ocr_confidence ?? null, userConfirmed: true as const,
       }));
     setErr(null);
-    setBusy("Consultando o Meter e as fontes macro disponíveis...");
+    setBusy("Consultando dados de força e contexto macro...");
     setBusyKind("market");
     try {
       const report = await apiFetch<MarketMacroAnalysisResponse>("/api/ai/macro/market-analysis", {
@@ -107,7 +107,7 @@ export default function AnaliseMacroPage() {
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      <PageHeader icon={BrainCircuit} title="Análise Macro IA" sub="Resumo atual do mercado e pares G8. Print do calendário é opcional; a análise principal funciona sem imagem." right={
+      <PageHeader icon={BrainCircuit} title="Análise Macro IA" sub="Ranking de força das oito moedas G8 em D1/W1. Print do calendário é opcional." right={
         <div className="flex items-center gap-2">
           <button onClick={() => setShowToken((s) => !s)} className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary" title="Token de acesso às rotas IA (APP_API_TOKEN)"><KeyRound size={14} />{token ? "token ok" : "token"}</button>
           {showToken && <input value={token} onChange={(e) => { setTok(e.target.value); setToken(e.target.value); }} placeholder="APP_API_TOKEN (opcional)" className={`${inputCls} w-56`} type="password" />}
@@ -153,12 +153,9 @@ export default function AnaliseMacroPage() {
         <div className="mb-4">
           <AiWaitPanel
             steps={[
-              "Consultando o Currency Strength Meter 1D/Today na fonte primária",
-              "Validando a data de atualização e filtrando somente AUD, CAD, NZD, USD, GBP, CHF, JPY e EUR",
-              "Lendo taxas e comunicados oficiais dos oito bancos centrais",
-              "Consultando eventos confirmados e interpretações salvas em modo somente leitura",
-              "Separando força de preço, fundamentos e confiança — sem alterar scores existentes",
-              "Montando um resumo objetivo e a shortlist de pares 1D/1W",
+              "Carregando a força D1 e W1 para as oito moedas G8",
+              "Validando atualização e completude dos dados",
+              "Preparando o ranking e a visualização",
             ]}
           />
         </div>
@@ -184,26 +181,26 @@ export default function AnaliseMacroPage() {
       {tab === "nova" && step === "upload" && (
         <div className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-3">
-            <Section className="lg:col-span-2" title="Leitura atual do mercado" sub="Gere o resumo e a shortlist de pares agora. Nenhum print é necessário.">
-              <p className="max-w-3xl text-xs leading-relaxed text-text-secondary">A leitura consulta a força de preço 1D/1W, dados macro disponíveis e fontes oficiais. Prints do calendário são apenas um complemento opcional e não bloqueiam a análise.</p>
+            <Section className="lg:col-span-2" title="Leitura atual do mercado" sub="Gere o ranking de força D1/W1 agora. Nenhum print é necessário.">
+              <p className="max-w-3xl text-xs leading-relaxed text-text-secondary">A leitura combina os rankings de força D1/W1 com o contexto macro disponível. Prints do calendário são opcionais e não bloqueiam a análise.</p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
-                <Btn onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />Gerar análise atual</Btn>
+                <Btn onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Carregando dados atuais..."><BrainCircuit size={16} />Gerar análise atual</Btn>
                 <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Adicionar eventos manualmente (opcional)</Btn>
               </div>
               <p className="mt-3 text-[10px] text-text-muted">Consulta somente leitura. Não salva eventos, scores nem histórico de chamadas.</p>
             </Section>
             <Section title="O que você verá" sub="Visão resumida e acionável">
               <ul className="space-y-2 text-xs text-text-secondary">
-                <li><b>Pares G8:</b> shortlist quando a força de preço concorda em 1D e 1W.</li>
-                <li><b>Resumo macro:</b> fundamentos em dimensão separada do preço.</li>
-                <li><b>Detalhes:</b> fontes, eventos e metodologia ficam disponíveis sob demanda.</li>
+                <li><b>Ranking:</b> oito moedas ordenadas por força, com alternância D1/W1.</li>
+                <li><b>Top 3 pares:</b> na página Ranking G8, com confirmação nos dois períodos.</li>
+                <li><b>Dados ausentes:</b> ficam sem score; não são estimados.</li>
               </ul>
             </Section>
           </div>
 
           <details className="glass-card p-4 md:p-5">
             <summary className="cursor-pointer text-sm font-bold text-text-primary">Complementar com print ou evento de calendário (opcional)</summary>
-            <p className="mt-2 text-xs text-text-muted">Use somente se quiser acrescentar eventos confirmados. O print não substitui os dados do Currency Strength Meter.</p>
+            <p className="mt-2 text-xs text-text-muted">Use apenas para acrescentar eventos confirmados. A imagem é complementar e não é necessária para gerar os rankings.</p>
             <div className="mt-3"><ImageDropzone images={images} onChange={setImages} max={10} /></div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Btn onClick={extract} disabled={!images.length || !!busy} loading={busyKind === "extract"} loadingLabel="Lendo print..."> <ScanText size={16} />Ler print e revisar eventos{images.length ? ` (${images.length})` : ""}</Btn>
@@ -219,9 +216,9 @@ export default function AnaliseMacroPage() {
           <div className="flex flex-wrap items-center gap-3 mt-4">
             {extractionRejected > 0 && <p className="text-[11px] text-amber mb-2">{extractionRejected} linha(s) foram rejeitadas pela validação do código (moeda/evento/valor não constam no texto transcrito ou não foram confirmadas na imagem). Veja no modo auditoria após analisar.</p>}
             <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Salvando e recalculando..."><Sparkles size={16} />Salvar eventos e atualizar Ranking G8</Btn>
-            <Btn variant="ghost" onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Consultando fontes atuais..."><BrainCircuit size={16} />Gerar resumo atual com estes eventos</Btn>
+            <Btn variant="ghost" onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Carregando dados atuais..."><BrainCircuit size={16} />Gerar resumo atual com estes eventos</Btn>
             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
-            <p className="w-full text-[10px] text-text-muted">Consulta somente leitura: não salva eventos, histórico de chamadas ou scores. Eventos só entram se estiverem confirmados e permanecem complementares ao ranking 1D/Today.</p>
+            <p className="w-full text-[10px] text-text-muted">Consulta somente leitura: não salva eventos, histórico de chamadas ou scores. Eventos só entram se estiverem confirmados e permanecem complementares ao ranking D1/W1.</p>
           </div>
         </Section>
       )}

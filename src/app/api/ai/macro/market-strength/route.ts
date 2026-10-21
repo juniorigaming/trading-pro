@@ -1,5 +1,5 @@
-/** GET somente leitura com os rankings oficiais do Currency Strength Meter 1D e 1W. */
-import { authorize, errorResponse, json } from "@/lib/api-utils";
+/** GET somente leitura dos rankings de força D1 e W1. */
+import { authorize, json } from "@/lib/api-utils";
 import { fetchExchangeRatesUKStrength } from "@/lib/macro/exchange-rates-uk";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   try {
     return json(await fetchExchangeRatesUKStrength());
   } catch (error) {
-    return errorResponse(error, "Falha ao consultar o Currency Strength Meter");
+    console.error("[api] Não foi possível carregar os dados de força", error);
+    return json({ error: "Não foi possível carregar os dados de força agora. Tente novamente." }, 502);
   }
 }

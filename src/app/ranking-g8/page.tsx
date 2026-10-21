@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import G8Ranking, { type MiniScorePoint } from "@/components/ai/G8Ranking";
 import MacroSummary from "@/components/ai/MacroSummary";
 import CurrencyStrengthRankings from "@/components/ai/CurrencyStrengthRankings";
+import PricePairCandidates from "@/components/ai/PricePairCandidates";
 import { DivergenceMatrix, TradeCandidates } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import ScoreHistoryChart from "@/components/ai/ScoreHistoryChart";
@@ -76,13 +77,13 @@ export default function RankingG8Page() {
     catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   const tabs = [
-    { id: "preco" as Tab, label: "Pares 1D/1W", icon: BarChart3 }, { id: "ranking" as Tab, label: "Macro por eventos", icon: Trophy }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
+    { id: "preco" as Tab, label: "Pares D1/W1", icon: BarChart3 }, { id: "ranking" as Tab, label: "Macro por eventos", icon: Trophy }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
     { id: "risco" as Tab, label: "Event Risk", icon: Siren }, { id: "historico" as Tab, label: "Histórico 7D/30D/90D", icon: LineChartIcon }
   ];
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
-      <PageHeader icon={Trophy} title="Ranking G8" sub="Duas métricas separadas: score macro por eventos e força de preço original do Currency Strength Meter (1D/1W). Ausências são mostradas sem estimar valores." right={
+      <PageHeader icon={Trophy} title="Ranking G8" sub="Força de preço em D1/W1 e score macro por eventos são dimensões separadas. Dados ausentes não são estimados." right={
         <div className="flex items-center gap-2">
           <select value={session} onChange={(e) => setSession(e.target.value as Session | "ALL")} className="bg-surface-2 border border-border rounded-lg px-2 py-1.5 text-xs text-text-primary"><option value="ALL">Última análise</option>{SESSIONS.map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}</select>
           <Btn variant="ghost" onClick={refresh} title="Atualiza os rankings carregados"><RefreshCw size={14} /></Btn>
@@ -111,7 +112,7 @@ export default function RankingG8Page() {
             <Section title="Como ler" sub="Evidência, não contagem de eventos">
               <ul className="text-xs text-text-secondary space-y-1.5 list-disc pl-4">
                 <li><b>Poucos eventos ≠ moeda fraca.</b> Sem dado vivo, a moeda fica sem score macro e nunca é penalizada.</li>
-                <li><b>Moedas sem evidência ficam em “sem dado”.</b> Para ver as oito moedas G8 no meter de preço, use a aba <i>Preço 1D/1W</i>.</li>
+                <li><b>Moedas sem evidência ficam em “sem dado”.</b> Para ver as oito moedas G8 ordenadas por força de preço, use a aba <i>Pares D1/W1</i>.</li>
                 <li>Escala <b>−5..+5</b>: força da EVIDÊNCIA macro — <b>não</b> é probabilidade de o preço subir.</li>
                 <li>Força relativa do par = base − cotada. Bandas: &lt;0.5 neutro · 0.6–1.0 muito fraco · 1.1–1.5 moderado · 1.6–2.5 forte · 2.6+ muito forte.</li>
                 <li><b>Score ≠ confiança.</b> Score expressa direção/força média ponderada dos eventos; confiança mede robustez da evidência e não é probabilidade de alta, lucro ou acerto.</li>
@@ -125,10 +126,10 @@ export default function RankingG8Page() {
         </div>
       )}
       {tab === "preco" && (
-        <Section title="Pares por força de preço — Currency Strength Meter" sub="A shortlist 1D/1W aparece primeiro; o ranking completo das moedas fica logo abaixo. Métrica separada do score macro por eventos.">
+        <Section title="Força G8 e pares candidatos" sub="Ranking D1/W1 e maior diferencial entre moedas; separado do score macro por eventos.">
           {priceErr && <div className="mb-3"><Notice kind="error">{priceErr}</Notice></div>}
-          {priceBusy && <div className="mb-3"><Spinner label="Consultando Exchange Rates UK…" /></div>}
-          {marketStrength && <CurrencyStrengthRankings market={marketStrength} />}
+          {priceBusy && <div className="mb-3"><Spinner label="Consultando rankings D1/W1…" /></div>}
+          {marketStrength && <div className="space-y-3"><PricePairCandidates market={marketStrength} /><CurrencyStrengthRankings market={marketStrength} /></div>}
           {!marketStrength && !priceBusy && !priceErr && <Spinner label="Preparando rankings de preço…" />}
         </Section>
       )}

@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { G8, type Currency } from "@/lib/ai/types";
 import type { ExchangeRatesMarketSnapshot, MarketStrengthEntry } from "@/lib/macro/market-analysis-types";
-import CurrencyStrengthRankings from "@/components/ai/CurrencyStrengthRankings";
+import CurrencyStrengthRankings, { rankG8StrengthEntries } from "@/components/ai/CurrencyStrengthRankings";
+import PricePairCandidates from "@/components/ai/PricePairCandidates";
+import MacroMarketAnalysisView from "@/components/ai/MacroMarketAnalysisView";
+import type { MarketMacroAnalysisResponse } from "@/lib/macro/market-analysis-types";
 
 function snapshot(): ExchangeRatesMarketSnapshot {
   return {
     status: "unavailable",
-    sourceUrl: "https://www.exchangerates.org.uk/performance-trends",
+    sourceUrl: "https://example.test/strength",
     retrievedAt: "2026-10-19T15:00:00.000Z",
     updatedAt: null,
     ageHours: null,
@@ -38,45 +41,70 @@ function completeSnapshot(): ExchangeRatesMarketSnapshot {
   return market;
 }
 
-describe("Currency Strength G8 rankings", () => {
-  it("always renders all eight G8 currencies for both periods when the source has no rows", () => {
+describe("G8 strength list", () => {
+  it("shows all eight currencies, D1/W1 selectors, and no source labels when data is unavailable", () => {
     const html = renderToStaticMarkup(<CurrencyStrengthRankings market={snapshot()} />);
-    expect(html).toContain("Diário — 1D / Today");
-    expect(html).toContain("Semanal — 1W");
-    expect(html).toContain("Pares candidatos por força de preço");
-    for (const currency of G8) {
-      expect(html.match(new RegExp(`>${currency}</td>`, "g")) ?? []).toHaveLength(2);
-    }
-    expect(html).toContain("não significa zero");
-    expect(html).toContain("Nenhum valor ausente foi estimado");
+    expect(html).toContain(">D1</button>");
+    expect(html).toContain(">W1</button>");
+    expect(html).toContain("Indisponível");
+    for (const currency of G8) expect(html).toContain(`>${currency}</span>`);
+    expect(html).not.toContain("Exchange Rates UK");
+    expect(html).not.toContain("Currency Strength Meter");
   });
 
-  it("shows aligned, price-only pair candidates with a direct SMC/ICT link", () => {
+  it("keeps the macro analysis result to the compact ranking, not the detailed narrative", () => {
+    const report = {
+      analysisStatus: "available",
+      marketStrength: completeSnapshot(),
+      narrative: { headline: "NARRATIVA-TESTE-NÃO-EXIBIR", executiveSummary: "RELATÓRIO-EXTENSO-TESTE" },
+    } as unknown as MarketMacroAnalysisResponse;
+    const html = renderToStaticMarkup(<MacroMarketAnalysisView report={report} onBack={() => {}} />);
+    expect(html).toContain("Força das moedas G8");
+    expect(html).not.toContain("NARRATIVA-TESTE-NÃO-EXIBIR");
+    expect(html).not.toContain("RELATÓRIO-EXTENSO-TESTE");
+    expect(html).not.toContain("example.test");
+  });
+
+  it("orders D1 from strongest to weakest and displays the original percentage scores", () => {
     const html = renderToStaticMarkup(<CurrencyStrengthRankings market={completeSnapshot()} />);
-    expect(html).toContain("GBP/USD");
-    expect(html).toContain("1D + 1W alinhados");
-    expect(html).toContain("Analisar no SMC/ICT");
-    expect(html).toContain("symbol=GBPUSD&amp;bias=LONG");
-    expect(html).toContain("Comparações");
+    expect(html.indexOf(">GBP</span>")).toBeLessThan(html.indexOf(">AUD</span>"));
+    expect(html.indexOf(">AUD</span>")).toBeLessThan(html.indexOf(">CAD</span>"));
+    expect(html.indexOf(">CAD</span>")).toBeLessThan(html.indexOf(">USD</span>"));
+    expect(html).toContain("+0,36%");
+    expect(html).toContain("-0,19%");
   });
 
-  it("preserves the supplied source percentage and shows missing period values as empty", () => {
-    const market = snapshot();
-    market.status = "partial";
-    market.primaryRanking = [{
-      currency: "AUD", score: 0.53, sourceRank: 1, g8Rank: 1,
-      wins: 7, losses: 2, flat: 0, comparisons: 9,
-    }];
+  it("leaves missing and non-finite scores without an invented rank", () => {
+    const rows = rankG8StrengthEntries([{
+      currency: "AUD", score: Number.NaN, sourceRank: 1, g8Rank: 1,
+      wins: 5, losses: 2, flat: 1, comparisons: 8,
+    }]);
+    expect(rows).toHaveLength(8);
+    expect(rows.every((row) => row.score === null && row.g8Rank === null)).toBe(true);
+  });
+
+  it("orders W1 independently from strongest to weakest", () => {
+    const rows = rankG8StrengthEntries(completeSnapshot().weeklyRanking);
+    expect(rows.slice(0, 4).map((row) => row.currency)).toEqual(["NZD", "CAD", "GBP", "CHF"]);
+    expect(rows.slice(4).map((row) => row.currency)).toEqual(["AUD", "EUR", "USD", "JPY"]);
+  });
+
+  it("hides old scores when the data snapshot is stale but keeps all G8 rows visible", () => {
+    const market = completeSnapshot();
+    market.status = "stale";
     const html = renderToStaticMarkup(<CurrencyStrengthRankings market={market} />);
-    expect(html).toContain("+0,53%");
-    expect(html).toContain("Score 1D (%)");
-    expect(html).toContain("Score 1W (%)");
+    expect(html).toContain("Desatualizado");
+    expect(html).not.toContain("+0,36%");
+    for (const currency of G8) expect(html).toContain(`>${currency}</span>`);
   });
 
-  it("keeps the full currency tables collapsed in compact report mode", () => {
-    const html = renderToStaticMarkup(<CurrencyStrengthRankings market={completeSnapshot()} compact />);
-    expect(html).toContain("Pares candidatos por força de preço");
-    expect(html).toContain("Ver ranking completo das oito moedas (1D e 1W)");
-    expect(html).not.toContain("Força de preço original do Currency Strength Meter. É distinta");
+  it("shows only the top three aligned price-differential pairs in Ranking G8", () => {
+    const html = renderToStaticMarkup(<PricePairCandidates market={completeSnapshot()} />);
+    expect(html).toContain("Top 3 pares · maior diferencial de força");
+    expect(html).toContain("GBP/USD");
+    expect(html).toContain("D1 + W1 alinhados");
+    expect(html).toContain("Analisar no SMC/ICT");
+    expect(html).not.toContain("Exchange Rates UK");
+    expect(html).not.toContain("Currency Strength Meter");
   });
 });
