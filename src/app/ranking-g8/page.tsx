@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BarChart3, Trophy, Grid3X3, Siren, LineChart as LineChartIcon, RefreshCw, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
-import G8Ranking, { type MiniScorePoint } from "@/components/ai/G8Ranking";
+import G8Ranking from "@/components/ai/G8Ranking";
 import MacroSummary from "@/components/ai/MacroSummary";
 import CurrencyStrengthRankings from "@/components/ai/CurrencyStrengthRankings";
 import PricePairCandidates from "@/components/ai/PricePairCandidates";
@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/ai/client";
 import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView } from "@/lib/ai/types";
 import type { ExchangeRatesMarketSnapshot } from "@/lib/macro/market-analysis-types";
 import { SESSIONS, type Session } from "@/lib/ai/types";
+import { announceAiDataUpdated, subscribeAiDataUpdated } from "@/lib/ai/refresh-events";
 
 type Tab = "ranking" | "preco" | "matriz" | "candidatos" | "risco" | "historico";
 
@@ -21,7 +22,6 @@ export default function RankingG8Page() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("preco");
   const [scores, setScores] = useState<CurrencyScoreView[] | null>(null);
-  const [scoreHistory, setScoreHistory] = useState<MiniScorePoint[]>([]);
   const [latest, setLatest] = useState<MacroAnalysisResult | null>(null);
   const [candidates, setCandidates] = useState<TradeCandidateView[] | null>(null);
   const [marketStrength, setMarketStrength] = useState<ExchangeRatesMarketSnapshot | null>(null);
@@ -33,22 +33,17 @@ export default function RankingG8Page() {
 
   const load = useCallback(async () => {
     try {
+      const sessionQuery = session !== "ALL" ? `?session=${session}` : "";
+      const latestQuery = session !== "ALL" ? `&session=${session}` : "";
       const [s, l, c] = await Promise.all([
-        apiFetch<CurrencyScoreView[]>("/api/macro/scores"),
-        apiFetch<MacroAnalysisResult | null>(`/api/macro/analyses?latest=1${session !== "ALL" ? `&session=${session}` : ""}`),
-        apiFetch<TradeCandidateView[]>("/api/macro/candidates"),
+        apiFetch<CurrencyScoreView[]>(`/api/macro/scores${sessionQuery}`),
+        apiFetch<MacroAnalysisResult | null>(`/api/macro/analyses?latest=1${latestQuery}`),
+        apiFetch<TradeCandidateView[]>(`/api/macro/candidates${sessionQuery}`),
       ]);
       setScores(s); setLatest(l); setCandidates(c); setErr(null);
     } catch (e) { setErr((e as Error).message); }
   }, [session]);
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
-  useEffect(() => {
-    let active = true;
-    apiFetch<MiniScorePoint[]>("/api/macro/scores/history?days=7")
-      .then((rows) => { if (active) setScoreHistory(Array.isArray(rows) ? rows : []); })
-      .catch(() => { if (active) setScoreHistory([]); });
-    return () => { active = false; };
-  }, []);
 
   const loadPriceStrength = useCallback(async () => {
     setPriceBusy(true);
@@ -65,16 +60,26 @@ export default function RankingG8Page() {
   useEffect(() => {
     if (tab === "preco" && marketStrength === null && !priceBusy && !priceErr) void Promise.resolve().then(loadPriceStrength);
   }, [tab, marketStrength, priceBusy, priceErr, loadPriceStrength]);
+  useEffect(() => subscribeAiDataUpdated(() => {
+    void load();
+    void loadPriceStrength();
+  }), [load, loadPriceStrength]);
 
   const refresh = () => {
     void load();
-    if (tab === "preco") void loadPriceStrength();
+    void loadPriceStrength();
   };
 
   const recompute = async () => {
     setBusy("Recalculando scores com os eventos já interpretados (sem IA)..."); setErr(null);
-    try { const r = await apiFetch<MacroAnalysisResult>("/api/macro/scores/recompute", { method: "POST", body: JSON.stringify({ session: session === "ALL" ? "LONDON" : session, persist: true }) }); setLatest({ ...r, analysis_id: r.analysis_id ?? "recalc" }); setScores(r.currencies); setCandidates(r.trade_candidates); }
-    catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
+    try {
+      const targetSession = session === "ALL" ? (latest?.session ?? "LONDON") : session;
+      const r = await apiFetch<MacroAnalysisResult>("/api/macro/scores/recompute", {
+        method: "POST", body: JSON.stringify({ session: targetSession, interpret: false, persist: true }),
+      });
+      setLatest(r); setScores(r.currencies); setCandidates(r.trade_candidates);
+      announceAiDataUpdated();
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
   const tabs = [
     { id: "preco" as Tab, label: "Pares D1/W1", icon: BarChart3 }, { id: "ranking" as Tab, label: "Macro por eventos", icon: Trophy }, { id: "matriz" as Tab, label: "Divergence Matrix", icon: Grid3X3 }, { id: "candidatos" as Tab, label: "Trade Candidates", icon: Target },
@@ -93,14 +98,14 @@ export default function RankingG8Page() {
       <div className="mb-4"><Tabs tabs={tabs} value={tab} onChange={setTab} /></div>
       {err && <div className="mb-4"><Notice kind="error">{err}</Notice></div>}
       {busy && <div className="mb-4"><Spinner label={busy} /></div>}
-      {latest && tab !== "preco" && <p className="text-[11px] text-text-muted mb-3">Base do score macro: análise #{latest.analysis_id} · {latest.date} · {SESSION_LABEL[latest.session]} · scoring {latest.meta.scoring_version}</p>}
+      {latest && tab !== "preco" && <p className="text-[11px] text-text-muted mb-3">Base do score macro: análise #{latest.analysis_id} · {latest.date} · {SESSION_LABEL[latest.session]} · scoring {latest.meta.scoring_version}{latest.analysis_status === "ANALISE_INSUFICIENTE" ? " · evidência insuficiente para ranking confiável" : ""}</p>}
 
       {tab === "ranking" && (
         <div className="space-y-4">
-          {latest && <MacroSummary result={latest} />}
+          {latest && <MacroSummary result={latest} compact />}
           <div className="grid gap-4 xl:grid-cols-3">
             <Section className="xl:col-span-2" title="Score macro por eventos" sub="Evidência econômica confirmada, não força de preço. Moedas sem evidência ficam em “sem dado”, sem posição macro.">
-              {scores ? <G8Ranking scores={scores} history={scoreHistory} /> : <Spinner />}
+              {scores ? <G8Ranking scores={scores} /> : <Spinner />}
               {(latest?.extra_currencies?.length ?? 0) > 0 && (
                 <div className="mt-4 pt-4 border-t border-border">
                   <p className="text-xs font-bold text-text-primary">Moedas fora do G8 com evidência disponível</p>

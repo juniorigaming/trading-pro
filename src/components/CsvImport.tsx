@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { Upload, FileText, CheckCircle, AlertCircle, Download, X, Trash2 } from "lucide-react";
+import Link from "next/link";
 type ImportedFileInfo = { name: string; size: number; importedAt: string; totalRows: number; imported: number; };
 export default function CsvImport() {
   const [file, setFile] = useState<File | null>(null);
@@ -12,8 +13,13 @@ export default function CsvImport() {
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
+    let cancelled = false;
     const saved = localStorage.getItem('lastImportedFile');
-    if (saved) { try { setImportedFile(JSON.parse(saved)); } catch {} }
+    if (saved) void Promise.resolve().then(() => {
+      if (cancelled) return;
+      try { setImportedFile(JSON.parse(saved)); } catch {}
+    });
+    return () => { cancelled = true; };
   }, []);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) { setFile(e.target.files[0]); setResult(null); setError(null); }
@@ -102,7 +108,7 @@ export default function CsvImport() {
       {result && (
         <div className="p-3 rounded-xl border bg-emerald/10 border-emerald/20 text-emerald text-xs flex items-start gap-2">
           <CheckCircle size={16} className="mt-0.5 flex-shrink-0" />
-          <div className="flex-1"><p className="font-bold">{result.message}</p><p className="mt-1 text-[11px]">Total linhas: {result.totalRows} | Importadas: {result.imported} | Ignoradas: {result.skipped}</p><p className="mt-2"><a href="/operacoes" className="underline font-bold">Ver em Operações →</a></p></div>
+          <div className="flex-1"><p className="font-bold">{result.message}</p><p className="mt-1 text-[11px]">Total linhas: {result.totalRows} | Importadas: {result.imported} | Ignoradas: {result.skipped}</p><p className="mt-2"><Link href="/operacoes" className="underline font-bold">Ver em Operações →</Link></p></div>
         </div>
       )}
       {error && (

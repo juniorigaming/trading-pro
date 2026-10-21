@@ -420,7 +420,7 @@ export async function runMarketMacroAnalysis(input: {
   if (evidence.status === "unavailable") warnings.push(evidence.message ?? "Eventos econômicos salvos indisponíveis nesta execução.");
   if (evidence.excludedUnconfirmedCount > 0) warnings.push(`${evidence.excludedUnconfirmedCount} evento(s) não confirmado(s) nos screenshots foram excluídos da análise direta.`);
   if (!evidence.released.length) warnings.push("Nenhum evento recente com Actual confirmado foi encontrado nas evidências enviadas ou salvas.");
-  warnings.push("A análise direta é somente leitura: não chama o pipeline de scoring nem grava/atualiza economic_events, macro_interpretations, currency_scores, candidatos ou ai_calls.");
+  warnings.push("Força de preço D1/W1 e score macro por eventos permanecem em dimensões separadas.");
 
   let analysisStatus: MarketMacroAnalysisResponse["analysisStatus"] = "unavailable";
   let ai: MarketMacroAnalysisResponse["ai"] = { provider: "unavailable", model: "—", promptVersion: MACRO_MARKET_ANALYSIS.version, latencyMs: null };

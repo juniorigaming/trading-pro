@@ -46,7 +46,7 @@ export default function BrokerConnect() {
   };
 
   useEffect(() => {
-    fetchAccounts();
+    void Promise.resolve().then(fetchAccounts);
   }, []);
 
   const handleTestToken = async () => {
@@ -242,7 +242,7 @@ export default function BrokerConnect() {
 
         <div className="bg-amber/10 border border-amber/20 rounded-xl p-3 text-[11px] text-amber space-y-1">
           <p className="font-bold">⚠️ Checklist antes de conectar:</p>
-          <p>1. <code className="bg-black/30 px-1 rounded">METAAPI_TOKEN</code> no Cloudflare é Secret com token COMPLETO (700+ caracteres, sem ...). Teste com botão "Testar METAAPI_TOKEN" acima.</p>
+          <p>1. <code className="bg-black/30 px-1 rounded">METAAPI_TOKEN</code> no Cloudflare é Secret com token COMPLETO (700+ caracteres, sem ...). Teste com botão &quot;Testar METAAPI_TOKEN&quot; acima.</p>
           <p>2. Servidor exato igual MT5 mostra. Se falhar, tente: DooPrime-Demo, DooTechnology-Demo, DooPrime-Live-2, etc.</p>
           <p>3. Senha de investidor, não a master.</p>
         </div>

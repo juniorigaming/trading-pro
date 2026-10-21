@@ -18,21 +18,22 @@ export default function EditarOperacaoPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchTrade(id)
-      .then((t) => {
-        if (!cancelled) setTrade(t);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof TradeNotFoundError ? "Operação não encontrada." : e.message);
-      })
-      .finally(() => {
+    const load = async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const next = await fetchTrade(id);
+        if (!cancelled) setTrade(next);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof TradeNotFoundError ? "Operação não encontrada." : (e as Error).message);
+      } finally {
         if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
+      }
     };
+    void load();
+    return () => { cancelled = true; };
   }, [id, reloadKey]);
 
   return (

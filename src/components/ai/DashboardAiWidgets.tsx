@@ -1,9 +1,10 @@
 "use client";
-import { Component, useEffect, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark, Bitcoin } from "lucide-react";
+import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark, Bitcoin, RefreshCw } from "lucide-react";
 import type { PortfolioId } from "@/lib/portfolio";
 import { apiFetch } from "@/lib/ai/client";
+import { subscribeAiDataUpdated } from "@/lib/ai/refresh-events";
 import { B3_SESSION_LABEL, type B3AnalysisResult } from "@/lib/b3/types";
 import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView , EvaluatedCurrency } from "@/lib/ai/types";
 import { Badge, DeltaArrow, fmtScore, riskColor, scoreBg, SESSION_LABEL } from "./ui";
@@ -62,13 +63,50 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
   const [cands, setCands] = useState<TradeCandidateView[]>([]);
   const [unavailable, setUnavailable] = useState(false);
   const [b3, setB3] = useState<B3AnalysisResult | null>(null);
-  useEffect(() => { apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").then((r) => setB3(r && typeof r === "object" && "win" in r ? r : null)).catch(() => setB3(null)); }, []);
-  useEffect(() => {
-    Promise.all([apiFetch<CurrencyScoreView[]>("/api/macro/scores"), apiFetch<MacroAnalysisResult | null>("/api/macro/analyses?latest=1"), apiFetch<TradeCandidateView[]>("/api/macro/candidates")])
-      .then(([s, l, c]) => { setScores(Array.isArray(s) ? s : []); setLatest(l && typeof l === "object" ? l : null); setCands(normalizeCandidates(c)); }).catch(() => setUnavailable(true));
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const loadDashboardData = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const [s, l, c, b] = await Promise.all([
+        apiFetch<CurrencyScoreView[]>("/api/macro/scores"),
+        apiFetch<MacroAnalysisResult | null>("/api/macro/analyses?latest=1"),
+        apiFetch<TradeCandidateView[]>("/api/macro/candidates"),
+        apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").catch(() => null),
+      ]);
+      setScores(Array.isArray(s) ? s : []);
+      setLatest(l && typeof l === "object" ? l : null);
+      setCands(normalizeCandidates(c));
+      setB3(b && typeof b === "object" && "win" in b ? b : null);
+      setUnavailable(false);
+      setLastUpdated(new Date());
+    } catch {
+      setUnavailable(true);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
+
+  useEffect(() => { void Promise.resolve().then(loadDashboardData); }, [loadDashboardData]);
+  useEffect(() => subscribeAiDataUpdated(() => { void loadDashboardData(); }), [loadDashboardData]);
+
+  const refreshToolbar = (
+    <div className="mb-2 flex items-center justify-end gap-2 text-[10px] text-text-muted">
+      {lastUpdated && <span>Consultado às {lastUpdated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>}
+      <button type="button" onClick={() => void loadDashboardData()} disabled={refreshing} className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-surface-2 disabled:opacity-50" title="Atualizar os widgets de mercado">
+        <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />Atualizar
+      </button>
+    </div>
+  );
   if (unavailable) return (
-    <div className="glass-card p-4 mb-6 flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-sm text-text-secondary"><BrainCircuit size={18} className="text-accent" />Módulo IA ainda não configurado (rode a migration e defina as variáveis).</div><Link href="/analise-macro" className="text-xs font-bold text-accent inline-flex items-center gap-1">Abrir <ChevronRight size={14} /></Link></div>
+    <div className="glass-card p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-sm text-text-secondary"><BrainCircuit size={18} className="text-accent" />Widgets de mercado indisponíveis nesta atualização.</div>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={() => void loadDashboardData()} disabled={refreshing} className="text-xs font-bold text-accent disabled:opacity-50">Tentar novamente</button>
+        <Link href="/analise-macro" className="text-xs font-bold text-accent inline-flex items-center gap-1">Abrir Análise Macro <ChevronRight size={14} /></Link>
+      </div>
+    </div>
   );
   const sorted = scores ? (scores.filter((s) => s.status === "EVALUATED" && s.score !== null) as EvaluatedCurrency[]).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)) : [];
   const top = sorted.slice(0, 3), bottom = sorted.slice(-3).reverse();
@@ -100,9 +138,12 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
 
   if (portfolio === "B3") {
     return (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
-        {b3Card}
-        {eventRiskCard}
+      <div className="mb-6">
+        {refreshToolbar}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {b3Card}
+          {eventRiskCard}
+        </div>
       </div>
     );
   }
@@ -111,7 +152,9 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
     const usd = sorted.find((x) => x.currency === "USD");
     const regime = b3?.regime ?? null;
     return (
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-6">
+      <div className="mb-6">
+        {refreshToolbar}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Link href="/ranking-g8" className="glass-card p-4 hover:bg-surface-2/60 transition">
           <p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><Bitcoin size={14} className="text-sky" />Regime de risco global</p>
           {!usd && !regime ? <p className="text-xs text-text-muted">Sem análise macro ainda — rode a Análise Macro IA para ver o viés do dólar.</p> : (
@@ -131,12 +174,15 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
             <li>Registrar taxa (fee) e funding no resultado líquido.</li>
           </ul>
         </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
+    <div className="mb-6">
+      {refreshToolbar}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       <Link href="/ranking-g8" className="glass-card p-4 hover:bg-surface-2/60 transition">
         <div className="flex items-center justify-between mb-2"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5"><Trophy size={14} className="text-accent" />Ranking G8</p>{sessionLabel && <span className="text-[10px] text-text-muted">{sessionLabel}</span>}</div>
         {sorted.length === 0 ? <p className="text-xs text-text-muted">Sem análise ainda.</p> : (
@@ -152,6 +198,7 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
       </Link>
       {eventRiskCard}
       <div className="glass-card p-4"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><BrainCircuit size={14} className="text-accent" />Exposição por moeda</p><CurrencyExposure compact /></div>
+      </div>
     </div>
   );
 }

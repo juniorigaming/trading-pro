@@ -61,7 +61,8 @@ export async function saveRawEvents(events: EconomicEventInput[], opts: SaveRawO
         set: {
           actual: values.actual, forecast: values.forecast, previous: values.previous, actualNum: values.actualNum, forecastNum: values.forecastNum, previousNum: values.previousNum,
           status: values.status, impact: values.impact, ocrConfidence: values.ocrConfidence, requiresManualConfirmation: values.requiresManualConfirmation,
-          userEdited: values.userEdited, userEdits: values.userEdits, updatedAt: new Date(),
+          userEdited: values.userEdited, userEdits: values.userEdits,
+          ...(opts.sourceRef?.startsWith("analysis:") ? { sourceRef: values.sourceRef } : {}), updatedAt: new Date(),
         },
       }).returning({ id: economicEvents.id });
     ids.push(row.id);
@@ -313,6 +314,10 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
 
   if (opts.persist !== false && scopeId) {
     const scoreDate = now.toISOString().slice(0, 10);
+    // Um ponto vigente por moeda/análise/dia: recalcular na mesma análise não polui o histórico.
+    await db.delete(currencyScores).where(and(
+      eq(currencyScores.analysisId, scopeId), eq(currencyScores.session, opts.session), eq(currencyScores.scoreDate, scoreDate),
+    ));
     // Só moedas com evidência entram no histórico — nunca um 0 artificial.
     const persistable = evaluated;
     if (persistable.length) await db.insert(currencyScores).values(persistable.map((s) => ({
@@ -320,6 +325,8 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
       classification: s.classification!, bias: s.bias ?? "NEUTRAL", confidence: s.confidence as Confidence, rank: s.rank ?? 0, previousScore: null, scoreDelta: null,
       momentum: null, liveEvents: s.live_events, drivers: s.drivers, scoringVersion: cfg.version,
     })));
+    // Um único snapshot de candidatos vigente por análise; os scores continuam históricos.
+    await db.delete(tradeCandidates).where(eq(tradeCandidates.analysisId, scopeId));
     if (candidates.length) {
       await db.insert(tradeCandidates).values(candidates.map((c) => ({
         analysisId: scopeId, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
@@ -448,8 +455,8 @@ export async function getLatestAnalysis(session?: Session): Promise<MacroAnalysi
 }
 
 /** Scores da ANÁLISE MAIS RECENTE (nunca um misto de análises). Usado pelo Ranking G8 e pelo histórico de risco. */
-export async function latestScores(): Promise<CurrencyScoreView[]> {
-  const a = await getLatestAnalysis();
+export async function latestScores(session?: Session): Promise<CurrencyScoreView[]> {
+  const a = await getLatestAnalysis(session);
   return a?.currencies ?? [];
 }
 

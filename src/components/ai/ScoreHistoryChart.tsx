@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { apiFetch } from "@/lib/ai/client";
+import { subscribeAiDataUpdated } from "@/lib/ai/refresh-events";
 import { G8 } from "@/lib/ai/types";
 import { Spinner } from "./ui";
 
@@ -14,7 +15,16 @@ export default function ScoreHistoryChart({ endpoint = "/api/macro/scores/histor
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [state, setState] = useState<{ days: number; rows: Row[] } | null>(null);
   const [sel, setSel] = useState<string[]>([...all]);
-  useEffect(() => { let alive = true; apiFetch<Row[]>(`${endpoint}${endpoint.includes("?") ? "&" : "?"}days=${days}`).then((r) => alive && setState({ days, rows: r })).catch(() => alive && setState({ days, rows: [] })); return () => { alive = false; }; }, [days, endpoint]);
+  const loadHistory = useCallback(async () => {
+    try {
+      const rows = await apiFetch<Row[]>(`${endpoint}${endpoint.includes("?") ? "&" : "?"}days=${days}`);
+      setState({ days, rows });
+    } catch {
+      setState({ days, rows: [] });
+    }
+  }, [days, endpoint]);
+  useEffect(() => { void Promise.resolve().then(loadHistory); }, [loadHistory]);
+  useEffect(() => subscribeAiDataUpdated(() => { void loadHistory(); }), [loadHistory]);
   const rows = state && state.days === days ? state.rows : null;
   const data = useMemo(() => {
     if (!rows) return [];

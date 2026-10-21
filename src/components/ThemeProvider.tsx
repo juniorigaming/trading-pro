@@ -33,11 +33,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // On mount, hydrate from localStorage + system.
   useEffect(() => {
+    let cancelled = false;
     const stored = loadAppearance();
     applyAppearance(stored);
-    setPrefs(stored);
-    setThemeState(resolveTheme(stored.theme));
-    setIsSystem(stored.theme === "system");
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setPrefs(stored);
+      setThemeState(resolveTheme(stored.theme));
+      setIsSystem(stored.theme === "system");
+    });
 
     const mq = window.matchMedia("(prefers-color-scheme: light)");
     const onChange = () => {
@@ -47,7 +51,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       }
     };
     mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    return () => {
+      cancelled = true;
+      mq.removeEventListener("change", onChange);
+    };
   }, []);
 
   const commit = useCallback((next: AppearancePrefs) => {

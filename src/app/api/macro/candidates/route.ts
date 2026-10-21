@@ -43,7 +43,9 @@ export async function GET(request: Request) {
     if (!latest[0]) return json([]);
     const rows = await db.select().from(tradeCandidates)
       .where(and(eq(tradeCandidates.analysisId, latest[0].id)))
-      .orderBy(tradeCandidates.priority);
-    return json(rows.map(toView));
+      .orderBy(desc(tradeCandidates.computedAt), tradeCandidates.priority);
+    const unique = new Map<string, Row>();
+    for (const row of rows) if (!unique.has(row.symbol)) unique.set(row.symbol, row);
+    return json([...unique.values()].sort((a, b) => a.priority - b.priority).map(toView));
   } catch (e) { return errorResponse(e, "Falha ao carregar candidatos"); }
 }

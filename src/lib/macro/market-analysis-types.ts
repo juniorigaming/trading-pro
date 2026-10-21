@@ -1,4 +1,4 @@
-import type { Currency } from "@/lib/ai/types";
+import type { Currency, Session } from "@/lib/ai/types";
 
 export type MarketSourceStatus = "available" | "partial" | "stale" | "unavailable";
 export type MarketNarrativeStatus = "available" | "mock" | "unavailable";
@@ -225,5 +225,13 @@ export interface MarketMacroAnalysisResponse {
   };
   divergences: PriceFundamentalDivergence[];
   pairAsymmetries: PairAsymmetry[];
+  macroRefresh?: {
+    status: "updated" | "skipped" | "failed";
+    analysisId: string | null;
+    date?: string;
+    session?: Session;
+    eventCount: number;
+    message: string;
+  };
   warnings: string[];
 }

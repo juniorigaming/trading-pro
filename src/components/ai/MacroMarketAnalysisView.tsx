@@ -19,6 +19,7 @@ export default function MacroMarketAnalysisView({ report, onBack }: { report: Ma
         {report.marketStrength.updatedAt && <span className="text-[11px] text-text-muted">Dados atualizados em {new Date(report.marketStrength.updatedAt).toLocaleString("pt-BR")}</span>}
       </div>
 
+      {report.macroRefresh && <Notice kind={report.macroRefresh.status === "updated" ? "info" : "warn"}>{report.macroRefresh.message}</Notice>}
       {!hasNarrative && <Notice kind="warn">A leitura textual da IA não ficou disponível; os dados numéricos aparecem abaixo sem estimativas.</Notice>}
 
       <CurrencyStrengthRankings market={report.marketStrength} />

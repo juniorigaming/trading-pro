@@ -77,7 +77,7 @@ describe.skipIf(!hasPglite)("B3 e2e (PGlite + mock AI)", () => {
     // segunda análise → delta/mudanças
     const r2 = await POST(J({ session: "NY_OVERLAP", inputType: "recompute" })); const b2 = await r2.json(); expect(r2.status).toBe(200); expect(b2.win.previous_score).toBe(b.win.score);
     // USD do G8 não foi alterado: currency_scores não recebe BRL
-    const { GET: G8 } = await import("@/app/api/macro/scores/route"); const g8 = await (await G8()).json(); expect(g8.find((x: { currency: string }) => x.currency === "BRL")).toBeUndefined();
+    const { GET: G8 } = await import("@/app/api/macro/scores/route"); const g8 = await (await G8(new Request("http://x/api/macro/scores"))).json(); expect(g8.find((x: { currency: string }) => x.currency === "BRL")).toBeUndefined();
   });
   it("SMC analyze com WIN usa checklist B3 + journal com campos B3 + stats por regime", async () => {
     const { POST } = await import("@/app/api/ai/smc/analyze/route");

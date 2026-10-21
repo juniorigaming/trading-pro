@@ -9,6 +9,7 @@ import { Badge, Btn, Notice, PageHeader, Section, Spinner, Tabs, fmtScore, input
 import { AlertList, CandidateCards, ComponentTable, DiCurvePanel, EventRiskB3, InstrumentHeader, IntermarketTable, REGIME_LABEL, ScoreCards, regimeColor } from "@/components/b3/B3Cards";
 import { DiCurveForm, MarketForm, emptyMarkets, toDiInputs, toMarketInputs, type DiDraft, type MarketDraft } from "@/components/b3/B3Inputs";
 import { apiFetch, uid, type LocalImage } from "@/lib/ai/client";
+import { announceAiDataUpdated } from "@/lib/ai/refresh-events";
 import type { EconomicEventInput } from "@/lib/ai/types";
 import type { DiContractConfig } from "@/lib/b3/config";
 import { B3_SESSIONS, B3_SESSION_LABEL, guessB3Session, type B3AnalysisResult, type B3Candidate, type B3Session, type DiCause, type DiContractInput } from "@/lib/b3/types";
@@ -56,7 +57,7 @@ function B3Inner() {
     try {
       const diInputs = toDiInputs(di); const mk = toMarketInputs(markets);
       const r = await apiFetch<B3AnalysisResult>("/api/ai/b3/analyze", { method: "POST", body: JSON.stringify({ session, events: opts.events, inputType: opts.inputType, imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), withBrief, diCurve: diInputs.length ? { contracts: diInputs, cause: diCause || null } : null, markets: mk.length ? mk : null }) });
-      setLatest(r); setRows([]); setImages([]); setMarkets(emptyMarkets()); setDi([]); setTab("overview"); flash(`Análise ${r.analysis_id ?? ""} concluída — regime ${REGIME_LABEL[r.regime]}.`);
+      setLatest(r); setRows([]); setImages([]); setMarkets(emptyMarkets()); setDi([]); setTab("overview"); flash(`Análise ${r.analysis_id ?? ""} concluída — regime ${REGIME_LABEL[r.regime]}.`); announceAiDataUpdated();
       apiFetch<HistItem[]>("/api/b3/analyses?limit=20").then(setHistory).catch(() => undefined);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
@@ -95,6 +96,7 @@ function B3Inner() {
           <Btn variant="ghost" onClick={() => setShowSettings((s) => !s)} title="Contratos DI configuráveis">DI: {contracts.map((c) => c.code).join("/") || "..."}</Btn>
         </div>
       } />
+      <div className="mb-4"><Notice kind="info"><b>WIN × WDO:</b> muitas vezes apresentam uma relação inversa — dólar em alta costuma coincidir com pressão no índice, e dólar em baixa pode acompanhar alívio. É uma tendência, não uma regra nem garantia; juros, fiscal, commodities, fluxo e exterior podem inverter o quadro. O módulo não exibe coeficiente sem uma série histórica pareada adequada.</Notice></div>
       {showSettings && <div className="glass-card p-4 mb-4 flex flex-wrap items-center gap-2 text-xs"><span className="text-text-muted">Contratos (código:vértice, separados por vírgula)</span><input value={contractDraft} onChange={(e) => setContractDraft(e.target.value)} className={`${inputCls} max-w-md`} placeholder="DI1F27:SHORT, DI1F29:MID, DI1F31:LONG" /><Btn onClick={saveContracts}>Salvar</Btn></div>}
 
       <div className="flex flex-col gap-3 mb-4">

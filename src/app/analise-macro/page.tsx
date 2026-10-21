@@ -11,6 +11,7 @@ import { CandidateList } from "@/components/ai/DivergenceMatrix";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
 import { apiFetch, getToken, setToken, uid, type LocalImage } from "@/lib/ai/client";
+import { announceAiDataUpdated, subscribeAiDataUpdated } from "@/lib/ai/refresh-events";
 import { ALL_CURRENCIES, G8, SESSIONS, type EconomicEventInput, type MacroAnalysisResult, type Session } from "@/lib/ai/types";
 import MacroMarketAnalysisView from "@/components/ai/MacroMarketAnalysisView";
 import type { MarketMacroAnalysisResponse } from "@/lib/macro/market-analysis-types";
@@ -47,6 +48,7 @@ export default function AnaliseMacroPage() {
   useEffect(() => { const id = setTimeout(() => setTok(getToken()), 0); return () => clearTimeout(id); }, []);
   const loadHistory = useCallback(() => { apiFetch<AnalysisListItem[]>("/api/macro/analyses?limit=30").then(setHistory).catch((e) => setErr(e.message)); }, []);
   useEffect(() => { if (tab === "historico") loadHistory(); }, [tab, loadHistory]);
+  useEffect(() => subscribeAiDataUpdated(() => { if (tab === "historico") loadHistory(); }), [tab, loadHistory]);
 
   const extract = async () => {
     setErr(null); setBusy("Lendo screenshots com IA (OCR estruturado)..."); setBusyKind("extract");
@@ -71,7 +73,7 @@ export default function AnaliseMacroPage() {
       for (const r of rows) if (r.user_edited) userEdits[`${r.currency}|${r.event}`] = { from: r._original ?? null, to: { actual: r.actual, forecast: r.forecast, previous: r.previous, event: r.event } };
       const events = rows.filter((r) => r.event.trim()).map(({ _id, _confirmed, _original, ...e }) => { void _id; void _confirmed; void _original; return e; });
       const r = await apiFetch<MacroAnalysisResult>("/api/ai/macro/analyze", { method: "POST", body: JSON.stringify({ session, events, inputType: images.length ? "screenshot" : "manual", imagesCount: images.length, tzOffsetMinutes: -new Date().getTimezoneOffset(), userEdits: Object.keys(userEdits).length ? userEdits : null, withBrief, extraction: extractionAudit }) });
-      setMarketResult(null); setResult(r); setStep("result");
+      setMarketResult(null); setResult(r); setStep("result"); announceAiDataUpdated();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
@@ -90,9 +92,9 @@ export default function AnaliseMacroPage() {
     try {
       const report = await apiFetch<MarketMacroAnalysisResponse>("/api/ai/macro/market-analysis", {
         method: "POST",
-        body: JSON.stringify({ supplementalEvents, excludedUnconfirmedCount }),
+        body: JSON.stringify({ supplementalEvents, excludedUnconfirmedCount, session, tzOffsetMinutes: -new Date().getTimezoneOffset() }),
       });
-      setResult(null); setMarketResult(report); setStep("market");
+      setResult(null); setMarketResult(report); setStep("market"); announceAiDataUpdated();
     } catch (e) { setErr((e as Error).message); } finally { setBusy(null); setBusyKind(null); }
   };
 
@@ -187,7 +189,7 @@ export default function AnaliseMacroPage() {
                 <Btn onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Carregando dados atuais..."><BrainCircuit size={16} />Gerar análise atual</Btn>
                 <Btn variant="ghost" onClick={() => { setRows([]); setStep("validate"); }}>Adicionar eventos manualmente (opcional)</Btn>
               </div>
-              <p className="mt-3 text-[10px] text-text-muted">Consulta somente leitura. Não salva eventos, scores nem histórico de chamadas.</p>
+              <p className="mt-3 text-[10px] text-text-muted">Ao concluir, os eventos confirmados são salvos e o score macro é recalculado sem chamada extra de IA. Força D1/W1 permanece separada.</p>
             </Section>
             <Section title="O que você verá" sub="Visão resumida e acionável">
               <ul className="space-y-2 text-xs text-text-secondary">
@@ -218,7 +220,7 @@ export default function AnaliseMacroPage() {
             <Btn onClick={analyze} disabled={!rows.length || !!busy} loading={busyKind === "analyze"} loadingLabel="Salvando e recalculando..."><Sparkles size={16} />Salvar eventos e atualizar Ranking G8</Btn>
             <Btn variant="ghost" onClick={analyzeMarket} disabled={!!busy} loading={busyKind === "market"} loadingLabel="Carregando dados atuais..."><BrainCircuit size={16} />Gerar resumo atual com estes eventos</Btn>
             <label className="inline-flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={withBrief} onChange={(e) => setWithBrief(e.target.checked)} className="accent-[var(--user-accent)]" />Gerar brief narrativo da sessão (1 chamada extra de IA)</label>
-            <p className="w-full text-[10px] text-text-muted">Consulta somente leitura: não salva eventos, histórico de chamadas ou scores. Eventos só entram se estiverem confirmados e permanecem complementares ao ranking D1/W1.</p>
+            <p className="w-full text-[10px] text-text-muted">Somente eventos confirmados atualizam o score por eventos; o recálculo é determinístico e não faz chamada extra de IA. A força D1/W1 continua em aba separada.</p>
           </div>
         </Section>
       )}
@@ -251,7 +253,7 @@ export default function AnaliseMacroPage() {
             {auditMode && result.audit && <Section title="Modo auditoria" sub="Do screenshot ao ranking: cada etapa, cada rejeição e cada score"><AuditPanel result={result} previews={images.map((i) => ({ id: i.id, previewUrl: i.previewUrl, name: i.label }))} /></Section>}
             {result.analysis_status !== "ANALISE_INSUFICIENTE" && <>
             {/* Resumo macro consolidado (backend): forte/fraca, risco, Top 3 long/short, pares a evitar, alertas */}
-            <MacroSummary result={result} />
+            <MacroSummary result={result} compact />
             {brief && <p className="glass-card p-4 text-xs text-text-secondary leading-snug">{brief.replace("Brief: ", "").split(" — ")[0]}</p>}
 
             <div className="grid gap-4 xl:grid-cols-2">
