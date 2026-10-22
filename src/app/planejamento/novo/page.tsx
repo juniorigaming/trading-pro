@@ -58,6 +58,8 @@ export default function NovoPlanejamentoPage() {
     const bias = params.get("bias") === "SHORT" ? "SHORT" : "LONG";
     const div = Number(params.get("div"));
     const eventRisk = (params.get("eventRisk") || "UNKNOWN").slice(0, 20);
+    const eventRiskAssessed = params.get("eventRiskAssessed") !== "false";
+    const eventRiskLabel = eventRiskAssessed ? eventRisk : "NÃO AVALIADO (calendário não informado)";
     const reason = (params.get("reason") || "").slice(0, 500);
     const invalidations = (params.get("invalidations") || "").slice(0, 300);
     Promise.resolve().then(() => setForm((prev) => ({
@@ -66,9 +68,9 @@ export default function NovoPlanejamentoPage() {
       direction: bias === "LONG" ? "BUY" : "SELL",
       macroBias: bias === "LONG" ? "Bullish" : "Bearish",
       invalidation: invalidations,
-      notes: `Candidato Ranking G8 · ${bias} · divergência ${Number.isFinite(div) ? div.toFixed(2) : "—"} · risco de evento ${eventRisk}${reason ? `\n${reason}` : ""}${invalidations ? `\nEventos para revisar: ${invalidations}` : ""}`,
+      notes: `Candidato Ranking G8 · ${bias} · divergência ${Number.isFinite(div) ? div.toFixed(2) : "—"} (|Δ| exibido: 0..10) · risco de evento ${eventRiskLabel}${reason ? `\n${reason}` : ""}${invalidations ? `\nEventos para revisar: ${invalidations}` : ""}`,
     })));
-    Promise.resolve().then(() => setMacroCandidate(`${symbol} · ${bias} · evento ${eventRisk}`));
+    Promise.resolve().then(() => setMacroCandidate(`${symbol} · ${bias} · evento ${eventRiskLabel}`));
   }, []);
 
   const score = useMemo(() => {

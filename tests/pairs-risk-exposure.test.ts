@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTradeCandidates, conventionalPair, divergenceMatrix, G8_PAIRS, splitSymbol } from "@/lib/macro/pairs";
+import { buildTradeCandidates, conventionalPair, divergenceMatrix, filterEligibleTradeCandidates, G8_PAIRS, splitSymbol } from "@/lib/macro/pairs";
 import { eventRiskFor, maxRisk } from "@/lib/macro/event-risk";
 import { computeExposure, wouldIncreaseConcentration } from "@/lib/macro/exposure";
 import type { CurrencyScoreView, PendingEventView } from "@/lib/ai/types";
@@ -23,6 +23,29 @@ describe("pares / divergência", () => {
     const nzdJpy = c.find((x) => x.symbol === "NZDJPY")!; expect(nzdJpy.bias).toBe("SHORT"); expect(nzdJpy.macro_divergence).toBe(3.5); expect(nzdJpy.confidence).toBe("LOW");
     expect(c[0].symbol).toBe("NZDJPY"); expect(c[0].priority).toBe(1);
     expect(c.every((x) => x.macro_divergence >= 1.0)).toBe(true);
+  });
+  it("mantém scores e divergência do candidato na mesma escala exibida no ranking", () => {
+    const withDisplay = scores.map((s) => ({
+      ...s,
+      score_display: s.currency === "EUR" ? 3.76 : s.currency === "AUD" ? -2.51 : Number((s.score! * 2.5).toFixed(2)),
+    }));
+    const eurAud = buildTradeCandidates({ scores: withDisplay, pending: [], maxCandidates: G8_PAIRS.length, eventRiskFor: () => ({ level: "LOW", events: [] }) }).find((x) => x.symbol === "EURAUD")!;
+    expect(eurAud.base_score).toBe(3.76);
+    expect(eurAud.quote_score).toBe(-2.51);
+    expect(eurAud.relative_strength).toBe(6.27);
+    expect(eurAud.macro_divergence).toBe(2.5); // escala nativa preservada para consumidores internos
+  });
+  it("não apresenta pares com evidência fraca como candidatos e marca risco sem calendário como não avaliado", () => {
+    const withEvidence = scores.map((s) => ({ ...s, confidence_pct: 85, evidence_level: s.currency === "CHF" ? "WEAK" as const : "STRONG" as const }));
+    const candidates = buildTradeCandidates({ scores: withEvidence, pending: [], calendarProvided: false, maxCandidates: G8_PAIRS.length, eventRiskFor: () => ({ level: "LOW", events: [] }) });
+    const usdChf = candidates.find((x) => x.symbol === "USDCHF");
+    expect(usdChf?.eligible).toBe(false);
+    expect(usdChf?.ineligible_reason).toMatch(/evidência fraca/i);
+    expect(usdChf?.event_risk_assessed).toBe(false);
+    expect(filterEligibleTradeCandidates(candidates, true).some((x) => x.symbol === "USDCHF")).toBe(false);
+    expect(candidates.some((x) => x.symbol === "EURAUD" && x.eligible)).toBe(true);
+    expect(filterEligibleTradeCandidates(candidates, true, ["EURAUD"]).some((x) => x.symbol === "EURAUD")).toBe(false);
+    expect(filterEligibleTradeCandidates(candidates, false)).toEqual([]);
   });
   it("matriz linha − coluna", () => { const m = divergenceMatrix(scores); expect(m.EUR.AUD).toBe(2.5); expect(m.AUD.EUR).toBe(-2.5); });
 });

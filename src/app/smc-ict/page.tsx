@@ -69,7 +69,7 @@ function SmcPageInner() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-3">
               <label className="text-xs text-text-muted">Ativo<input value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="EURAUD, XAUUSD, NAS100, WINZ26, WDOF27..." className={`${inputCls} mt-1`} /></label>
               <label className="text-xs text-text-muted">Direção macro<select value={bias} onChange={(e) => setBias(e.target.value as typeof bias)} className={`${selectCls} mt-1 w-full`}><option value="">não informada</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option><option value="NEUTRAL">NEUTRAL</option></select></label>
-              <label className="text-xs text-text-muted">Divergência macro<input value={div} onChange={(e) => setDiv(e.target.value)} placeholder="ex.: 2.5" className={`${inputCls} mt-1`} /></label>
+              <label className="text-xs text-text-muted">Divergência macro (magnitude nativa 0..4)<input value={div} onChange={(e) => setDiv(e.target.value)} placeholder="ex.: 0.6" className={`${inputCls} mt-1`} /></label>
               <label className="text-xs text-text-muted">Sessão<select value={session} onChange={(e) => setSession(e.target.value as Session)} className={`${selectCls} mt-1 w-full`}>{SESSIONS.map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}</select></label>
             </div>
             <ImageDropzone images={images} onChange={setImages} max={10} labels={TIMEFRAMES} labelTitle="Timeframe" hint="Envie do maior para o menor timeframe (ex.: D1, H4, H1, M15, M5). Até 10 imagens." />

@@ -44,7 +44,7 @@ export function toDisplayScale(score: number, cfg: ScoringConfig = DEFAULT_SCORI
   return Number((score * cfg.display_scale).toFixed(2));
 }
 
-/** Classifica a força relativa do par pela assimetria, já na escala −5..+5. */
+/** Classifica a diferença entre scores de moeda já convertidos; cada perna é −5..+5 e o Δ pode ser −10..+10. */
 export function classifyRelativeStrength(rel: number, cfg: ScoringConfig = DEFAULT_SCORING_CONFIG): PairStrengthClass {
   const a = Math.abs(rel);
   const b = cfg.pair_bands;
@@ -85,8 +85,17 @@ export interface CandidateInput {
   scores: CurrencyScoreView[];
   pending: PendingEventView[]; // eventos pendentes (para event risk)
   eventRiskFor: (currencies: Currency[], pending: PendingEventView[]) => { level: EventRiskLevel; events: PendingEventView[] };
+  /** false when the analysis had no calendar input; risk must then be shown as not assessed. */
+  calendarProvided?: boolean;
   cfg?: ScoringConfig;
   maxCandidates?: number;
+}
+
+/** Somente pares aprovados pela evidência e pela checagem de consistência podem ser apresentados como candidatos. */
+export function filterEligibleTradeCandidates(candidates: readonly TradeCandidateView[], analysisTrusted = true, avoidedSymbols: readonly string[] = []): TradeCandidateView[] {
+  if (!analysisTrusted) return [];
+  const avoided = new Set(avoidedSymbols);
+  return candidates.filter((candidate) => candidate.eligible === true && !candidate.ineligible_reason && !avoided.has(candidate.symbol));
 }
 
 /** Gera candidatos ordenados pela maior assimetria macro (força relativa), com confiança e invalidação. */
@@ -100,9 +109,12 @@ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[
     if (!b || !q) continue;
     // Sem dado vivo numa das pernas não há viés macro — é ausência de evidência, não fraqueza.
     if (b.no_data || q.no_data) continue;
+    const baseDisplayScore = b.score_display ?? toDisplayScale(b.score, cfg);
+    const quoteDisplayScore = q.score_display ?? toDisplayScale(q.score, cfg);
+    const rel = Number((baseDisplayScore - quoteDisplayScore).toFixed(2));
+    // Keep the native, quantized divergence consumed by SMC/ICT; presentation uses `rel`.
     const div = Number((b.score - q.score).toFixed(2));
     if (Math.abs(div) < cfg.pair_min_divergence) continue;
-    const rel = Number((toDisplayScale(b.score, cfg) - toDisplayScale(q.score, cfg)).toFixed(2));
     const strengthClass = classifyRelativeStrength(rel, cfg);
     if (strengthClass === "NEUTRO") continue;
     const bias: "LONG" | "SHORT" = rel > 0 ? "LONG" : "SHORT";
@@ -118,10 +130,10 @@ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[
       symbol: p.symbol, bias, strong_currency: strong.currency, weak_currency: weak.currency,
       strong_score: strong.score, weak_score: weak.score, macro_divergence: Math.abs(div),
       confidence: confidenceEnumFromPct(confPct), priority: 0,
-      event_risk: risk.level, event_risk_events: risk.events,
+      event_risk: risk.level, event_risk_assessed: input.calendarProvided ?? false, event_risk_events: risk.events,
       relative_strength: rel, strength_class: strengthClass, confidence_pct: confPct,
       base_currency: p.base, quote_currency: p.quote,
-      base_score: toDisplayScale(b.score, cfg), quote_score: toDisplayScale(q.score, cfg),
+      base_score: baseDisplayScore, quote_score: quoteDisplayScore,
       invalidation_events: invalidation,
       eligible: confPct >= cfg.candidate_min_confidence_pct && risk.level !== "EXTREME" && !mixed && !weakLeg,
       ineligible_reason:
@@ -130,7 +142,7 @@ export function buildTradeCandidates(input: CandidateInput): TradeCandidateView[
         : mixed ? "Indicadores conflitantes (viés misto) numa das pernas"
         : weakLeg ? `Evidência fraca em ${weakLeg} (um único dado secundário) — não sustenta par`
         : undefined,
-      reason: `${p.base} ${fmt(toDisplayScale(b.score, cfg))} vs ${p.quote} ${fmt(toDisplayScale(q.score, cfg))} → força relativa ${fmt(rel)} (${divergenceLabel(rel, cfg)}), confiança ${confPct}%.` +
+      reason: `${p.base} ${fmt(baseDisplayScore)} vs ${p.quote} ${fmt(quoteDisplayScore)} → força relativa ${fmt(rel)} (${divergenceLabel(rel, cfg)}), confiança ${confPct}%.` +
         `${mixed ? " Há indicadores conflitantes numa das pernas (viés misto) — convicção reduzida." : ""}` +
         ` ${strengthClass} em ${p.symbol} é o lado favorecido pela macro; aguardar confirmação SMC/ICT.`,
     });

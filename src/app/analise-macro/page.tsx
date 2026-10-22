@@ -8,6 +8,7 @@ import MacroSummary from "@/components/ai/MacroSummary";
 import OcrValidationTable, { type OcrRow } from "@/components/ai/OcrValidationTable";
 import G8Ranking from "@/components/ai/G8Ranking";
 import { CandidateList } from "@/components/ai/DivergenceMatrix";
+import { filterEligibleTradeCandidates } from "@/lib/macro/pairs";
 import EventRiskPanel from "@/components/ai/EventRiskPanel";
 import { Btn, Notice, PageHeader, Section, Spinner, Tabs, SESSION_LABEL, inputCls } from "@/components/ai/ui";
 import { apiFetch, getToken, setToken, uid, type LocalImage } from "@/lib/ai/client";
@@ -258,7 +259,7 @@ export default function AnaliseMacroPage() {
 
             <div className="grid gap-4 xl:grid-cols-2">
               <Section title="Ranking G8" sub="Toque numa moeda para ver o que puxou o score"><G8Ranking scores={result.currencies} clean /></Section>
-              <Section title="Trade Candidates" sub="Direção macro para buscar setup no SMC/ICT — não é entrada"><CandidateList candidates={result.trade_candidates} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /></Section>
+              <Section title="Trade Candidates" sub="Direção macro para buscar setup no SMC/ICT — não é entrada"><CandidateList candidates={filterEligibleTradeCandidates(result.trade_candidates, result.analysis_status === "OK", result.pairs_to_avoid.map((p) => p.symbol))} calendarProvided={result.calendar_status === "PROVIDED"} onPick={(c) => router.push(`/smc-ict?symbol=${c.symbol}&bias=${c.bias}&div=${c.macro_divergence}`)} /></Section>
             </div>
             {(result.extra_currencies?.length ?? 0) > 0 && (
               <Section title="Moedas fora do G8 com evidência disponível" sub="Avaliadas pelo mesmo motor (surpresa × impacto × confiança). Não entram no ranking G8 nem nos pares — servem de contexto (ex.: CNY para AUD/NZD).">
@@ -269,7 +270,7 @@ export default function AnaliseMacroPage() {
             <button onClick={() => setShowEvents((v) => !v)} className="w-full glass-card px-4 py-3 flex items-center justify-between text-sm font-bold text-text-primary">
               <span>Eventos pendentes e risco por moeda <span className="text-text-muted font-normal">({result.pending_events.length} pendentes)</span></span>{showEvents ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
-            {showEvents && <Section title="Event Risk" sub="Calculado por perna do par a partir dos eventos pendentes informados"><EventRiskPanel eventRisk={result.event_risk} pending={result.pending_events} pairsToAvoid={result.pairs_to_avoid} /></Section>}
+            {showEvents && <Section title="Event Risk" sub="Risco por moeda: janela intraday de 4h; pares: 14h. Sem calendário informado, o risco não é tratado como LOW."><EventRiskPanel eventRisk={result.event_risk} pending={result.pending_events} pairsToAvoid={result.pairs_to_avoid} calendarStatus={result.calendar_status} /></Section>}
             </>}
           </div>
         );

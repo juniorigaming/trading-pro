@@ -11,7 +11,7 @@ import { generateStructured } from "@/lib/ai/service";
 import { MACRO_SYSTEM, SESSION_BRIEF, type PromptDef } from "@/lib/ai/prompts";
 import { DEFAULT_SCORING_CONFIG, mergeScoringConfig, type ScoringConfig } from "./config";
 import { baseContribution, computeCurrencyScores, normalizeEventKey, parseNumeric, type ScoredEvent } from "./scoring";
-import { buildTradeCandidates } from "./pairs";
+import { buildTradeCandidates, filterEligibleTradeCandidates } from "./pairs";
 import { eventRiskFor, toPendingView } from "./event-risk";
 import { classifyRelease, IMPACT_TO_IMPORTANCE } from "./indicators";
 
@@ -211,6 +211,8 @@ export async function loadScoredEvents(cfg: ScoringConfig, scope?: { analysisId?
 
 export interface RecomputeOptions {
   session: Session; analysisId?: number | null; now?: Date; cfg?: ScoringConfig; persist?: boolean;
+  /** True only when this analysis included calendar rows; absent calendar means risk is not assessed. */
+  calendarProvided?: boolean;
   /** IDs dos RAW desta análise (para checar que nenhuma evidência veio de outra). */
   eventIds?: number[];
   classifiedCount?: number; releasedCount?: number;
@@ -234,10 +236,11 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
   // Nunca "sem dado" quando há dado; nunca dentro do ranking G8 nem dos pares.
   const extraEvents = events.filter((e) => (EXTRA_CURRENCIES as readonly string[]).includes(e.currency));
   const extraCurrencies = extraEvents.length ? computeCurrencyScores({ events: extraEvents, now, cfg, currencies: EXTRA_CURRENCIES }).filter((s) => s.status === "EVALUATED") : [];
-  const candidates = buildTradeCandidates({ scores, pending, cfg, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
+  const calendarProvided = opts.calendarProvided ?? false;
+  const candidates = buildTradeCandidates({ scores, pending, cfg, calendarProvided, eventRiskFor: (ccys, p) => eventRiskFor(ccys, p, { horizonHours: cfg.event_risk_hours.overnight }) });
   const eventRisk = G8.map((c) => {
     const s = scores.find((x) => x.currency === c)!;
-    const r = eventRiskFor([c], pending, { horizonHours: 12 });
+    const r = eventRiskFor([c], pending, { horizonHours: cfg.event_risk_hours.intraday });
     return { currency: c, current_bias: s.bias ?? "NEUTRAL", level: r.level, events: r.events };
   });
   // Pares a evitar — UM registro por símbolo (motivos agregados), sem repetição.
@@ -291,7 +294,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
     }
   }
   for (const sc of evaluated) if (sc.momentum === "NARRATIVE_SHIFT") alerts.push(`${sc.currency}: mudança de narrativa — reavalie posições abertas nessa moeda.`);
-  const presentable = candidates.filter((c) => c.eligible !== false && !avoidMap.has(c.symbol));
+  const presentable = filterEligibleTradeCandidates(candidates, trusted).filter((c) => !avoidMap.has(c.symbol));
   if (presentable.length === 0 && candidates.length > 0) {
     warnings.push(`Nenhum par atingiu a confiança mínima (${cfg.candidate_min_confidence_pct}%) — os ${candidates.length} pares com assimetria aparecem apenas em "pares a evitar".`);
   }
@@ -327,8 +330,9 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
     })));
     // Um único snapshot de candidatos vigente por análise; os scores continuam históricos.
     await db.delete(tradeCandidates).where(eq(tradeCandidates.analysisId, scopeId));
-    if (candidates.length) {
-      await db.insert(tradeCandidates).values(candidates.map((c) => ({
+    const persistableCandidates = filterEligibleTradeCandidates(candidates, trusted).filter((c) => !avoidMap.has(c.symbol));
+    if (persistableCandidates.length) {
+      await db.insert(tradeCandidates).values(persistableCandidates.map((c) => ({
         analysisId: scopeId, candidateDate: scoreDate, session: opts.session, computedAt: now, symbol: c.symbol, bias: c.bias,
         strongCurrency: c.strong_currency, weakCurrency: c.weak_currency, strongScore: c.strong_score, weakScore: c.weak_score, macroDivergence: c.macro_divergence,
         confidence: c.confidence, priority: c.priority, eventRisk: c.event_risk, eventRiskEvents: c.event_risk_events, reason: c.reason,
@@ -337,7 +341,7 @@ export async function recomputeScores(opts: RecomputeOptions): Promise<Recompute
   }
   return {
     date: now.toISOString().slice(0, 10), session: opts.session, currencies: scores, extra_currencies: extraCurrencies, ranking: trusted ? ranked.map((s) => s.currency) : [],
-    trade_candidates: candidates, pending_events: pending.slice(0, 30), event_risk: eventRisk, pairs_to_avoid: pairsToAvoid,
+    trade_candidates: candidates, pending_events: pending.slice(0, 30), calendar_status: calendarProvided ? "PROVIDED" : "NOT_PROVIDED", event_risk: eventRisk, pairs_to_avoid: pairsToAvoid,
     summary, warnings, meta: { scoring_version: cfg.version }, trusted, checks, scopeId, audit,
   };
 }
@@ -408,7 +412,7 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
   const cls = await classifyAnalysisEvents(cfg, analysis.id, ids);
   const computed = await recomputeScores({
     session: input.session, analysisId: analysis.id, now, cfg, eventIds: ids, releasedCount: cls.released, classifiedCount: cls.classified,
-    inputType: input.inputType, extraction: input.extraction ?? null,
+    calendarProvided: ids.length > 0, inputType: input.inputType, extraction: input.extraction ?? null,
   });
   const warnings = [...computed.warnings];
   if (cls.unknown > 0) warnings.push(`${cls.unknown} evento(s) com direção não mensurável — listados em "excluded_events", não pontuam.`);
@@ -424,10 +428,26 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
         const c = computed.trade_candidates.find((x) => x.symbol === r.symbol);
         if (c) c.reason = `${r.reason} O que observar: ${r.what_to_look_for} Invalidação macro: ${r.invalidation}`;
       }
+      const briefAvoidReasons = new Map(brief.data.pairs_to_avoid.map((p) => [p.symbol, p.reason]));
       for (const p of brief.data.pairs_to_avoid) if (!computed.pairs_to_avoid.some((x) => x.symbol === p.symbol)) computed.pairs_to_avoid.push(p);
+      for (const c of computed.trade_candidates) {
+        const avoidReason = briefAvoidReasons.get(c.symbol);
+        if (avoidReason) {
+          c.eligible = false;
+          c.ineligible_reason = c.ineligible_reason ?? avoidReason;
+        }
+      }
+      const aiAvoidSymbols = [...briefAvoidReasons.keys()];
+      if (aiAvoidSymbols.length) {
+        if (computed.summary) {
+          computed.summary.top_long = computed.summary.top_long.filter((c) => !briefAvoidReasons.has(c.symbol));
+          computed.summary.top_short = computed.summary.top_short.filter((c) => !briefAvoidReasons.has(c.symbol));
+        }
+        await db.delete(tradeCandidates).where(and(eq(tradeCandidates.analysisId, analysis.id), inArray(tradeCandidates.symbol, aiAvoidSymbols)));
+      }
       warnings.push(...brief.data.warnings.map((w) => `IA: ${w}`));
       if (brief.data.headline) warnings.unshift(`Brief: ${brief.data.headline} — ${brief.data.narrative}`);
-      await Promise.all(computed.trade_candidates.map((c) => db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)))));
+      await Promise.all(computed.trade_candidates.filter((c) => c.eligible === true).map((c) => db.update(tradeCandidates).set({ reason: c.reason }).where(and(eq(tradeCandidates.analysisId, analysis.id), eq(tradeCandidates.symbol, c.symbol)))));
     } catch (e) {
       warnings.push(`Brief da sessão indisponível: ${(e as Error).message}`);
     }
@@ -447,11 +467,17 @@ export async function runMacroAnalysis(input: RunAnalysisInput): Promise<MacroAn
 }
 
 export async function getLatestAnalysis(session?: Session): Promise<MacroAnalysisResult | null> {
-  const q = getDb().select().from(macroAnalyses).orderBy(desc(macroAnalyses.createdAt)).limit(1);
+  const q = getDb().select({ resultJson: macroAnalyses.resultJson, eventsCount: macroAnalyses.eventsCount })
+    .from(macroAnalyses).orderBy(desc(macroAnalyses.createdAt)).limit(1);
   const rows = session ? await q.where(eq(macroAnalyses.session, session)) : await q;
   const r = rows[0];
   if (!r || !r.resultJson || Object.keys(r.resultJson as object).length === 0) return null;
-  return r.resultJson as MacroAnalysisResult;
+  const result = r.resultJson as MacroAnalysisResult;
+  return {
+    ...result,
+    // Backfill older result JSONs so empty calendar data is not shown as measured LOW risk.
+    calendar_status: result.calendar_status ?? (r.eventsCount > 0 ? "PROVIDED" : "NOT_PROVIDED"),
+  };
 }
 
 /** Scores da ANÁLISE MAIS RECENTE (nunca um misto de análises). Usado pelo Ranking G8 e pelo histórico de risco. */

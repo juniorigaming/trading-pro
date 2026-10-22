@@ -155,9 +155,11 @@ export interface TradeCandidateView {
   confidence: Confidence;
   priority: number;
   event_risk: EventRiskLevel;
+  /** false when this analysis did not include a calendar; LOW must not be read as verified low risk. */
+  event_risk_assessed?: boolean;
   event_risk_events: PendingEventView[];
   reason: string;
-  /** Força relativa na escala de apresentação (−5..+5): base − cotada. */
+  /** Diferença exibida (score da base − cotada); cada score de moeda é −5..+5, então Δ pode chegar a −10..+10. */
   relative_strength?: number;
   /** FORTE LONG · LONG · NEUTRO · SHORT · FORTE SHORT */
   strength_class?: PairStrengthClass;
@@ -199,6 +201,8 @@ export interface MacroAnalysisResult {
   ranking: Currency[];
   trade_candidates: TradeCandidateView[];
   pending_events: PendingEventView[];
+  /** Whether this analysis included any calendar/event rows to assess scheduled risk. */
+  calendar_status?: "PROVIDED" | "NOT_PROVIDED";
   event_risk: { currency: Currency; current_bias: string; level: EventRiskLevel; events: PendingEventView[] }[];
   pairs_to_avoid: { symbol: string; reason: string }[];
   /** Resumo macro consolidado (moeda mais forte/fraca, top 3 long/short, alertas). */

@@ -22,6 +22,10 @@ export async function POST(request: Request) {
       .where(eq(macroAnalyses.session, body.session))
       .orderBy(desc(macroAnalyses.createdAt)).limit(1);
     if (!analysis) return json({ error: "Nenhuma análise salva para esta sessão." }, 404);
+    const previous = analysis.resultJson && typeof analysis.resultJson === "object"
+      ? analysis.resultJson as Partial<MacroAnalysisResult> : {};
+    const calendarProvided = previous.calendar_status === "PROVIDED"
+      || (previous.calendar_status == null && analysis.eventsCount > 0);
 
     const cfg = await loadScoringConfig();
     let interpreted = 0;
@@ -34,16 +38,15 @@ export async function POST(request: Request) {
     }
 
     const computed = await recomputeScores({
-      session: body.session, analysisId: analysis.id, cfg,
+      session: body.session, analysisId: analysis.id, cfg, calendarProvided,
       inputType: (analysis.inputType === "screenshot" || analysis.inputType === "structured" || analysis.inputType === "manual")
         ? analysis.inputType : "manual",
     });
     const { trusted, audit, meta, warnings, checks, scopeId, ...fields } = computed;
-    const previous = analysis.resultJson && typeof analysis.resultJson === "object"
-      ? analysis.resultJson as Partial<MacroAnalysisResult> : {};
     const updated: MacroAnalysisResult = {
       ...previous,
       ...fields,
+      calendar_status: previous.calendar_status ?? computed.calendar_status,
       analysis_id: String(analysis.id),
       analysis_status: trusted ? "OK" : "ANALISE_INSUFICIENTE",
       meta: {

@@ -35,7 +35,7 @@ export interface ScoringConfig {
   evidence_k: number;
   /** Multiplicador do score nativo (−2..+2) para a escala de apresentação (−5..+5). */
   display_scale: number;
-  /** Bandas de força relativa do par, já na escala de apresentação (−5..+5). */
+  /** Limiares do Δ base−cotada na escala exibida; cada score é −5..+5, logo o Δ pode ser −10..+10. */
   pair_bands: { neutral: number; weak: number; moderate: number; strong: number };
   /** Confiança mínima (0–100) para um par ser APRESENTÁVEL como candidato. Abaixo disso ele só aparece em 'pares a evitar'. */
   candidate_min_confidence_pct: number;
@@ -76,7 +76,7 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   classification_thresholds: { very_strong: 0.6, strong: 0.3, moderately_strong: 0.1 },
   narrative_shift_min_delta: 1.0,
   momentum_min_delta: 0.25,
-  // 0.4 nativo = 1.0 na escala de apresentação (−5..+5): abaixo disso o par é considerado neutro.
+  // Diferença nativa de 0.4 entre moedas = |Δ| exibido de 1.0; abaixo disso o par é considerado neutro.
   pair_min_divergence: 0.4,
   event_risk_hours: { intraday: 4, overnight: 14 },
   // v3: evidence_k NÃO atenua mais o score (quantidade reduz a CONFIANÇA, não o score). Define só o rótulo de nível de evidência.

@@ -19,7 +19,7 @@ describe("DivergenceMatrix — null não vira 0", () => {
   it("mistura: moeda medida aparece com valor; a sem evidência fica em —, sem 0.00", () => {
     const scores = G8.map((c) => view(c, c === "USD" ? 1.5 : null));
     const html = renderToStaticMarkup(<DivergenceMatrix scores={scores} />);
-    expect(html).toContain("1.50");
+    expect(html).toContain("3.75");
     expect(html).not.toContain("0.00");
   });
 });

@@ -72,8 +72,8 @@ export default function G8Ranking({ scores, compact = false, clean = false, hist
                 <div className="absolute left-1/2 top-0 bottom-0 w-px bg-border" />
                 <div className={`absolute top-0 bottom-0 ${v >= 0 ? "bg-emerald" : "bg-rose"}`} style={{ left: v >= 0 ? "50%" : `${50 + (v / 5) * 50}%`, width: `${(Math.abs(v) / 5) * 50}%` }} />
               </div>
-              <span className={`px-2 py-0.5 rounded-md text-xs font-extrabold tabular-nums ${scoreBg(s.score)}`}>{fmt5(v)}</span>
-              <span className="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-text-muted w-14">
+              <span className={`px-2 py-0.5 rounded-md text-xs font-extrabold tabular-nums ${scoreBg(v)}`}>{fmt5(v)}</span>
+              <span className="inline-flex items-center gap-0.5 text-[11px] tabular-nums text-text-muted w-14" title="Variação do score da moeda desde a leitura anterior; cada score é −5..+5, então a variação pode chegar a ±10">
                 {s.score_delta != null && Math.abs(s.score_delta) >= 0.01 && <><DeltaArrow delta={s.score_delta} />{fmt5(s.score_delta * 2.5)}</>}
               </span>
               {!compact && !clean && <>

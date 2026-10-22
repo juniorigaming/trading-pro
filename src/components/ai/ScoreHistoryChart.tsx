@@ -34,6 +34,7 @@ export default function ScoreHistoryChart({ endpoint = "/api/macro/scores/histor
   }, [rows]);
   return (
     <div>
+      <p className="text-[10px] text-text-muted mb-2">Valores históricos na escala nativa (−2..+2); a aba Macro por eventos apresenta a escala convertida (−5..+5).</p>
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {([7, 30, 90] as const).map((d) => <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${days === d ? "border-accent bg-accent-soft text-accent" : "border-border text-text-muted"}`}>{d}D</button>)}
         <span className="mx-1 text-text-muted">|</span>

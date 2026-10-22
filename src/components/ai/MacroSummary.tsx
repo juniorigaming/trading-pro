@@ -10,9 +10,10 @@ export function confColor(pct: number) {
   return pct >= 65 ? "text-emerald" : pct >= 40 ? "text-amber" : "text-text-muted";
 }
 
-function PairRow({ c }: { c: TradeCandidateView }) {
+function PairRow({ c, calendarProvided }: { c: TradeCandidateView; calendarProvided: boolean }) {
   const rel = c.relative_strength ?? 0;
   const pct = c.confidence_pct ?? 0;
+  const riskAssessed = c.event_risk_assessed ?? calendarProvided;
   return (
     <li className="rounded-lg border border-border bg-surface-2/60 px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -20,9 +21,9 @@ function PairRow({ c }: { c: TradeCandidateView }) {
         <Badge className={rel > 0 ? "bg-emerald/15 text-emerald border-emerald/40" : "bg-rose/15 text-rose border-rose/40"}>
           {c.strength_class ?? c.bias}
         </Badge>
-        <span className="text-xs font-bold tabular-nums text-text-primary">{fmt5(rel)}</span>
+        <span className="text-xs font-bold tabular-nums text-text-primary" title="Δ assinado = score exibido da base − cotada; cada score é −5..+5, logo Δ pode ser −10..+10">Δ {fmt5(rel)}</span>
         <span className={`text-[11px] font-semibold tabular-nums ${confColor(pct)}`}>conf. {pct}%</span>
-        <Badge className={`${riskColor(c.event_risk)} ml-auto`}>risco {c.event_risk}</Badge>
+        <Badge className={`${riskColor(riskAssessed ? c.event_risk : "NOT_ASSESSED")} ml-auto`}>{riskAssessed ? `risco ${c.event_risk}` : "risco não avaliado"}</Badge>
       </div>
       <p className="mt-1 text-[11px] text-text-muted tabular-nums">
         {c.base_currency} {fmt5(c.base_score)} · {c.quote_currency} {fmt5(c.quote_score)}
@@ -38,11 +39,15 @@ function PairRow({ c }: { c: TradeCandidateView }) {
 export default function MacroSummary({ result, compact = false }: { result: MacroAnalysisResult; compact?: boolean }) {
   const s: MacroSummaryView | undefined = result.summary;
   if (!s) return null;
+  const calendarProvided = result.calendar_status === "PROVIDED" || (result.calendar_status == null && result.pending_events.length > 0);
+  const avoidedSymbols = new Set(result.pairs_to_avoid.map((pair) => pair.symbol));
+  const topLong = s.top_long.filter((candidate) => candidate.eligible !== false && !avoidedSymbols.has(candidate.symbol));
+  const topShort = s.top_short.filter((candidate) => candidate.eligible !== false && !avoidedSymbols.has(candidate.symbol));
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 rounded-xl border border-sky/30 bg-sky/10 px-3 py-2 text-xs text-sky sm:flex-row sm:items-center sm:justify-between">
-        <span><b>Score macro por eventos econômicos.</b> Força de preço D1/W1 é uma dimensão separada.</span>
+        <span><b>Score macro por eventos econômicos.</b> Scores de moeda −5..+5; Δ do par (base−cotada) −10..+10. Força de preço D1/W1 é uma dimensão separada.</span>
       </div>
       <div className={`glass-card p-4 grid gap-4 sm:grid-cols-2 ${compact ? "" : "lg:grid-cols-4"}`}>
         {!compact && (
@@ -66,7 +71,7 @@ export default function MacroSummary({ result, compact = false }: { result: Macr
         )}
         <div>
           <p className="text-[10px] uppercase tracking-wider text-text-muted">Risco geral</p>
-          <p className="mt-1"><span className={`px-2 py-1 rounded-md text-xs font-extrabold border ${riskColor(s.overall_risk)}`}>{s.overall_risk}</span></p>
+          <p className="mt-1"><span title={calendarProvided ? "Risco nos eventos informados" : "Calendário não informado; risco de eventos não avaliado"} className={`px-2 py-1 rounded-md text-xs font-extrabold border ${riskColor(calendarProvided ? s.overall_risk : "NOT_ASSESSED")}`}>{calendarProvided ? s.overall_risk : "NÃO AVALIADO"}</span></p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wider text-text-muted">Qualidade da amostra</p>
@@ -82,11 +87,11 @@ export default function MacroSummary({ result, compact = false }: { result: Macr
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="glass-card p-4">
             <h3 className="text-sm font-extrabold text-text-primary flex items-center gap-1.5 mb-2"><TrendingUp size={15} className="text-emerald" />Top 3 LONG</h3>
-            {s.top_long.length === 0 ? <p className="text-xs text-text-muted">Nenhum par LONG com evidência suficiente.</p> : <ul className="space-y-1.5">{s.top_long.map((c) => <PairRow key={c.symbol} c={c} />)}</ul>}
+            {topLong.length === 0 ? <p className="text-xs text-text-muted">Nenhum par LONG com evidência suficiente.</p> : <ul className="space-y-1.5">{topLong.map((c) => <PairRow key={c.symbol} c={c} calendarProvided={calendarProvided} />)}</ul>}
           </div>
           <div className="glass-card p-4">
             <h3 className="text-sm font-extrabold text-text-primary flex items-center gap-1.5 mb-2"><TrendingDown size={15} className="text-rose" />Top 3 SHORT</h3>
-            {s.top_short.length === 0 ? <p className="text-xs text-text-muted">Nenhum par SHORT com evidência suficiente.</p> : <ul className="space-y-1.5">{s.top_short.map((c) => <PairRow key={c.symbol} c={c} />)}</ul>}
+            {topShort.length === 0 ? <p className="text-xs text-text-muted">Nenhum par SHORT com evidência suficiente.</p> : <ul className="space-y-1.5">{topShort.map((c) => <PairRow key={c.symbol} c={c} calendarProvided={calendarProvided} />)}</ul>}
           </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -105,7 +110,7 @@ export default function MacroSummary({ result, compact = false }: { result: Macr
         <Info size={14} className="mt-0.5 shrink-0" />
         <p>
           <b>Viés macro não representa entrada operacional.</b> O score mede direção e qualidade da evidência por eventos; não é força de preço nem probabilidade de lucro.
-          {!compact && s.top_long.length + s.top_short.length > 0 && <> Priorize a observação técnica (SMC/ICT) em: <b>{[...s.top_long, ...s.top_short].map((c) => c.symbol).join(", ")}</b>.</>}
+          {!compact && topLong.length + topShort.length > 0 && <> Priorize a observação técnica (SMC/ICT) em: <b>{[...topLong, ...topShort].map((c) => c.symbol).join(", ")}</b>.</>}
         </p>
       </div>
     </div>

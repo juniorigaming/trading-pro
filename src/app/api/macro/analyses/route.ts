@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { macroAnalyses } from "@/db/schema";
 import { errorResponse, json } from "@/lib/api-utils";
 import { getLatestAnalysis } from "@/lib/macro/pipeline";
-import type { Session } from "@/lib/ai/types";
+import type { MacroAnalysisResult, Session } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,17 @@ export async function GET(request: Request) {
     const id = url.searchParams.get("id");
     if (id) {
       const rows = await getDb().select().from(macroAnalyses).where(eq(macroAnalyses.id, Number(id))).limit(1);
-      return rows[0] ? json(rows[0]) : json({ error: "Análise não encontrada" }, 404);
+      const analysis = rows[0];
+      if (!analysis) return json({ error: "Análise não encontrada" }, 404);
+      const result = analysis.resultJson && typeof analysis.resultJson === "object"
+        ? analysis.resultJson as Partial<MacroAnalysisResult> : {};
+      return json({
+        ...analysis,
+        resultJson: {
+          ...result,
+          calendar_status: result.calendar_status ?? (analysis.eventsCount > 0 ? "PROVIDED" : "NOT_PROVIDED"),
+        },
+      });
     }
     if (url.searchParams.get("latest")) {
       const session = url.searchParams.get("session") as Session | null;

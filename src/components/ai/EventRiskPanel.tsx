@@ -5,16 +5,18 @@ import { Badge, riskColor } from "./ui";
 const fmtIn = (m: number) => (m < 0 ? "agora" : m < 60 ? `${m} min` : m < 48 * 60 ? `${(m / 60).toFixed(1)} h` : `${Math.round(m / 1440)} d`);
 const fmtAt = (iso: string) => new Date(iso).toLocaleString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-export default function EventRiskPanel({ eventRisk, pending, pairsToAvoid }: { eventRisk: MacroAnalysisResult["event_risk"]; pending: PendingEventView[]; pairsToAvoid?: { symbol: string; reason: string }[] }) {
+export default function EventRiskPanel({ eventRisk, pending, pairsToAvoid, calendarStatus }: { eventRisk: MacroAnalysisResult["event_risk"]; pending: PendingEventView[]; pairsToAvoid?: { symbol: string; reason: string }[]; calendarStatus?: MacroAnalysisResult["calendar_status"] }) {
+  const calendarProvided = calendarStatus === "PROVIDED" || (calendarStatus == null && pending.length > 0);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div>
-        <h4 className="text-xs font-extrabold text-text-primary mb-2">Risco por moeda (próximas 4h intraday / 14h overnight)</h4>
+        <h4 className="text-xs font-extrabold text-text-primary mb-2">Risco por moeda (janela intraday: próximas 4h)</h4>
+        <p className="text-[10px] text-text-muted mb-2">O risco é calculado somente com os eventos pendentes informados nesta análise; lista vazia não garante que o calendário completo não tenha eventos.</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {eventRisk.map((r) => (
-            <div key={r.currency} className={`rounded-xl border p-2.5 ${riskColor(r.level)}`}>
-              <div className="flex items-center justify-between"><span className="text-sm font-extrabold">{r.currency}</span><span className="text-[10px] font-extrabold">{r.level}</span></div>
-              <p className="text-[10px] opacity-80 mt-0.5">viés {r.current_bias}</p>
+            <div key={r.currency} className={`rounded-xl border p-2.5 ${riskColor(calendarProvided ? r.level : "NOT_ASSESSED")}`}>
+              <div className="flex items-center justify-between"><span className="text-sm font-extrabold">{r.currency}</span><span className="text-[10px] font-extrabold">{calendarProvided ? r.level : "NÃO AVALIADO"}</span></div>
+              <p className="text-[10px] opacity-80 mt-0.5">viés macro {r.current_bias}</p>
               {r.events.slice(0, 2).map((e) => <p key={e.id} className="text-[10px] mt-1 truncate" title={e.event}>• {e.event} <b>{fmtIn(e.minutes_until)}</b></p>)}
             </div>
           ))}
@@ -40,7 +42,7 @@ export default function EventRiskPanel({ eventRisk, pending, pairsToAvoid }: { e
                   <td className="px-2 py-1.5 text-text-muted whitespace-nowrap">F {e.forecast ?? "—"} · P {e.previous ?? "—"}</td>
                 </tr>
               ))}
-              {pending.length === 0 && <tr><td className="px-3 py-4 text-center text-text-muted">Nenhum evento pendente nas próximas 72h (ou calendário não enviado).</td></tr>}
+              {pending.length === 0 && <tr><td className="px-3 py-4 text-center text-text-muted">{calendarProvided ? "Nenhum evento pendente registrado nas próximas 72h; confirme se a agenda da janela foi enviada." : "Calendário não informado nesta análise; risco de eventos não avaliado."}</td></tr>}
             </tbody>
           </table>
         </div>
