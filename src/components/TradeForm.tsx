@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save, ImagePlus, X, AlertCircle } from "lucide-react";
 import { Trade, Config } from "@/lib/types";
-import { localTodayKey, tradeDayKey } from "@/lib/date";
 import { useConfig, useTrades } from "@/hooks/useTradeData";
 import { usePortfolio } from "@/components/PortfolioProvider";
 import { PORTFOLIOS, PORTFOLIO_META, type PortfolioId } from "@/lib/portfolio";
@@ -12,6 +11,7 @@ import { calculateMetrics } from "@/lib/calculations";
 import { setupScore, executionScore } from "@/lib/scores";
 import { formatCurrency } from "@/lib/utils";
 import NumberInput from "@/components/NumberInput";
+import MarketSymbol from "@/components/MarketSymbol";
 
 // EXPANDIDO: Forex + B3 + Cripto + Futuros US + Ações US - Dashboard Profissional
 const MARKET_GROUPS = {
@@ -83,7 +83,7 @@ export interface TradeFormValues {
   macroCurrency: string;
   macroImpact: string;
   macroBias: string;
-  followedPlan: boolean;
+  followedPlan: boolean | null;
   emotionalBefore: string;
   emotionalAfter: string;
   mistakes: string;
@@ -91,7 +91,6 @@ export interface TradeFormValues {
   whatWentWrong: string;
   lesson: string;
   notes: string;
-  tags: string;
   screenshotUrl: string;
   [key: string]: unknown;
 }
@@ -99,7 +98,7 @@ export interface TradeFormValues {
 function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRiskPercent: number): TradeFormValues {
   const now = new Date();
   return {
-    date: t ? tradeDayKey(t.date) : localTodayKey(now),
+    date: t ? new Date(t.date).toISOString().split("T")[0] : now.toISOString().split("T")[0],
     time: t?.time || now.toTimeString().slice(0, 5),
     asset: t?.asset || "EURUSD",
     portfolio: (t?.portfolio as PortfolioId) || "FOREX",
@@ -126,7 +125,7 @@ function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRis
     macroCurrency: t?.macroCurrency || "",
     macroImpact: t?.macroImpact || "Baixo",
     macroBias: t?.macroBias || "Neutro",
-    followedPlan: t?.followedPlan ?? true,
+    followedPlan: t?.followedPlan ?? null,
     emotionalBefore: t?.emotionalBefore || "Confiante",
     emotionalAfter: t?.emotionalAfter || "Satisfeito",
     mistakes: t?.mistakes || "",
@@ -134,7 +133,6 @@ function tradeToFormValues(t: Trade | null, suggestedBalance: number, defaultRis
     whatWentWrong: t?.whatWentWrong || "",
     lesson: t?.lesson || "",
     notes: t?.notes || "",
-    tags: (t?.tags || []).join(", "),
     screenshotUrl: t?.screenshotUrl || "",
     bos: t?.bos ?? false,
     choch: t?.choch ?? false,
@@ -202,7 +200,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
   const steps = ["Dados Básicos", "Gestão de Risco", "Contexto SMC", "Macro & Checklist", "Resultado & Diário"];
 
-  const update = (field: string, value: string | boolean) => {
+  const update = (field: string, value: string | boolean | null) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -233,7 +231,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     if (file.size > 8 * 1024 * 1024) {
       setFormError("Imagem muito grande. Máximo 8MB original, será comprimida para ~800KB.");
       return;
@@ -241,7 +239,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
     try {
       const compressedBase64 = await compressImage(file, 1200, 0.7);
-      
+
       if (compressedBase64.length > 1_200_000) {
         setFormError("Imagem ainda muito grande após compressão. Tente uma imagem menor ou recorte.");
         return;
@@ -306,7 +304,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
       } as never;
       const sScore = setupScore(scoreTrade)?.score ?? null;
       const eScore = executionScore({
-        followedPlan: !!form.followedPlan,
+        followedPlan: form.followedPlan,
         earlyEntry: !!form.earlyEntry,
         earlyExit: !!form.earlyExit,
         revengeTrade: !!form.revengeTrade,
@@ -351,7 +349,7 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         macroCurrency: form.macroCurrency,
         macroImpact: form.macroImpact,
         macroBias: form.macroBias,
-        followedPlan: !!form.followedPlan,
+        followedPlan: form.followedPlan,
         earlyEntry: !!form.earlyEntry,
         earlyExit: !!form.earlyExit,
         revengeTrade: !!form.revengeTrade,
@@ -364,7 +362,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
         whatWentWrong: form.whatWentWrong,
         lesson: form.lesson,
         notes: form.notes,
-        tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean).slice(0, 20),
         screenshotUrl: form.screenshotUrl || null,
         setupScore: sScore,
         executionScore: eScore,
@@ -456,13 +453,14 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
             </div>
             <FormField label="Data *" type="date" value={form.date} onChange={(v) => update("date", v)} />
             <FormField label="Horário *" type="time" value={form.time} onChange={(v) => update("time", v)} />
-            
+
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] text-slate-muted uppercase tracking-wider font-semibold flex items-center gap-2">
                 Ativo * <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet/20 text-violet">{marketType}</span>
               </label>
               {!customAsset ? (
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  <MarketSymbol symbol={form.asset || "unknown"} size="md" />
                   <select
                     value={form.asset}
                     onChange={(e) => {
@@ -487,7 +485,8 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
                   </select>
                 </div>
               ) : (
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  <MarketSymbol symbol={form.asset || "unknown"} size="md" />
                   <input
                     type="text"
                     value={form.asset}
@@ -572,7 +571,16 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
 
             <h3 className="text-sm font-bold text-text-primary mb-3">Disciplina</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
-              <CheckboxField label="Segui o Plano" checked={!!form.followedPlan} onChange={(v) => update("followedPlan", v)} />
+              <FormSelect
+                label="Aderência ao plano"
+                value={form.followedPlan === true ? "yes" : form.followedPlan === false ? "no" : "unassessed"}
+                onChange={(v) => update("followedPlan", v === "yes" ? true : v === "no" ? false : null)}
+                options={[
+                  { value: "unassessed", label: "Sem avaliação" },
+                  { value: "yes", label: "Dentro do plano" },
+                  { value: "no", label: "Fora do plano" },
+                ]}
+              />
               {DISCIPLINE_FIELDS.map((item) => (
                 <CheckboxField key={item.key} label={item.label} checked={!!form[item.key]} onChange={(v) => update(item.key, v)} />
               ))}
@@ -621,7 +629,6 @@ export default function TradeForm({ trade }: { trade?: Trade }) {
               <textarea placeholder="O que devo repetir?" value={form.lesson} onChange={(e) => update("lesson", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
               <textarea placeholder="Erros cometidos" value={form.mistakes} onChange={(e) => update("mistakes", e.target.value)} rows={3} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
             </div>
-            <input placeholder="Ex.: A+ setup, notícia, FOMO (separadas por vírgula)" value={form.tags} onChange={(e) => update("tags", e.target.value)} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition mb-3" aria-label="Etiquetas" />
             <textarea placeholder="Observações" value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={2} className="w-full bg-dark-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-text-primary placeholder:text-slate-muted focus:outline-none focus:ring-1 focus:ring-emerald/30 transition resize-none" />
           </div>
         )}

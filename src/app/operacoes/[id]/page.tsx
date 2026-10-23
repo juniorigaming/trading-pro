@@ -6,9 +6,9 @@ import { ArrowLeft, Pencil, Gauge, Target, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Trade } from "@/lib/types";
 import { formatCurrency, formatR } from "@/lib/utils";
-import { formatTradeDate } from "@/lib/date";
 import { captureEfficiency } from "@/lib/scores";
 import { fetchTrade, TradeNotFoundError } from "@/lib/trade-fetch";
+import MarketSymbol from "@/components/MarketSymbol";
 
 const SMC_TAGS: { key: keyof Trade; label: string }[] = [
   { key: "trendConfirmation", label: "Estrutura HTF definida" },
@@ -25,28 +25,27 @@ const SMC_TAGS: { key: keyof Trade; label: string }[] = [
 export default function OperacaoDetalhePage() {
   const params = useParams();
   const id = params.id as string;
-  const [trade, setTrade] = useState<Trade | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<{ id: string; reloadKey: number; trade: Trade | null; error: string | null } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.resolve().then(() => { if (!cancelled) { setLoading(true); setError(null); } });
     fetchTrade(id)
-      .then((t) => {
-        if (!cancelled) setTrade(t);
+      .then((trade) => {
+        if (!cancelled) setLoaded({ id, reloadKey, trade, error: null });
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof TradeNotFoundError ? "Operação não encontrada." : e.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoaded({ id, reloadKey, trade: null, error: e instanceof TradeNotFoundError ? "Operação não encontrada." : e.message });
       });
     return () => {
       cancelled = true;
     };
   }, [id, reloadKey]);
+
+  const isCurrentLoad = loaded?.id === id && loaded.reloadKey === reloadKey;
+  const trade = isCurrentLoad ? loaded.trade : null;
+  const error = isCurrentLoad ? loaded.error : null;
+  const loading = !isCurrentLoad;
 
   if (loading) return <div className="p-8 text-center text-slate-muted text-sm">Carregando...</div>;
   if (error || !trade)
@@ -71,7 +70,7 @@ export default function OperacaoDetalhePage() {
         <Link href={`/operacoes/${trade.id}/editar`} className="inline-flex items-center gap-1.5 text-xs font-bold text-amber hover:underline"><Pencil size={13} /> Editar</Link>
       </div>
       <h1 className="text-2xl font-extrabold text-text-primary mb-1">Detalhes da Operação #{trade.id} {trade.isDemo && <span className="text-xs text-sky font-medium ml-2">(Demonstração)</span>}</h1>
-      <p className="text-sm text-slate-muted mb-4">{trade.asset} · {formatTradeDate(trade.date)} às {trade.time}</p>
+      <p className="text-sm text-slate-muted mb-4 inline-flex items-center gap-2"><MarketSymbol symbol={trade.asset} size="sm" />{trade.asset} · {new Date(trade.date).toLocaleDateString("pt-BR")} às {trade.time}</p>
 
       {/* Scores */}
       <div className="flex flex-wrap gap-3 mb-6">
@@ -106,9 +105,9 @@ export default function OperacaoDetalhePage() {
         <div className="glass-card p-5">
           <h3 className="text-xs font-bold text-slate-muted uppercase tracking-wider mb-3">Dados Básicos</h3>
           <div className="space-y-2 text-sm">
-            <p><span className="text-slate-muted">Data:</span> <span className="text-text-primary font-medium">{formatTradeDate(trade.date)}</span></p>
+            <p><span className="text-slate-muted">Data:</span> <span className="text-text-primary font-medium">{new Date(trade.date).toLocaleDateString("pt-BR")}</span></p>
             <p><span className="text-slate-muted">Hora:</span> <span className="text-text-primary font-medium">{trade.time}</span></p>
-            <p><span className="text-slate-muted">Ativo:</span> <span className="text-text-primary font-bold">{trade.asset}</span></p>
+            <p className="flex items-center gap-1.5"><span className="text-slate-muted">Ativo:</span> <MarketSymbol symbol={trade.asset} size="sm" /><span className="text-text-primary font-bold">{trade.asset}</span></p>
             <p><span className="text-slate-muted">Direção:</span> <span className={`font-bold ${trade.direction === "BUY" ? "text-emerald" : "text-rose"}`}>{trade.direction}</span></p>
             <p><span className="text-slate-muted">Sessão:</span> <span className="text-text-primary font-medium">{trade.session}</span></p>
             <p><span className="text-slate-muted">Setup:</span> <span className="text-text-primary font-medium">{trade.setup || "—"}</span></p>
@@ -185,7 +184,7 @@ export default function OperacaoDetalhePage() {
         <div className="mt-4 pt-4 border-t border-white/5 flex gap-4">
           <span className="text-xs text-slate-muted">Antes: <span className="text-text-primary">{trade.emotionalBefore || "—"}</span></span>
           <span className="text-xs text-slate-muted">Depois: <span className="text-emerald">{trade.emotionalAfter || "—"}</span></span>
-          <span className="text-xs text-slate-muted">Seguiu o plano: <span className={trade.followedPlan ? "text-emerald" : "text-rose"}>{trade.followedPlan ? "Sim" : "Não"}</span></span>
+          <span className="text-xs text-slate-muted">Aderência ao plano: <span className={trade.followedPlan === true ? "text-emerald" : trade.followedPlan === false ? "text-rose" : "text-amber"}>{trade.followedPlan === true ? "Dentro do plano" : trade.followedPlan === false ? "Fora do plano" : "Sem avaliação"}</span></span>
         </div>
       </div>
     </div>

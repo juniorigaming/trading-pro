@@ -41,7 +41,7 @@ export interface TradeInput {
   macroCurrency?: string;
   macroImpact?: string;
   macroBias?: string;
-  followedPlan?: boolean;
+  followedPlan?: boolean | null;
   earlyEntry?: boolean;
   earlyExit?: boolean;
   revengeTrade?: boolean;
@@ -54,7 +54,6 @@ export interface TradeInput {
   whatWentWrong?: string;
   lesson?: string;
   notes?: string;
-  tags?: string[];
   screenshotUrl?: string;
   preTradeScreenshotUrl?: string;
   postEntryScreenshotUrl?: string;

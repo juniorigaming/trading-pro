@@ -62,7 +62,7 @@ export function applyAppearance(prefs: AppearancePrefs) {
   // Keep meta theme-color in sync for mobile browser chrome.
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) {
-    meta.setAttribute("content", resolved === "dark" ? "#07090d" : "#f4f7fb");
+    meta.setAttribute("content", resolved === "dark" ? "#000000" : "#f4f7fb");
   }
 }
 

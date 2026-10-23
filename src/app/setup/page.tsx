@@ -50,7 +50,7 @@ export default function SetupPage() {
                   <td className="py-2.5 text-right text-slate-300">{s.trades}</td>
                   <td className={`py-2.5 text-right ${s.winRate >= 50 ? "text-emerald" : "text-amber"}`}>{formatNumber(s.winRate, 0)}%</td>
                   <td className={`py-2.5 text-right ${s.result >= 0 ? "text-emerald" : "text-rose"}`}>{s.result >= 0 ? "+" : ""}{formatCurrency(s.result)}</td>
-                  <td className="py-2.5 text-right text-slate-300">{formatNumber(s.avgR)}R</td>
+                  <td className="py-2.5 text-right text-slate-300" title={`${s.rTrades} operações com risco definido`}>{s.avgR != null ? `${formatNumber(s.avgR)}R` : "—"}</td>
                   <td className="py-2.5 text-right text-slate-300">{s.profitFactor === Infinity ? "∞" : formatNumber(s.profitFactor)}</td>
                 </tr>
               ))}

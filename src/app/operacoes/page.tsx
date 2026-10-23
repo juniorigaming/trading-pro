@@ -7,8 +7,9 @@ import { useTrades } from "@/hooks/useTradeData";
 import PortfolioSwitcher from "@/components/PortfolioSwitcher";
 import { usePortfolio } from "@/components/PortfolioProvider";
 import { formatCurrency, formatR } from "@/lib/utils";
+import { marketSymbolLabel } from "@/components/MarketSymbol";
+import MarketSymbol from "@/components/MarketSymbol";
 import { Trade } from "@/lib/types";
-import { formatTradeDate } from "@/lib/date";
 
 export default function OperacoesPage() {
   const { trades, loading, refetch, removeTrade, error } = useTrades();
@@ -19,15 +20,13 @@ export default function OperacoesPage() {
   const [sessionFilter, setSessionFilter] = useState("all");
   const [directionFilter, setDirectionFilter] = useState("all");
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const pageSize = 50;
 
   const uniqueAssets = useMemo(() => Array.from(new Set(trades.map((t) => t.asset))).sort(), [trades]);
   const uniqueSessions = useMemo(() => Array.from(new Set(trades.map((t) => t.session))).sort(), [trades]);
 
   const filtered = useMemo(() => {
     return trades.filter((t) => {
-      if (search && !t.asset.toLowerCase().includes(search.toLowerCase()) && !(t.setup || "").toLowerCase().includes(search.toLowerCase()) && !(t.tags || []).join(" ").toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !t.asset.toLowerCase().includes(search.toLowerCase()) && !(t.setup || "").toLowerCase().includes(search.toLowerCase())) return false;
       if (resultFilter !== "Todos" && t.resultType !== resultFilter) return false;
       if (assetFilter !== "all" && t.asset !== assetFilter) return false;
       if (sessionFilter !== "all" && t.session !== sessionFilter) return false;
@@ -36,36 +35,32 @@ export default function OperacoesPage() {
     });
   }, [trades, search, resultFilter, assetFilter, sessionFilter, directionFilter]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const safePage = Math.min(page, pageCount);
-  const pageRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
-
   const handleDelete = async (id: number) => {
     if (!confirm("Tem certeza que deseja excluir esta operação? Essa ação não pode ser desfeita.")) return;
     setDeletingId(id);
     try {
-      // FIX: Adiciona timestamp e no-store para evitar cache que causava "erro ao excluir"
-      const res = await fetch(`/api/trades/${id}`, { 
+      // A rota é force-dynamic e envia Cache-Control: no-store/no-cache; DELETE não usa cache de resposta.
+      const res = await fetch(`/api/trades/${id}`, {
         method: "DELETE",
         cache: "no-store",
-        headers: { "Cache-Control": "no-cache" }
+        headers: { "Cache-Control": "no-cache" },
       });
-      
+
       const data = await res.json().catch(() => ({}));
-      
+
       if (!res.ok) {
         console.error("[DELETE] Erro:", res.status, data);
         throw new Error(data.error || `Erro ${res.status}: Não foi possível excluir`);
       }
-      
+
       console.log(`[DELETE] Operação ${id} excluída:`, data);
-      
+
       // Remove da lista local imediatamente - FIX para não precisar F5
       removeTrade(id);
-      
+
       // Não precisa refetch imediato, já removemos local. Refetch em background para consistência
       setTimeout(() => refetch(), 500);
-      
+
     } catch (err) {
       console.error("[DELETE] Falha:", err);
       alert(err instanceof Error ? err.message : "Erro ao excluir a operação. Verifique os logs.");
@@ -77,14 +72,13 @@ export default function OperacoesPage() {
   };
 
   const exportCSV = () => {
-    const headers = ["ID", "Data", "Hora", "Ativo", "Direção", "Sessão", "Timeframe", "Setup", "Tags", "Entrada", "Stop Loss", "Take Profit", "Risco $", "Resultado $", "Resultado R", "Resultado %", "Resultado Final"];
+    const headers = ["ID", "Data", "Hora", "Ativo", "Direção", "Sessão", "Timeframe", "Setup", "Entrada", "Stop Loss", "Take Profit", "Risco $", "Resultado $", "Resultado R", "Resultado %", "Resultado Final"];
     const rows = filtered.map((t) => [
-      t.id, formatTradeDate(t.date), t.time, t.asset, t.direction, t.session, t.timeframeEntry || "",
-      t.setup || "", (t.tags || []).join("|"), t.entryPrice ?? "", t.stopLoss ?? "", t.takeProfit ?? "", t.riskAmount ?? "",
+      t.id, new Date(t.date).toLocaleDateString("pt-BR"), t.time, t.asset, t.direction, t.session, t.timeframeEntry || "",
+      t.setup || "", t.entryPrice ?? "", t.stopLoss ?? "", t.takeProfit ?? "", t.riskAmount ?? "",
       t.resultAmount ?? "", t.resultR ?? "", t.resultPercent ?? "", t.resultType,
     ]);
-    const cell = (v: unknown) => { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const csv = [headers.map(cell).join(","), ...rows.map((r) => r.map(cell).join(","))].join("\n");
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -125,7 +119,7 @@ export default function OperacoesPage() {
           </div>
           <select value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)} className="bg-dark-800 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald/30">
             <option value="all">Todos os ativos</option>
-            {uniqueAssets.map((a) => <option key={a} value={a}>{a}</option>)}
+            {uniqueAssets.map((a) => <option key={a} value={a}>{marketSymbolLabel(a)}</option>)}
           </select>
           <select value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)} className="bg-dark-800 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald/30">
             <option value="all">Todas as sessões</option>
@@ -162,17 +156,6 @@ export default function OperacoesPage() {
         </div>
       </div>
 
-      {!loading && filtered.length > 0 && (
-        <div className="flex items-center justify-between gap-3 mb-3 text-xs text-text-muted">
-          <span>Mostrando {Math.min(filtered.length, (safePage - 1) * pageSize + 1)}–{Math.min(filtered.length, safePage * pageSize)} de {filtered.length} operações</span>
-          <div className="flex items-center gap-2">
-            <button type="button" disabled={safePage <= 1} onClick={() => setPage(Math.max(1, safePage - 1))} className="px-3 py-1.5 rounded-lg border border-border disabled:opacity-40 hover:bg-surface-3">Anterior</button>
-            <span>Página {safePage}/{pageCount}</span>
-            <button type="button" disabled={safePage >= pageCount} onClick={() => setPage(Math.min(pageCount, safePage + 1))} className="px-3 py-1.5 rounded-lg border border-border disabled:opacity-40 hover:bg-surface-3">Próxima</button>
-          </div>
-        </div>
-      )}
-
       {loading ? (
         <div className="glass-card-strong p-12 text-center text-slate-muted text-sm">Carregando operações...</div>
       ) : filtered.length === 0 ? (
@@ -200,14 +183,14 @@ export default function OperacoesPage() {
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((t: Trade) => (
+              {filtered.map((t: Trade) => (
                 <tr key={t.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition">
                   <td className="px-4 py-3">
-                    <p className="text-xs font-medium text-text-primary">{formatTradeDate(t.date)}</p>
+                    <p className="text-xs font-medium text-text-primary">{new Date(t.date).toLocaleDateString("pt-BR")}</p>
                     <p className="text-[10px] text-slate-muted">{t.time}</p>
                   </td>
                   <td className="px-4 py-3 font-bold text-text-primary">
-                    {t.asset} {t.isDemo && <span className="text-[9px] text-sky ml-1">(demo)</span>}
+                    <span className="inline-flex items-center gap-2"><MarketSymbol symbol={t.asset} size="sm" />{t.asset}{t.isDemo && <span className="text-[9px] text-sky ml-1">(demo)</span>}</span>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${t.direction === "BUY" ? "bg-emerald/10 text-emerald" : "bg-rose/10 text-rose"}`}>
@@ -215,7 +198,7 @@ export default function OperacoesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-300">{t.session}</td>
-                  <td className="px-4 py-3 text-xs text-slate-300">{t.setup || "—"}{(t.tags || []).length > 0 && <div className="flex flex-wrap gap-1 mt-1">{(t.tags || []).slice(0, 3).map((tag) => <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-sky/10 text-sky">{tag}</span>)}</div>}</td>
+                  <td className="px-4 py-3 text-xs text-slate-300">{t.setup || "—"}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs font-extrabold px-2 py-0.5 rounded ${t.resultType === "WIN" ? "text-emerald bg-emerald/10" : t.resultType === "LOSS" ? "text-rose bg-rose/10" : "text-sky bg-sky/10"}`}>
                       {t.resultType}

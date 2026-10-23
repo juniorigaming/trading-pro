@@ -1,14 +1,26 @@
 "use client";
-import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark, Bitcoin, RefreshCw } from "lucide-react";
+import { BrainCircuit, Trophy, Siren, Target, ChevronRight, Landmark, Bitcoin } from "lucide-react";
 import type { PortfolioId } from "@/lib/portfolio";
 import { apiFetch } from "@/lib/ai/client";
-import { subscribeAiDataUpdated } from "@/lib/ai/refresh-events";
 import { B3_SESSION_LABEL, type B3AnalysisResult } from "@/lib/b3/types";
-import type { CurrencyScoreView, MacroAnalysisResult, TradeCandidateView , EvaluatedCurrency } from "@/lib/ai/types";
+import { G8, type CurrencyScoreView, type MacroAnalysisResult, type TradeCandidateView } from "@/lib/ai/types";
+import { useLocalTimeZone } from "@/hooks/useLocalTimeZone";
 import { Badge, DeltaArrow, fmtScore, riskColor, scoreBg, SESSION_LABEL } from "./ui";
 import CurrencyExposure from "./CurrencyExposure";
+import MarketSymbol, { CurrencyMark } from "@/components/MarketSymbol";
+
+function formatLocalTimestamp(value: string | undefined, timeZone: string) {
+  if (!value) return "não informado";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "não informado";
+  try {
+    return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(date);
+  } catch {
+    return "não informado";
+  }
+}
 
 /** Aceita linhas em snake_case (contrato) ou camelCase (linha crua do banco) sem quebrar o dashboard. */
 function normalizeCandidates(input: unknown): TradeCandidateView[] {
@@ -17,7 +29,7 @@ function normalizeCandidates(input: unknown): TradeCandidateView[] {
     if (!raw || typeof raw !== "object") return [];
     const r = raw as Record<string, unknown>;
     const num = (a: unknown, b: unknown) => { const v = Number(a ?? b ?? 0); return Number.isFinite(v) ? v : 0; };
-    const symbol = String(r.symbol ?? ""); if (!symbol || r.eligible !== true) return [];
+    const symbol = String(r.symbol ?? ""); if (!symbol) return [];
     return [{
       symbol,
       bias: (r.bias === "SHORT" ? "SHORT" : "LONG") as TradeCandidateView["bias"],
@@ -29,34 +41,10 @@ function normalizeCandidates(input: unknown): TradeCandidateView[] {
       confidence: (r.confidence ?? "LOW") as TradeCandidateView["confidence"],
       priority: num(r.priority, 0),
       event_risk: (r.event_risk ?? r.eventRisk ?? "LOW") as TradeCandidateView["event_risk"],
-      event_risk_assessed: r.event_risk_assessed !== false,
       event_risk_events: (Array.isArray(r.event_risk_events) ? r.event_risk_events : Array.isArray(r.eventRiskEvents) ? r.eventRiskEvents : []) as TradeCandidateView["event_risk_events"],
       reason: String(r.reason ?? ""),
-      relative_strength: r.relative_strength == null ? undefined : num(r.relative_strength, null),
-      base_currency: (r.base_currency ?? r.baseCurrency) as TradeCandidateView["base_currency"],
-      quote_currency: (r.quote_currency ?? r.quoteCurrency) as TradeCandidateView["quote_currency"],
-      base_score: r.base_score == null ? undefined : num(r.base_score, null),
-      quote_score: r.quote_score == null ? undefined : num(r.quote_score, null),
-      confidence_pct: r.confidence_pct == null ? undefined : num(r.confidence_pct, null),
-      eligible: r.eligible === true,
-      ineligible_reason: r.ineligible_reason == null ? undefined : String(r.ineligible_reason),
     }];
   });
-}
-
-function displayMacroScore(score: CurrencyScoreView): number | null {
-  if (score.score === null) return null;
-  return score.score_display ?? Number((score.score * 2.5).toFixed(2));
-}
-function displayMacroDelta(score: CurrencyScoreView): number | null {
-  return score.score_delta == null ? null : Number((score.score_delta * 2.5).toFixed(2));
-}
-function displayCandidateDelta(candidate: TradeCandidateView): number {
-  return Number(Math.abs(candidate.relative_strength ?? candidate.macro_divergence * 2.5).toFixed(2));
-}
-function MacroScoreRow({ score }: { score: CurrencyScoreView }) {
-  const shown = displayMacroScore(score);
-  return <p className="flex items-center justify-between py-0.5"><span className="font-extrabold text-text-primary">{score.currency}</span><span className="flex items-center gap-1" title="Variação do score individual desde a leitura anterior (escala de apresentação)"><DeltaArrow delta={displayMacroDelta(score)} /><span className={`px-1.5 rounded ${scoreBg(shown ?? 0)}`}>{fmtScore(shown)}</span></span></p>;
 }
 
 /** Error boundary local: se os widgets IA falharem, o resto do dashboard continua funcionando. */
@@ -77,8 +65,8 @@ export default function DashboardAiWidgets({ portfolio = "FOREX" }: { portfolio?
 /**
  * Widgets do dashboard principal, por carteira (sem repetir cards):
  *  FOREX  → Ranking G8 · Trade Candidates · Event Risk · Exposição por moeda
- *  B3     → B3 Macro (WIN & DOL) em destaque · Event Risk (USD/BRL)
- *  CRYPTO → Regime global de risco (USD/exterior) · Event Risk USD
+ *  B3     → B3 Macro (WIN & DOL) em destaque · Event Risk G8 em contexto
+ *  CRYPTO → Regime global de risco (USD/exterior) · Event Risk G8 em contexto
  * Falha silenciosa se o módulo IA ainda não foi usado.
  */
 function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
@@ -87,61 +75,45 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
   const [cands, setCands] = useState<TradeCandidateView[]>([]);
   const [unavailable, setUnavailable] = useState(false);
   const [b3, setB3] = useState<B3AnalysisResult | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  const loadDashboardData = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const [s, l, c, b] = await Promise.all([
-        apiFetch<CurrencyScoreView[]>("/api/macro/scores"),
-        apiFetch<MacroAnalysisResult | null>("/api/macro/analyses?latest=1"),
-        apiFetch<TradeCandidateView[]>("/api/macro/candidates"),
-        apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").catch(() => null),
-      ]);
-      setScores(Array.isArray(s) ? s : []);
-      setLatest(l && typeof l === "object" ? l : null);
-      setCands(normalizeCandidates(c));
-      setB3(b && typeof b === "object" && "win" in b ? b : null);
-      setUnavailable(false);
-      setLastUpdated(new Date());
-    } catch {
-      setUnavailable(true);
-    } finally {
-      setRefreshing(false);
-    }
+  const timeZone = useLocalTimeZone();
+  useEffect(() => { apiFetch<B3AnalysisResult | null>("/api/b3/analyses?latest=1").then((r) => setB3(r && typeof r === "object" && "win" in r ? r : null)).catch(() => setB3(null)); }, []);
+  useEffect(() => {
+    Promise.all([apiFetch<CurrencyScoreView[]>("/api/macro/scores"), apiFetch<MacroAnalysisResult | null>("/api/macro/analyses?latest=1"), apiFetch<TradeCandidateView[]>("/api/macro/candidates")])
+      .then(([s, l, c]) => { setScores(Array.isArray(s) ? s : []); setLatest(l && typeof l === "object" ? l : null); setCands(normalizeCandidates(c)); }).catch(() => setUnavailable(true));
   }, []);
-
-  useEffect(() => { void Promise.resolve().then(loadDashboardData); }, [loadDashboardData]);
-  useEffect(() => subscribeAiDataUpdated(() => { void loadDashboardData(); }), [loadDashboardData]);
-
-  const refreshToolbar = (
-    <div className="mb-2 flex items-center justify-end gap-2 text-[10px] text-text-muted">
-      {lastUpdated && <span>Consultado às {lastUpdated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>}
-      <button type="button" onClick={() => void loadDashboardData()} disabled={refreshing} className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-surface-2 disabled:opacity-50" title="Atualizar os widgets de mercado">
-        <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />Atualizar
-      </button>
-    </div>
-  );
   if (unavailable) return (
-    <div className="glass-card p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2 text-sm text-text-secondary"><BrainCircuit size={18} className="text-accent" />Widgets de mercado indisponíveis nesta atualização.</div>
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={() => void loadDashboardData()} disabled={refreshing} className="text-xs font-bold text-accent disabled:opacity-50">Tentar novamente</button>
-        <Link href="/analise-macro" className="text-xs font-bold text-accent inline-flex items-center gap-1">Abrir Análise Macro <ChevronRight size={14} /></Link>
-      </div>
-    </div>
+    <div className="glass-card p-4 mb-6 flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-sm text-text-secondary"><BrainCircuit size={18} className="text-accent" />Módulo IA ainda não configurado (rode a migration e defina as variáveis).</div><Link href="/analise-macro" className="text-xs font-bold text-accent inline-flex items-center gap-1">Abrir <ChevronRight size={14} /></Link></div>
   );
-  const sorted = scores ? (scores.filter((s) => s.status === "EVALUATED" && s.score !== null) as EvaluatedCurrency[]).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)) : [];
+  const sorted = scores ? [...scores].sort((a, b) => a.rank - b.rank) : [];
   const top = sorted.slice(0, 3), bottom = sorted.slice(-3).reverse();
-  const risky = (latest?.event_risk ?? []).filter((r) => r.level === "HIGH" || r.level === "EXTREME");
+  const riskRows = latest?.event_risk ?? [];
+  const riskAttention = riskRows.filter((r) => r.level !== "LOW");
+  const pendingEvents = Array.isArray(latest?.pending_events) ? latest.pending_events : null;
+  const hasG8Events = (pendingEvents ?? []).some((event) => (G8 as readonly string[]).includes(event.currency))
+    || riskRows.some((row) => Array.isArray(row.events) && row.events.some((event) => (G8 as readonly string[]).includes(event.currency)));
+  const riskHours = latest?.meta?.event_risk_hours;
+  const riskUpdatedAt = latest?.created_at ?? latest?.generated_at;
   const sessionLabel = latest ? (SESSION_LABEL[latest.session] ?? latest.session) : null;
-  const calendarProvided = latest?.calendar_status === "PROVIDED";
   const eventRiskCard = (
     <Link href={portfolio === "B3" ? "/b3" : "/ranking-g8"} className="glass-card p-4 hover:bg-surface-2/60 transition">
-      <p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><Siren size={14} className="text-amber" />Event Risk</p>
-      {!latest ? <p className="text-xs text-text-muted">Sem análise macro carregada.</p> : !calendarProvided ? <p className="text-xs text-amber">Calendário não informado; risco de eventos não avaliado.</p> : risky.length === 0 ? <p className="text-xs text-emerald">Sem evento de alto impacto nos eventos informados nesta análise.</p> : risky.map((r) => <p key={r.currency} className="text-xs py-0.5 flex items-center justify-between"><span className="font-extrabold">{r.currency}</span><Badge className={riskColor(r.level)}>{r.level}</Badge></p>)}
-      {latest && <p className="text-[10px] text-text-muted mt-1">{(latest.pending_events ?? []).length} eventos pendentes{calendarProvided ? " na entrada desta análise" : " · não avaliado"}</p>}
+      <p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><Siren size={14} className="text-amber" />Event Risk · G8</p>
+      {!latest ? (
+        <p className="text-xs text-text-muted">Sem análise salva — risco não avaliado.</p>
+      ) : !hasG8Events ? (
+        <p className="text-xs text-amber">Nenhum evento G8 consta neste snapshot; risco não avaliado e cobertura não confirmada.</p>
+      ) : riskAttention.length === 0 ? (
+        <p className="text-xs text-emerald">Sem risco médio/alto nas janelas avaliadas, entre os eventos G8 informados.</p>
+      ) : riskAttention.map((r) => (
+        <p key={r.currency} className="text-xs py-0.5 flex items-center justify-between">
+          <span className="inline-flex items-center gap-1.5 font-extrabold"><CurrencyMark currency={r.currency} />{r.currency}</span>
+          <Badge className={riskColor(r.level)}>{r.level}</Badge>
+        </p>
+      ))}
+      {latest && (
+        <p className="text-[9px] text-text-muted mt-2 leading-relaxed">
+          {riskHours ? `Janelas ${riskHours.intraday}h moeda / ${riskHours.overnight}h par` : "Janela não registrada nesta análise"} · fuso {timeZone} · snapshot salvo em {formatLocalTimestamp(riskUpdatedAt, timeZone)}. Cobertura limitada aos eventos informados.
+        </p>
+      )}
     </Link>
   );
   const b3Card = (
@@ -155,7 +127,7 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
           <span className="text-text-muted">regime <b className="text-text-primary">{b3.regime}</b></span>
           {b3.di_curve && <span className="text-text-muted">DI {b3.di_curve.shape}</span>}
           {b3.event_risk.map((e) => <Badge key={e.instrument} className={riskColor(e.level)}>{e.instrument} {e.level}</Badge>)}
-          {b3.trade_candidates.slice(0, 3).map((c) => <span key={`${c.instrument}${c.bias}`} className="font-bold"><span className="text-text-primary">{c.instrument}</span> <span className={c.bias === "LONG" ? "text-emerald" : "text-rose"}>{c.bias}</span></span>)}
+          {b3.trade_candidates.slice(0, 3).map((c) => <span key={`${c.instrument}${c.bias}`} className="inline-flex items-center gap-1 font-bold"><MarketSymbol symbol={c.instrument} size="sm" /><span className="text-text-primary">{c.instrument}</span> <span className={c.bias === "LONG" ? "text-emerald" : "text-rose"}>{c.bias}</span></span>)}
         </div>
       )}
     </Link>
@@ -163,12 +135,9 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
 
   if (portfolio === "B3") {
     return (
-      <div className="mb-6">
-        {refreshToolbar}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {b3Card}
-          {eventRiskCard}
-        </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
+        {b3Card}
+        {eventRiskCard}
       </div>
     );
   }
@@ -177,14 +146,12 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
     const usd = sorted.find((x) => x.currency === "USD");
     const regime = b3?.regime ?? null;
     return (
-      <div className="mb-6">
-        {refreshToolbar}
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-6">
         <Link href="/ranking-g8" className="glass-card p-4 hover:bg-surface-2/60 transition">
           <p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><Bitcoin size={14} className="text-sky" />Regime de risco global</p>
           {!usd && !regime ? <p className="text-xs text-text-muted">Sem análise macro ainda — rode a Análise Macro IA para ver o viés do dólar.</p> : (
             <div className="text-xs space-y-1">
-              {usd && <p className="flex items-center justify-between"><span className="text-text-muted">Score macro USD (−5..+5)</span><span className="flex items-center gap-1"><DeltaArrow delta={displayMacroDelta(usd)} /><span className={`px-1.5 rounded font-bold ${scoreBg(displayMacroScore(usd) ?? 0)}`}>{fmtScore(displayMacroScore(usd))}</span></span></p>}
+              {usd && <p className="flex items-center justify-between"><span className="text-text-muted">Força do USD (G8)</span><span className="flex items-center gap-1"><DeltaArrow delta={usd.score_delta} /><span className={`px-1.5 rounded font-bold ${scoreBg(usd.score)}`}>{fmtScore(usd.score)}</span></span></p>}
               {regime && <p className="flex items-center justify-between"><span className="text-text-muted">Regime (exterior)</span><b className="text-text-primary">{regime}</b></p>}
               <p className="text-[10px] text-text-muted pt-1">Dólar forte / risk-off tende a pressionar BTC e alts; use como contexto, não como sinal.</p>
             </div>
@@ -199,31 +166,33 @@ function DashboardAiWidgetsInner({ portfolio }: { portfolio: PortfolioId }) {
             <li>Registrar taxa (fee) e funding no resultado líquido.</li>
           </ul>
         </div>
-        </div>
       </div>
     );
   }
 
   return (
-    <div className="mb-6">
-      {refreshToolbar}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
       <Link href="/ranking-g8" className="glass-card p-4 hover:bg-surface-2/60 transition">
-        <div className="flex items-center justify-between mb-2"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5"><Trophy size={14} className="text-accent" />Ranking G8 · macro −5..+5</p>{sessionLabel && <span className="text-[10px] text-text-muted">{sessionLabel}</span>}</div>
+        <div className="flex items-center justify-between mb-2"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5"><Trophy size={14} className="text-accent" />Ranking G8</p>{sessionLabel && <span className="text-[10px] text-text-muted">{sessionLabel}</span>}</div>
+        <p className="text-[10px] text-text-muted mb-1">Score macro de eventos; não é força de preço. Sem filtros de operações.</p>
         {sorted.length === 0 ? <p className="text-xs text-text-muted">Sem análise ainda.</p> : (
           <div className="grid grid-cols-2 gap-x-3 text-xs">
-            <div>{top.map((s) => <MacroScoreRow key={s.currency} score={s} />)}</div>
-            <div>{bottom.map((s) => <MacroScoreRow key={s.currency} score={s} />)}</div>
+            <div>{top.map((s) => <p key={s.currency} className="flex items-center justify-between py-0.5"><span className="inline-flex items-center gap-1.5 font-extrabold text-text-primary"><CurrencyMark currency={s.currency} />{s.currency}</span><span className="flex items-center gap-1"><DeltaArrow delta={s.score_delta} /><span className={`px-1.5 rounded ${scoreBg(s.score)}`}>{fmtScore(s.score)}</span></span></p>)}</div>
+            <div>{bottom.map((s) => <p key={s.currency} className="flex items-center justify-between py-0.5"><span className="inline-flex items-center gap-1.5 font-extrabold text-text-primary"><CurrencyMark currency={s.currency} />{s.currency}</span><span className="flex items-center gap-1"><DeltaArrow delta={s.score_delta} /><span className={`px-1.5 rounded ${scoreBg(s.score)}`}>{fmtScore(s.score)}</span></span></p>)}</div>
           </div>
         )}
       </Link>
       <Link href="/ranking-g8" className="glass-card p-4 hover:bg-surface-2/60 transition">
         <p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><Target size={14} className="text-accent" />Trade Candidates</p>
-        {cands.length === 0 ? <p className="text-xs text-text-muted">Nenhum par elegível com evidência suficiente.</p> : cands.slice(0, 4).map((c) => <p key={c.symbol} className="flex items-center justify-between text-xs py-0.5"><span className="font-extrabold text-text-primary">{c.symbol}</span><span className="flex items-center gap-1.5"><span className={c.bias === "LONG" ? "text-emerald font-bold" : "text-rose font-bold"}>{c.bias}</span><span className="text-text-muted tabular-nums" title="|Δ| entre scores exibidos da base e da cotada; cada score é −5..+5, então |Δ| vai de 0 a 10">|Δ| {displayCandidateDelta(c).toFixed(2)}</span><Badge className={riskColor(c.event_risk_assessed === false ? "NOT_ASSESSED" : c.event_risk)}>{c.event_risk_assessed === false ? "N/A" : c.event_risk}</Badge></span></p>)}
+        {cands.length === 0 ? <p className="text-xs text-text-muted">Nenhum par com divergência macro ≥ 1.0.</p> : (
+          <>
+            <p className="text-[10px] text-text-muted mb-1">Δ é diferencial de score macro; não representa força de preço.</p>
+            {cands.slice(0, 3).map((c) => <p key={c.symbol} className="flex items-center justify-between text-xs py-0.5"><span className="inline-flex items-center gap-1.5 font-extrabold text-text-primary"><MarketSymbol symbol={c.symbol} size="sm" />{c.symbol}</span><span className="flex items-center gap-1.5"><span className={c.bias === "LONG" ? "text-emerald font-bold" : "text-rose font-bold"}>{c.bias}</span><span className="text-text-muted tabular-nums">Δ{Number(c.macro_divergence ?? 0).toFixed(2)}</span><Badge className={riskColor(c.event_risk)}>{c.event_risk}</Badge></span></p>)}
+          </>
+        )}
       </Link>
       {eventRiskCard}
-      <div className="glass-card p-4"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-2"><BrainCircuit size={14} className="text-accent" />Exposição por moeda</p><CurrencyExposure compact /></div>
-      </div>
+      <div className="glass-card p-4"><p className="text-xs font-extrabold text-text-primary inline-flex items-center gap-1.5 mb-1"><BrainCircuit size={14} className="text-accent" />Exposição por moeda</p><p className="text-[10px] text-text-muted mb-2">Posições abertas · todas as carteiras · sem filtros</p><CurrencyExposure compact /></div>
     </div>
   );
 }

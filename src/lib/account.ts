@@ -1,7 +1,6 @@
 import { Trade } from "./types";
 import { Config } from "./types";
 import { buildCalendarData } from "./calculations";
-import { dayOrdinal, localTodayKey, tradeDayKey } from "./date";
 
 export interface AccountState {
   initialBalance: number;
@@ -13,8 +12,8 @@ export interface AccountState {
   equity: number;
   pnlDaily: number;
   pnlWeekly: number;
-  rDaily: number;
-  rWeekly: number;
+  rDaily: number | null;
+  rWeekly: number | null;
   openRisk: number;
   riskUsedToday: number; // in currency
   riskRemaining: number; // in currency
@@ -50,23 +49,28 @@ export function computeAccount(trades: Trade[], config: Config | null): AccountS
 
   // Daily / weekly PnL and R.
   const calendar = buildCalendarData(trades);
-  const todayKey = localTodayKey();
+  const todayKey = new Date().toISOString().split("T")[0];
   const today = calendar.get(todayKey);
   const pnlDaily = today?.result ?? 0;
-  const rDaily = today?.resultR ?? 0;
+  const rDaily = today && today.rTrades > 0 ? today.resultR : null;
 
-  // Weekly: last 7 days.
-  const todayOrdinal = dayOrdinal(todayKey);
-  const weekStartOrdinal = todayOrdinal - 6; // hoje + 6 dias anteriores (sem deslocamento UTC)
+  // Weekly: last 7 days. R is unavailable unless at least one trade has defined risk.
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
   let pnlWeekly = 0;
-  let rWeekly = 0;
+  let rWeeklyTotal = 0;
+  let rWeeklyCount = 0;
   trades.forEach((t) => {
-    const ordinal = dayOrdinal(tradeDayKey(t.date));
-    if (ordinal >= weekStartOrdinal && ordinal <= todayOrdinal) {
+    const d = new Date(t.date);
+    if (d >= weekAgo) {
       pnlWeekly += t.resultAmount || 0;
-      rWeekly += t.resultR || 0;
+      if (typeof t.resultR === "number" && Number.isFinite(t.resultR)) {
+        rWeeklyTotal += t.resultR;
+        rWeeklyCount += 1;
+      }
     }
   });
+  const rWeekly = rWeeklyCount > 0 ? rWeeklyTotal : null;
 
   // Open risk = sum of planned/open trade risk amounts.
   const openRisk = trades
@@ -74,8 +78,9 @@ export function computeAccount(trades: Trade[], config: Config | null): AccountS
     .reduce((s, t) => s + (t.riskAmount || 0), 0);
 
   // Risk used today = sum of risk on today's executed trades.
-  const executedToday = trades.filter((t) => tradeDayKey(t.date) === todayKey && (t.status == null || t.status === "OPEN" || t.status === "CLOSED"));
-  const riskUsedToday = executedToday.reduce((s, t) => s + (t.riskAmount || 0), 0);
+  const riskUsedToday = today
+    ? trades.filter((t) => new Date(t.date).toISOString().split("T")[0] === todayKey).reduce((s, t) => s + (t.riskAmount || 0), 0)
+    : 0;
 
   const dailyRiskLimit = (riskPercent / 100) * equity * maxTradesPerDay;
   const riskRemaining = Math.max(0, dailyRiskLimit - riskUsedToday);
@@ -97,7 +102,7 @@ export function computeAccount(trades: Trade[], config: Config | null): AccountS
     });
   const currentDrawdown = peak > 0 ? ((peak - runningCap) / peak) * 100 : 0;
 
-  const tradesToday = executedToday.length;
+  const tradesToday = trades.filter((t) => new Date(t.date).toISOString().split("T")[0] === todayKey).length;
 
   return {
     initialBalance,

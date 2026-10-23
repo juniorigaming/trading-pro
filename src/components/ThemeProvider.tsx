@@ -33,11 +33,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // On mount, hydrate from localStorage + system.
   useEffect(() => {
-    let cancelled = false;
     const stored = loadAppearance();
     applyAppearance(stored);
-    void Promise.resolve().then(() => {
-      if (cancelled) return;
+    Promise.resolve().then(() => {
       setPrefs(stored);
       setThemeState(resolveTheme(stored.theme));
       setIsSystem(stored.theme === "system");
@@ -51,10 +49,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       }
     };
     mq.addEventListener("change", onChange);
-    return () => {
-      cancelled = true;
-      mq.removeEventListener("change", onChange);
-    };
+    return () => mq.removeEventListener("change", onChange);
   }, []);
 
   const commit = useCallback((next: AppearancePrefs) => {

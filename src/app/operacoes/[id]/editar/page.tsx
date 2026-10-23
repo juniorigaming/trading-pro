@@ -11,30 +11,27 @@ import { fetchTrade, TradeNotFoundError } from "@/lib/trade-fetch";
 export default function EditarOperacaoPage() {
   const params = useParams();
   const id = params.id as string;
-  const [trade, setTrade] = useState<Trade | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<{ id: string; reloadKey: number; trade: Trade | null; error: string | null } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const next = await fetchTrade(id);
-        if (!cancelled) setTrade(next);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof TradeNotFoundError ? "Operação não encontrada." : (e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    fetchTrade(id)
+      .then((trade) => {
+        if (!cancelled) setLoaded({ id, reloadKey, trade, error: null });
+      })
+      .catch((e) => {
+        if (!cancelled) setLoaded({ id, reloadKey, trade: null, error: e instanceof TradeNotFoundError ? "Operação não encontrada." : e.message });
+      });
+    return () => {
+      cancelled = true;
     };
-    void load();
-    return () => { cancelled = true; };
   }, [id, reloadKey]);
+
+  const isCurrentLoad = loaded?.id === id && loaded.reloadKey === reloadKey;
+  const trade = isCurrentLoad ? loaded.trade : null;
+  const error = isCurrentLoad ? loaded.error : null;
+  const loading = !isCurrentLoad;
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-[1400px] mx-auto">

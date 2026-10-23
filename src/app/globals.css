@@ -44,17 +44,17 @@
    ============================================================ */
 :root,
 [data-theme="dark"] {
-  --background: #07090d;
-  --surface: #0d1017;
-  --surface-2: #121722;
-  --surface-3: #181e29;
+  --background: #000000;
+  --surface: #08090b;
+  --surface-2: #0d1014;
+  --surface-3: #15191f;
 
-  --border: #202632;
-  --border-subtle: #161b24;
+  --border: #22272e;
+  --border-subtle: #171a1f;
 
-  --text-primary: #f8fafc;
-  --text-secondary: #a8b3c4;
-  --text-muted: #64748b;
+  --text-primary: #f5f7fa;
+  --text-secondary: #a7b0bd;
+  --text-muted: #707b8b;
 
   --success: #10b981;
   --danger: #f43f5e;

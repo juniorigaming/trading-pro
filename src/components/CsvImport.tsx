@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { Upload, FileText, CheckCircle, AlertCircle, Download, X, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { Upload, FileText, CheckCircle, AlertCircle, Download, X, Trash2 } from "lucide-react";
 type ImportedFileInfo = { name: string; size: number; importedAt: string; totalRows: number; imported: number; };
 export default function CsvImport() {
   const [file, setFile] = useState<File | null>(null);
@@ -13,13 +13,12 @@ export default function CsvImport() {
   const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    let cancelled = false;
-    const saved = localStorage.getItem('lastImportedFile');
-    if (saved) void Promise.resolve().then(() => {
-      if (cancelled) return;
-      try { setImportedFile(JSON.parse(saved)); } catch {}
+    void Promise.resolve().then(() => {
+      try {
+        const saved = localStorage.getItem("lastImportedFile");
+        if (saved) setImportedFile(JSON.parse(saved));
+      } catch { /* segue sem histórico local */ }
     });
-    return () => { cancelled = true; };
   }, []);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) { setFile(e.target.files[0]); setResult(null); setError(null); }

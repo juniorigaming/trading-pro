@@ -4,6 +4,9 @@ import { Metrics } from "@/lib/calculations";
 import { Config } from "@/lib/types";
 
 interface DisciplineStats {
+  total: number;
+  evaluated: number;
+  unassessed: number;
   followedPlan: number;
   notFollowedPlan: number;
   followedPercent: number;
@@ -48,8 +51,8 @@ export default function AlertCard({ metrics, config, discipline }: Props) {
       alerts.push({ type: "success", message: "Performance consistente: Win Rate acima de 60% com resultado positivo." });
     }
 
-    if (discipline.notFollowedPercent > 30) {
-      alerts.push({ type: "warning", message: `${Math.round(discipline.notFollowedPercent)}% das operações fugiram do plano estabelecido.` });
+    if (discipline.evaluated > 0 && discipline.notFollowedPercent > 30) {
+      alerts.push({ type: "warning", message: `${Math.round(discipline.notFollowedPercent)}% das operações avaliadas ficaram fora do plano (${discipline.evaluated} avaliadas; ${discipline.unassessed} sem avaliação).` });
     }
 
     if (discipline.revengeTrade > 0) {

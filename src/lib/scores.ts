@@ -57,7 +57,7 @@ export function executionScore(trade: Trade | null | undefined): ExecutionScoreD
 
   const add = (label: string, ok: boolean, max: number) => items.push({ label, points: ok ? max : 0, max });
 
-  add("Seguiu o plano", trade.followedPlan !== false, 14);
+  if (typeof trade.followedPlan === "boolean") add("Seguiu o plano", trade.followedPlan, 14);
   add("Risco correto", !trade.increasedRisk, 12);
   add("Esperou confirmação", !trade.earlyEntry, 12);
   add("Não antecipou entrada", !trade.earlyEntry, 11);
@@ -68,14 +68,16 @@ export function executionScore(trade: Trade | null | undefined): ExecutionScoreD
   add("Gestão coerente", !trade.earlyExit, 5);
   add("Saída coerente", !!trade.exitReason || !trade.earlyExit, 5);
 
-  const score = Math.min(100, items.reduce((s, b) => s + b.points, 0));
+  const availablePoints = items.reduce((s, b) => s + b.max, 0);
+  const earnedPoints = items.reduce((s, b) => s + b.points, 0);
+  const score = availablePoints > 0 ? Math.round((earnedPoints / availablePoints) * 100) : 0;
   const classification = score >= 85 ? "Excelente" : score >= 70 ? "Boa" : score >= 55 ? "Regular" : "Ruim";
   return { score, classification, breakdown: items };
 }
 
 export function captureEfficiency(trade: Trade): number | null {
-  const rr = trade.resultR ?? 0;
+  if (typeof trade.resultR !== "number" || !Number.isFinite(trade.resultR)) return null;
   const mfeR = trade.mfeAmount != null && trade.riskAmount ? trade.mfeAmount / trade.riskAmount : null;
   if (mfeR == null || mfeR === 0) return null;
-  return (rr / mfeR) * 100;
+  return (trade.resultR / mfeR) * 100;
 }

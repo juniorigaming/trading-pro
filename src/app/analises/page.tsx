@@ -6,6 +6,7 @@ import { useTrades, useConfig } from "@/hooks/useTradeData";
 import { groupByAsset, groupBySession, groupBySetup, groupByWeekday, groupByHour, calculateMetrics, rDistribution } from "@/lib/calculations";
 import { formatCurrency, formatNumber, formatR } from "@/lib/utils";
 import SampleSizeWarning from "@/components/SampleSizeWarning";
+import MarketSymbol from "@/components/MarketSymbol";
 
 interface EdgeFilters {
   asset: string;
@@ -17,7 +18,6 @@ interface EdgeFilters {
   mss: string;
   fvg: string;
   ob: string;
-  tag: string;
 }
 
 export default function AnalisesPage() {
@@ -26,7 +26,7 @@ export default function AnalisesPage() {
   const initialCapital = config?.initialCapital ?? 10000;
 
   const [edge, setEdge] = useState<EdgeFilters>({
-    asset: "all", session: "all", macroAligned: "all", dxyAligned: "all", sweep: "all", displacement: "all", mss: "all", fvg: "all", ob: "all", tag: "all",
+    asset: "all", session: "all", macroAligned: "all", dxyAligned: "all", sweep: "all", displacement: "all", mss: "all", fvg: "all", ob: "all",
   });
 
   const byAsset = useMemo(() => groupByAsset(trades), [trades]);
@@ -40,7 +40,6 @@ export default function AnalisesPage() {
   const edgeTrades = useMemo(() => {
     return trades.filter((t) => {
       if (edge.asset !== "all" && t.asset !== edge.asset) return false;
-      if (edge.tag !== "all" && !(t.tags || []).includes(edge.tag)) return false;
       if (edge.session !== "all" && t.session !== edge.session) return false;
       if (edge.macroAligned !== "all" && (!!t.macroBias && t.macroBias !== "Neutro") !== (edge.macroAligned === "yes")) return false;
       if (edge.dxyAligned !== "all" && !!t.dxyBias !== (edge.dxyAligned === "yes")) return false;
@@ -56,7 +55,6 @@ export default function AnalisesPage() {
   const edgeMetrics = useMemo(() => calculateMetrics(edgeTrades, initialCapital), [edgeTrades, initialCapital]);
   const edgeAssets = useMemo(() => Array.from(new Set(trades.map((t) => t.asset))).sort(), [trades]);
   const edgeSessions = useMemo(() => Array.from(new Set(trades.map((t) => t.session))).sort(), [trades]);
-  const edgeTags = useMemo(() => Array.from(new Set(trades.flatMap((t) => t.tags || []))).sort(), [trades]);
 
   // Execution score vs result
   const execAnalysis = useMemo(() => {
@@ -109,7 +107,6 @@ export default function AnalisesPage() {
         <div className="flex flex-wrap gap-2 mb-4">
           <Sel label="Ativo" value={edge.asset} onChange={(v) => setEdge({ ...edge, asset: v })} options={["all", ...edgeAssets]} />
           <Sel label="Sessão" value={edge.session} onChange={(v) => setEdge({ ...edge, session: v })} options={["all", ...edgeSessions]} />
-          <Sel label="Tag" value={edge.tag} onChange={(v) => setEdge({ ...edge, tag: v })} options={["all", ...edgeTags]} />
           <Sel label="Macro" value={edge.macroAligned} onChange={(v) => setEdge({ ...edge, macroAligned: v })} options={["all", "yes", "no"]} />
           <Sel label="DXY" value={edge.dxyAligned} onChange={(v) => setEdge({ ...edge, dxyAligned: v })} options={["all", "yes", "no"]} />
           <Sel label="Sweep" value={edge.sweep} onChange={(v) => setEdge({ ...edge, sweep: v })} options={["all", "yes", "no"]} />
@@ -120,12 +117,13 @@ export default function AnalisesPage() {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <EdgeStat label="Trades" value={String(edgeTrades.length)} />
-          <EdgeStat label="Win Rate" value={`${formatNumber(edgeMetrics.winRate, 1)}%`} />
-          <EdgeStat label="Avg R" value={formatR(edgeMetrics.avgR)} />
-          <EdgeStat label="Expectancy (R)" value={formatR(edgeMetrics.expectancy ? edgeMetrics.expectancy / (edgeMetrics.avgLoss || 1) : 0)} />
-          <EdgeStat label="Profit Factor" value={formatNumber(edgeMetrics.profitFactor)} />
-          <EdgeStat label="Max DD" value={`-${formatNumber(edgeMetrics.maxDrawdown)}%`} />
+          <EdgeStat label="Win Rate" value={edgeTrades.length > 0 ? `${formatNumber(edgeMetrics.winRate, 1)}%` : "—"} />
+          <EdgeStat label="Avg R" value={edgeMetrics.avgR != null ? formatR(edgeMetrics.avgR) : "—"} />
+          <EdgeStat label="Ops com R definido" value={String(edgeMetrics.rTrades)} />
+          <EdgeStat label="Profit Factor" value={edgeTrades.length > 0 && edgeMetrics.profitFactor > 0 ? formatNumber(edgeMetrics.profitFactor) : "—"} />
+          <EdgeStat label="Max DD · pico→vale" value={`${edgeMetrics.maxDrawdown > 0 ? "−" : ""}${formatNumber(edgeMetrics.maxDrawdown)}%`} />
         </div>
+        <p className="text-[10px] text-text-muted mt-2">R médio usa apenas operações com risco definido. Drawdown é calculado sobre a sequência do recorte atual, partindo do capital inicial e sem depósitos/saques.</p>
       </section>
 
       {/* Execution vs Result */}
@@ -186,19 +184,20 @@ export default function AnalisesPage() {
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className="glass-card p-4 rounded-xl text-center">
-              <p className="text-[10px] text-text-muted uppercase">Expectancy ($)</p>
-              <p className={`text-2xl font-extrabold mt-1 ${metrics.expectancy >= 0 ? "text-emerald" : "text-rose"}`}>{metrics.expectancy >= 0 ? "+" : ""}{formatCurrency(metrics.expectancy)}</p>
+              <p className="text-[10px] text-text-muted uppercase">Expectância ($)</p>
+              <p className={`text-2xl font-extrabold mt-1 ${metrics.expectancy >= 0 ? "text-emerald" : "text-rose"}`}>{metrics.totalTrades > 0 ? `${metrics.expectancy >= 0 ? "+" : ""}${formatCurrency(metrics.expectancy)}` : "—"}</p>
             </div>
             <div className="glass-card p-4 rounded-xl text-center">
               <p className="text-[10px] text-text-muted uppercase">R Médio</p>
-              <p className={`text-2xl font-extrabold mt-1 ${rDist.avg >= 0 ? "text-emerald" : "text-rose"}`}>{formatR(rDist.avg)}</p>
+              <p className={`text-2xl font-extrabold mt-1 ${rDist.avg == null ? "text-text-muted" : rDist.avg >= 0 ? "text-emerald" : "text-rose"}`}>{rDist.avg == null ? "—" : formatR(rDist.avg)}</p>
+              <p className="text-[10px] text-text-muted mt-1">{rDist.count} operações com risco definido</p>
             </div>
           </div>
           <div className="grid grid-cols-4 gap-2 text-center text-xs">
-            <div><p className="text-text-muted text-[10px] uppercase">Mediana</p><p className="font-bold text-text-primary">{formatNumber(rDist.median)}R</p></div>
-            <div><p className="text-text-muted text-[10px] uppercase">Maior R</p><p className="font-bold text-emerald">{formatNumber(rDist.max)}R</p></div>
-            <div><p className="text-text-muted text-[10px] uppercase">Menor R</p><p className="font-bold text-rose">{formatNumber(rDist.min)}R</p></div>
-            <div><p className="text-text-muted text-[10px] uppercase">Total R</p><p className="font-bold text-text-primary">{formatNumber(rDist.total)}R</p></div>
+            <div><p className="text-text-muted text-[10px] uppercase">Mediana</p><p className="font-bold text-text-primary">{rDist.median == null ? "—" : `${formatNumber(rDist.median)}R`}</p></div>
+            <div><p className="text-text-muted text-[10px] uppercase">Maior R</p><p className="font-bold text-emerald">{rDist.max == null ? "—" : `${formatNumber(rDist.max)}R`}</p></div>
+            <div><p className="text-text-muted text-[10px] uppercase">Menor R</p><p className="font-bold text-rose">{rDist.min == null ? "—" : `${formatNumber(rDist.min)}R`}</p></div>
+            <div><p className="text-text-muted text-[10px] uppercase">Total R</p><p className="font-bold text-text-primary">{rDist.total == null ? "—" : `${formatNumber(rDist.total)}R`}</p></div>
           </div>
         </div>
       </section>
@@ -235,19 +234,19 @@ function AnalysisTable({ title, icon: Icon, rows }: { title: string; icon: typeo
         <SampleSizeWarning n={rows.reduce((s, r) => s + r.trades, 0)} show={rows.length > 0} />
       </div>
       {rows.length === 0 ? <Empty /> : (
-        <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm">
+        <table className="w-full text-sm">
           <thead><tr className="text-[10px] uppercase text-text-muted border-b border-border"><th className="text-left py-2">{title.replace("Por ", "")}</th><th className="text-right py-2">WR</th><th className="text-right py-2">Resultado</th><th className="text-right py-2">Ops</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} className="border-b border-border-subtle">
-                <td className="py-2.5 text-text-primary font-medium">{r.key}</td>
+                <td className="py-2.5 text-text-primary font-medium"><span className="inline-flex items-center gap-2">{title === "Por Ativo" && <MarketSymbol symbol={r.key} size="sm" />}{r.key}</span></td>
                 <td className={`py-2.5 text-right ${r.winRate >= 50 ? "text-emerald" : "text-amber"}`}>{formatNumber(r.winRate, 0)}%</td>
                 <td className={`py-2.5 text-right ${r.result >= 0 ? "text-emerald" : "text-rose"}`}>{r.result >= 0 ? "+" : ""}{formatCurrency(r.result)}</td>
                 <td className="py-2.5 text-right text-text-secondary">{r.trades}</td>
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table>
       )}
     </div>
   );

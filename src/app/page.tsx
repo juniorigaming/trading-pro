@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Zap, Filter as FilterIcon, ShieldCheck, ChevronRight } from "lucide-react";
+import { Plus, BarChart3, Target, Clock, ShieldCheck, ChevronRight, Filter } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import CapitalChart from "@/components/CapitalChart";
 import GlobalFilters, { FilterState, defaultFilters, applyFilters } from "@/components/GlobalFilters";
@@ -9,49 +9,48 @@ import AlertCard from "@/components/AlertCard";
 import MetricTile from "@/components/MetricTile";
 import CommandCenter from "@/components/CommandCenter";
 import DashboardAiWidgets from "@/components/ai/DashboardAiWidgets";
-import QuickTradeModal from "@/components/QuickTradeModal";
-import DashboardInsights from "@/components/DashboardInsights";
 import PortfolioSwitcher from "@/components/PortfolioSwitcher";
+import MarketSymbol from "@/components/MarketSymbol";
 import { usePortfolio } from "@/components/PortfolioProvider";
 import { useTrades, useConfig } from "@/hooks/useTradeData";
-import { calculateMetrics, disciplineStats, buildCalendarData } from "@/lib/calculations";
+import { calculateMetrics, groupByAsset, groupBySession, groupBySetup, disciplineStats, buildCalendarData } from "@/lib/calculations";
 import { computeAccount } from "@/lib/account";
 import { formatCurrency, formatPercent, formatR, formatNumber } from "@/lib/utils";
-import { comparePeriods, describeDelta } from "@/lib/period-compare";
-import { localTodayKey, shiftDayKey } from "@/lib/date";
 
 export default function DashboardPage() {
-  const { trades, loading, error } = useTrades();
-  const { config } = useConfig();
+  const { trades, loading } = useTrades();
+  const { config, loading: configLoading } = useConfig();
   const { meta, ready } = usePortfolio();
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
-  const [quickOpen, setQuickOpen] = useState(false);
 
   const filteredTrades = useMemo(() => applyFilters(trades, filters), [trades, filters]);
   const initialCapital = config?.initialCapital ?? 10000;
   const account = useMemo(() => computeAccount(trades, config), [trades, config]);
   const metrics = useMemo(() => calculateMetrics(filteredTrades, initialCapital), [filteredTrades, initialCapital]);
+  const byAsset = useMemo(() => groupByAsset(filteredTrades).slice(0, 5), [filteredTrades]);
+  const bySetup = useMemo(() => groupBySetup(filteredTrades).slice(0, 5), [filteredTrades]);
+  const bySession = useMemo(() => groupBySession(filteredTrades), [filteredTrades]);
   const discipline = useMemo(() => disciplineStats(filteredTrades), [filteredTrades]);
   const calendarMap = useMemo(() => buildCalendarData(filteredTrades), [filteredTrades]);
-  const periodComparison = comparePeriods(trades, initialCapital, 30);
-  const delta30d = (current: number, previous: number, kind: "percent-change" | "points", higherIsBetter = true) => {
-    if (!periodComparison.comparable) return null;
-    const d = describeDelta(current, previous, { kind, higherIsBetter, decimals: 1 });
-    return { ...d, label: "30d vs. 30d anteriores" };
-  };
+  const emptyAnalysisMessage = trades.length > 0 && filteredTrades.length === 0
+    ? "Nenhuma operação corresponde aos filtros atuais."
+    : "Nenhuma operação registrada neste recorte.";
 
-  // Últimos 14 dias até HOJE (calendário civil local, sem voltar para a última operação antiga)
+  // Last 14 days for calendar preview (based on the most recent trade date, or today)
   const previewDays = useMemo(() => {
+    const dates = Array.from(calendarMap.keys()).sort();
+    const lastDate = dates.length > 0 ? new Date(dates[dates.length - 1]) : new Date();
     const days: { label: string; data: ReturnType<typeof buildCalendarData> extends Map<string, infer V> ? V | null : null }[] = [];
-    const today = localTodayKey();
     for (let i = 13; i >= 0; i--) {
-      const key = shiftDayKey(today, -i);
-      days.push({ label: String(Number(key.slice(8, 10))), data: calendarMap.get(key) || null });
+      const d = new Date(lastDate);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split("T")[0];
+      days.push({ label: String(d.getDate()), data: calendarMap.get(key) || null });
     }
     return days;
   }, [calendarMap]);
 
-  if (loading || !ready) {
+  if (loading || configLoading || !ready) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-emerald/30 border-t-emerald rounded-full animate-spin" />
@@ -71,24 +70,18 @@ export default function DashboardPage() {
             </h1>
             <p className="text-sm text-slate-muted mt-1">{meta.description}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setQuickOpen(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-lg shadow-accent/20 transition-all active:scale-[0.98]">
-              <Zap size={17} /> Registro rápido
-            </button>
-            <Link href="/operacoes/novo" className="inline-flex items-center gap-2 px-4 py-2.5 border border-border bg-surface-2 hover:bg-surface-3 text-text-primary text-sm font-bold rounded-xl transition">
-              <Plus size={17} /> Completo
-            </Link>
-          </div>
+          <Link
+            href="/operacoes/novo"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent/90 text-white text-sm font-bold rounded-xl shadow-lg shadow-accent/20 transition-all duration-300 active:scale-[0.98]"
+          >
+            <Plus size={18} />
+            Nova Operação
+          </Link>
         </div>
       </header>
 
-      {error && <div className="mb-4 p-3 rounded-xl border border-rose/30 bg-rose/5 text-xs text-rose">Não foi possível carregar o histórico completo: {error}</div>}
-
       {/* Carteiras: Forex · B3 · Cripto */}
       <PortfolioSwitcher />
-
-      <div className="mb-2 flex items-center gap-2 text-[10px] text-text-muted"><FilterIcon size={12} /> Filtros abaixo afetam as métricas e análises desta página; Status da Conta e IA mostram a carteira completa.</div>
-      <GlobalFilters trades={trades} filters={filters} onChange={setFilters} />
 
       {/* Command Center (conta da carteira ativa) */}
       <CommandCenter />
@@ -110,35 +103,40 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Key Metrics Row */}
+      {/* Scope: filters apply only to the analysis below, not account status or macro context. */}
+      <div className="mb-2 flex items-start gap-2 px-1 text-[11px] leading-relaxed text-slate-muted">
+        <Filter size={13} className="mt-0.5 shrink-0 text-accent" />
+        <p>
+          Os filtros afetam métricas de performance, gráfico, alertas, sequência, análises, disciplina e prévia do calendário. P&amp;L das Operações, Carteiras e Status da Conta mostram o histórico completo da carteira ativa; Exposição soma posições abertas de todas as carteiras; Ranking/Event Risk usam a última análise macro, sem estes filtros.
+        </p>
+      </div>
+      <GlobalFilters trades={trades} filters={filters} onChange={setFilters} />
+
+      {/* Key Metrics Row: these metrics use the selected trade filters, except the account P&L card. */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard
           label="Expectância por Operação"
           value={metrics.totalTrades > 0 ? `${metrics.expectancy >= 0 ? "+" : ""}${formatCurrency(metrics.expectancy)}` : "—"}
-          sub={`${metrics.totalTrades} operações · Payoff ${metrics.payoffRatio > 0 ? formatNumber(metrics.payoffRatio) : "—"}`}
-          positive={metrics.expectancy >= 0}
-          delta={delta30d(periodComparison.current.expectancy, periodComparison.previous.expectancy, "percent-change")}
+          sub={`${metrics.totalTrades} operações no recorte · Payoff ${metrics.payoffRatio > 0 ? formatNumber(metrics.payoffRatio) : "—"}`}
+          positive={metrics.totalTrades > 0 ? metrics.expectancy >= 0 : undefined}
         />
         <StatCard
-          label="Resultado Acumulado"
-          value={`${account.realizedPnl >= 0 ? "+" : ""}${formatCurrency(account.realizedPnl)}`}
-          sub={`Dep: ${formatCurrency(account.totalDeposits)} · Ret: ${formatCurrency(account.totalWithdrawals)}`}
-          positive={account.realizedPnl >= 0}
-          delta={delta30d(periodComparison.current.pnl, periodComparison.previous.pnl, "percent-change")}
+          label="P&L das Operações"
+          value={`${account.realizedPnl > 0 ? "+" : ""}${formatCurrency(account.realizedPnl)}`}
+          sub={`Carteira ativa, sem filtro · fluxo fora do P&L: +${formatCurrency(account.totalDeposits)} aportes / −${formatCurrency(account.totalWithdrawals)} saques`}
+          positive={account.realizedPnl > 0 ? true : account.realizedPnl < 0 ? false : undefined}
         />
         <StatCard
           label="Win Rate"
           value={metrics.totalTrades > 0 ? formatPercent(metrics.winRate) : "—"}
-          sub={`${metrics.wins} wins / ${metrics.losses} losses / ${metrics.breakEven} BE`}
-          positive={metrics.winRate >= 50}
-          delta={delta30d(periodComparison.current.winRate, periodComparison.previous.winRate, "points")}
+          sub={`${metrics.wins} wins / ${metrics.losses} losses / ${metrics.breakEven} BE · BE excluído do denominador`}
+          positive={metrics.totalTrades > 0 ? metrics.winRate >= 50 : undefined}
         />
         <StatCard
           label="Drawdown Máximo"
-          value={`-${formatNumber(metrics.maxDrawdown)}%`}
-          sub={`Atual: -${formatNumber(metrics.currentDrawdown)}%`}
+          value={`${metrics.maxDrawdown > 0 ? "−" : ""}${formatNumber(metrics.maxDrawdown)}%`}
+          sub={`Atual ${metrics.currentDrawdown > 0 ? "−" : ""}${formatNumber(metrics.currentDrawdown)}% · pico→vale no recorte · sem depósitos/saques`}
           neutral
-          delta={delta30d(periodComparison.current.maxDrawdown, periodComparison.previous.maxDrawdown, "points", false)}
         />
       </section>
 
@@ -146,7 +144,7 @@ export default function DashboardPage() {
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         {/* Capital Chart */}
         <div className="lg:col-span-2">
-          <CapitalChart trades={filteredTrades} initialCapital={initialCapital} />
+          <CapitalChart trades={filteredTrades} initialCapital={initialCapital} currency={config?.currency || meta.currency} />
         </div>
         {/* Right Column */}
         <div className="space-y-4">
@@ -173,23 +171,90 @@ export default function DashboardPage() {
 
       {/* Metrics Grid */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <MetricTile label="Ganho Médio" value={metrics.wins > 0 ? `+${formatCurrency(metrics.avgWin)}` : "—"} sub={`${formatR(metrics.avgWinR)} médio`} color="emerald" />
-        <MetricTile label="Perda Média" value={metrics.losses > 0 ? `-${formatCurrency(metrics.avgLoss)}` : "—"} sub={`-${formatNumber(metrics.avgLossR)}R médio`} color="rose" />
-        <MetricTile label="Profit Factor" value={metrics.profitFactor > 0 ? formatNumber(metrics.profitFactor) : "—"} sub="Lucro bruto / Perda bruta" color="emerald" />
-        <MetricTile label="R Médio por Operação" value={metrics.totalTrades > 0 ? formatR(metrics.avgR) : "—"} sub="Todas as operações" color="sky" />
+        <MetricTile label="Ganho Médio" value={metrics.wins > 0 ? `+${formatCurrency(metrics.avgWin)}` : "—"} sub={metrics.avgWinR != null ? `${formatR(metrics.avgWinR)} médio · ${metrics.rWins} wins com risco` : "R sem dados: risco não definido"} color="emerald" />
+        <MetricTile label="Perda Média" value={metrics.losses > 0 ? `−${formatCurrency(metrics.avgLoss)}` : "—"} sub={metrics.avgLossR != null ? `−${formatNumber(metrics.avgLossR)}R médio · ${metrics.rLosses} losses com risco` : "R sem dados: risco não definido"} color="rose" />
+        <MetricTile label="Profit Factor" value={metrics.profitFactor > 0 ? formatNumber(metrics.profitFactor) : "—"} sub="Lucro bruto / perda bruta · recorte filtrado" color="emerald" />
+        <MetricTile label="R Médio por Operação" value={metrics.avgR != null ? formatR(metrics.avgR) : "—"} sub={metrics.rTrades > 0 ? `${metrics.rTrades} operações com risco definido` : "Sem dados: nenhuma operação com risco definido"} color="sky" />
       </section>
 
-      {/* Visão executiva: detalhes por dimensão ficam na página Análises */}
-      <DashboardInsights trades={filteredTrades} />
-      <section className="glass-card p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-bold text-text-primary">Quer investigar a performance?</h2>
-          <p className="text-[11px] text-text-muted">Ativo, setup, sessão, MAE/MFE, disciplina e Edge Explorer com filtros estão em Análises.</p>
+      {/* Analysis Sections */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        {/* By Asset */}
+        <div className="glass-card-strong p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
+              <BarChart3 size={16} className="text-violet" />
+            </div>
+            <h2 className="text-base font-bold text-text-primary">Por Ativo</h2>
+          </div>
+          <div className="space-y-3">
+            {byAsset.length === 0 && <EmptyRow message={emptyAnalysisMessage} />}
+            {byAsset.map((item) => (
+              <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <MarketSymbol symbol={item.key} size="md" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-text-primary truncate">{item.key}</p>
+                    <p className="text-[10px] text-slate-muted">{item.trades} operações</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-extrabold ${item.result >= 0 ? "text-emerald" : "text-rose"}`}>{item.result >= 0 ? "+" : ""}{formatCurrency(item.result)}</p>
+                  <p className="text-[10px] text-slate-muted">WR: {formatNumber(item.winRate, 0)}%</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href="/analises" className="text-xs font-bold text-accent hover:underline">Abrir Análises →</Link>
-          <Link href="/estatisticas" className="text-xs font-bold text-sky hover:underline">Estatísticas</Link>
-          <Link href="/setup" className="text-xs font-bold text-violet hover:underline">Playbook</Link>
+
+        {/* By Setup */}
+        <div className="glass-card-strong p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
+              <Target size={16} className="text-violet" />
+            </div>
+            <h2 className="text-base font-bold text-text-primary">Por Setup</h2>
+          </div>
+          <div className="space-y-3">
+            {bySetup.length === 0 && <EmptyRow message={emptyAnalysisMessage} />}
+            {bySetup.map((item) => (
+              <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
+                <div>
+                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
+                  <p className="text-[10px] text-slate-muted">{item.trades} ops · PF: {item.profitFactor === Infinity ? "∞" : formatNumber(item.profitFactor)}</p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-extrabold ${item.result >= 0 ? "text-emerald" : "text-rose"}`}>{item.result >= 0 ? "+" : ""}{formatCurrency(item.result)}</p>
+                  <p className="text-[10px] text-slate-muted">WR: {formatNumber(item.winRate, 0)}%</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* By Session */}
+        <div className="glass-card-strong p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <div className="w-8 h-8 rounded-lg bg-violet/10 border border-violet/10 flex items-center justify-center">
+              <Clock size={16} className="text-violet" />
+            </div>
+            <h2 className="text-base font-bold text-text-primary">Por Sessão</h2>
+          </div>
+          <div className="space-y-3">
+            {bySession.length === 0 && <EmptyRow message={emptyAnalysisMessage} />}
+            {bySession.map((item) => (
+              <div key={item.key} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04] transition">
+                <div>
+                  <p className="text-sm font-bold text-text-primary">{item.key}</p>
+                  <p className="text-[10px] text-slate-muted">{item.trades} operações</p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-extrabold ${item.result >= 0 ? "text-emerald" : "text-rose"}`}>{item.result >= 0 ? "+" : ""}{formatCurrency(item.result)}</p>
+                  <p className="text-[10px] text-slate-muted">WR: {formatNumber(item.winRate, 0)}%</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -201,24 +266,27 @@ export default function DashboardPage() {
           </div>
           <h2 className="text-base font-bold text-text-primary">Disciplina</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricTile label="Dentro do Plano" value={filteredTrades.length > 0 ? `${formatNumber(discipline.followedPercent, 0)}%` : "—"} sub={`${discipline.followedPlan} / ${filteredTrades.length} operações`} color="emerald" />
-          <MetricTile label="Fora do Plano" value={filteredTrades.length > 0 ? `${formatNumber(discipline.notFollowedPercent, 0)}%` : "—"} sub={`${discipline.notFollowedPlan} / ${filteredTrades.length} operações`} color="rose" />
-          <MetricTile label="Entrada Antecipada" value={discipline.earlyEntry} sub="Operações" color="amber" />
-          <MetricTile label="Revenge Trade" value={discipline.revengeTrade} sub="Identificadas" color="rose" />
+        <p className="-mt-3 mb-4 text-[11px] text-slate-muted">Percentuais calculados somente entre operações com avaliação registrada; “sem avaliação” não conta como operação fora do plano.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+          <MetricTile label="Dentro do plano" value={discipline.evaluated > 0 ? `${formatNumber(discipline.followedPercent, 0)}%` : "—"} sub={`${discipline.followedPlan} / ${discipline.evaluated} avaliadas`} color="emerald" />
+          <MetricTile label="Fora do plano" value={discipline.evaluated > 0 ? `${formatNumber(discipline.notFollowedPercent, 0)}%` : "—"} sub={`${discipline.notFollowedPlan} / ${discipline.evaluated} avaliadas`} color="rose" />
+          <MetricTile label="Sem avaliação" value={filteredTrades.length > 0 ? discipline.unassessed : "—"} sub={`${discipline.unassessed} / ${filteredTrades.length} operações`} color="amber" />
+          <MetricTile label="Entrada antecipada" value={discipline.earlyEntry} sub="Operações marcadas" color="amber" />
+          <MetricTile label="Revenge trade" value={discipline.revengeTrade} sub="Identificadas" color="rose" />
         </div>
         <div className="mt-5 pt-4 border-t border-white/5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <h4 className="text-sm font-bold text-text-primary">Status da Estratégia</h4>
-              <p className="text-xs text-slate-muted">Considerando as operações filtradas</p>
+              <p className="text-xs text-slate-muted">{discipline.evaluated > 0 ? `Base: ${discipline.evaluated} operações avaliadas no recorte filtrado` : "Ainda não há avaliações de aderência ao plano neste recorte."}</p>
             </div>
             <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+              discipline.evaluated === 0 ? "bg-surface-2 text-text-muted border-border" :
               discipline.followedPercent >= 80 ? "bg-emerald/10 text-emerald border-emerald/20" :
               discipline.followedPercent >= 60 ? "bg-amber/10 text-amber border-amber/20" :
               "bg-rose/10 text-rose border-rose/20"
             }`}>
-              {discipline.followedPercent >= 80 ? "Excelente" : discipline.followedPercent >= 60 ? "Moderado" : "Precisa Melhorar"}
+              {discipline.evaluated === 0 ? "Sem avaliação" : discipline.followedPercent >= 80 ? "Excelente" : discipline.followedPercent >= 60 ? "Moderado" : "Precisa melhorar"}
             </span>
           </div>
         </div>
@@ -229,7 +297,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between mb-5">
           <div>
             <h2 className="text-base font-bold text-text-primary">Calendário de Trading</h2>
-            <p className="text-[11px] text-slate-muted mt-0.5">Últimos 14 dias com registro</p>
+            <p className="text-[11px] text-slate-muted mt-0.5">Últimos 14 dias com registro · filtros desta página aplicados</p>
           </div>
           <Link href="/calendario" className="text-xs text-emerald font-medium hover:underline flex items-center gap-1">Ver completo <ChevronRight size={14} /></Link>
         </div>
@@ -259,11 +327,10 @@ export default function DashboardPage() {
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky" /> Sem operação</span>
         </div>
       </section>
-      {quickOpen && <QuickTradeModal onClose={() => setQuickOpen(false)} />}
     </div>
   );
 }
 
-function EmptyRow() {
-  return <p className="text-xs text-slate-muted text-center py-6">Nenhuma operação registrada ainda.</p>;
+function EmptyRow({ message }: { message: string }) {
+  return <p className="text-xs text-slate-muted text-center py-4">{message}</p>;
 }

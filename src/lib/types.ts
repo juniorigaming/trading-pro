@@ -44,7 +44,7 @@ export interface Trade {
   macroCurrency?: string;
   macroImpact?: string;
   macroBias?: string;
-  followedPlan?: boolean;
+  followedPlan?: boolean | null;
   earlyEntry?: boolean;
   earlyExit?: boolean;
   revengeTrade?: boolean;
@@ -57,8 +57,6 @@ export interface Trade {
   whatWentWrong?: string;
   lesson?: string;
   notes?: string;
-  /** Etiquetas livres usadas pelo Edge Explorer (ex.: FOMO, notícia, A+ setup). */
-  tags?: string[];
   screenshotUrl?: string;
   preTradeScreenshotUrl?: string;
   postEntryScreenshotUrl?: string;

@@ -19,7 +19,7 @@ function WalletCard({ id, active, onSelect, compact, config }: { id: PortfolioId
   const Icon = ICONS[id];
   const pnl = account.realizedPnl;
   const base = account.initialBalance + account.totalDeposits - account.totalWithdrawals;
-  const pct = base > 0 ? (pnl / base) * 100 : 0;
+  const pct = config && base > 0 && trades.length > 0 ? (pnl / base) * 100 : null;
   const empty = trades.length === 0 && (config?.initialCapital ?? 0) === 0;
 
   return (
@@ -51,13 +51,14 @@ function WalletCard({ id, active, onSelect, compact, config }: { id: PortfolioId
           <p className={`text-lg font-extrabold tabular-nums ${active ? "text-text-primary" : "text-text-secondary"}`}>
             {config ? formatCurrency(account.realizedBalance, config.currency || meta.currency) : "…"}
           </p>
-          <p className="text-[10px] text-text-muted mt-0.5">
-            {empty ? (
-              <span>Carteira zerada · {trades.length === 0 ? "sem operações" : ""}</span>
+          <p className="text-[10px] text-text-muted mt-0.5" title="O percentual compara o P&amp;L de operações com o capital líquido aportado; depósitos e retiradas não são P&amp;L.">
+            {trades.length === 0 ? (
+              <span>{empty ? "Carteira zerada" : "Sem operações · variação não aplicável"}</span>
             ) : (
               <>
-                <span className={pnl >= 0 ? "text-emerald font-semibold" : "text-rose font-semibold"}>
-                  {pnl >= 0 ? "+" : ""}{formatCurrency(pnl, config?.currency || meta.currency)} ({pct >= 0 ? "+" : ""}{pct.toFixed(2)}%)
+                <span className={pnl > 0 ? "text-emerald font-semibold" : pnl < 0 ? "text-rose font-semibold" : "text-text-secondary font-semibold"}>
+                  P&amp;L {pnl > 0 ? "+" : ""}{formatCurrency(pnl, config?.currency || meta.currency)}
+                  {pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}% sobre capital líquido aportado)` : " · % indisponível"}
                 </span>
                 <span> · {trades.length} op{trades.length === 1 ? "" : "s"}</span>
               </>
@@ -85,7 +86,7 @@ export default function PortfolioSwitcher({ compact = false }: { compact?: boole
             <div className="w-8 h-8 rounded-lg bg-accent-soft flex items-center justify-center"><Wallet size={16} className="text-accent" /></div>
             <div>
               <h2 className="text-base font-bold text-text-primary leading-tight">Carteiras</h2>
-              <p className="text-[11px] text-text-muted">Selecione o mercado — todo o painel passa a mostrar só essa carteira</p>
+              <p className="text-[11px] text-text-muted">Selecione a carteira ativa — saldo e resultado usam todo o histórico dela, sem filtros da página</p>
             </div>
           </div>
           <Link href="/configuracoes#carteira" className="inline-flex items-center gap-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-3 transition">

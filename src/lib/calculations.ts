@@ -1,5 +1,4 @@
 import { Trade } from "./types";
-import { tradeDayKey, weekdayIndex } from "./date";
 
 export interface GroupStat {
   key: string;
@@ -9,8 +8,13 @@ export interface GroupStat {
   breakEven: number;
   winRate: number;
   result: number;
-  avgR: number;
+  avgR: number | null;
+  rTrades: number;
   profitFactor: number;
+}
+
+function hasResultR(trade: Trade): trade is Trade & { resultR: number } {
+  return typeof trade.resultR === "number" && Number.isFinite(trade.resultR);
 }
 
 function buildGroupStats(trades: Trade[], keyFn: (t: Trade) => string): GroupStat[] {
@@ -26,13 +30,14 @@ function buildGroupStats(trades: Trade[], keyFn: (t: Trade) => string): GroupSta
       const wins = group.filter((t) => t.resultType === "WIN");
       const losses = group.filter((t) => t.resultType === "LOSS");
       const be = group.filter((t) => t.resultType === "BREAK EVEN");
+      const riskTrades = group.filter(hasResultR);
       const grossProfit = wins.reduce((s, t) => s + (t.resultAmount || 0), 0);
       const grossLoss = Math.abs(losses.reduce((s, t) => s + (t.resultAmount || 0), 0));
       const result = group.reduce((s, t) => s + (t.resultAmount || 0), 0);
       const winRate = wins.length + losses.length > 0 ? (wins.length / (wins.length + losses.length)) * 100 : 0;
-      const avgR = group.length > 0 ? group.reduce((s, t) => s + (t.resultR || 0), 0) / group.length : 0;
+      const avgR = riskTrades.length > 0 ? riskTrades.reduce((s, t) => s + t.resultR, 0) / riskTrades.length : null;
       const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
-      return { key, trades: group.length, wins: wins.length, losses: losses.length, breakEven: be.length, winRate, result, avgR, profitFactor };
+      return { key, trades: group.length, wins: wins.length, losses: losses.length, breakEven: be.length, winRate, result, avgR, rTrades: riskTrades.length, profitFactor };
     })
     .sort((a, b) => b.result - a.result);
 }
@@ -52,9 +57,9 @@ export function groupBySetup(trades: Trade[]) {
 const WEEKDAYS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 
 export function groupByWeekday(trades: Trade[]) {
-  const stats = buildGroupStats(trades, (t) => WEEKDAYS[weekdayIndex(tradeDayKey(t.date))]);
+  const stats = buildGroupStats(trades, (t) => WEEKDAYS[new Date(t.date).getUTCDay()]);
   return WEEKDAYS.filter((d) => d !== "Domingo" && d !== "Sábado").map(
-    (day) => stats.find((s) => s.key === day) || { key: day, trades: 0, wins: 0, losses: 0, breakEven: 0, winRate: 0, result: 0, avgR: 0, profitFactor: 0 }
+    (day) => stats.find((s) => s.key === day) || { key: day, trades: 0, wins: 0, losses: 0, breakEven: 0, winRate: 0, result: 0, avgR: null, rTrades: 0, profitFactor: 0 }
   );
 }
 
@@ -70,62 +75,76 @@ export interface DayResult {
   wins: number;
   losses: number;
   breakEven: number;
-  resultR: number;
+  resultR: number | null;
+  rTrades: number;
   assets: string[];
   avgExecutionScore: number | null;
+  executionEvaluated: number;
   planAdherence: number | null;
+  planEvaluated: number;
 }
 
 export function buildCalendarData(trades: Trade[]): Map<string, DayResult> {
   const map = new Map<string, DayResult>();
   trades.forEach((t) => {
-    const key = tradeDayKey(t.date);
-    if (!key) return;
+    const key = new Date(t.date).toISOString().split("T")[0];
     if (!map.has(key)) {
-      map.set(key, { date: key, result: 0, trades: 0, wins: 0, losses: 0, breakEven: 0, resultR: 0, assets: [], avgExecutionScore: null, planAdherence: null });
+      map.set(key, { date: key, result: 0, trades: 0, wins: 0, losses: 0, breakEven: 0, resultR: null, rTrades: 0, assets: [], avgExecutionScore: null, executionEvaluated: 0, planAdherence: null, planEvaluated: 0 });
     }
     const entry = map.get(key)!;
     entry.result += t.resultAmount || 0;
     entry.trades += 1;
-    entry.resultR += t.resultR || 0;
+    if (hasResultR(t)) {
+      entry.resultR = (entry.resultR ?? 0) + t.resultR;
+      entry.rTrades += 1;
+    }
     if (t.resultType === "WIN") entry.wins += 1;
     else if (t.resultType === "LOSS") entry.losses += 1;
     else entry.breakEven += 1;
     if (!entry.assets.includes(t.asset)) entry.assets.push(t.asset);
     if (t.executionScore != null) {
-      entry.avgExecutionScore = entry.avgExecutionScore == null ? t.executionScore : Math.round((entry.avgExecutionScore + t.executionScore) / 2);
+      const previousTotal = (entry.avgExecutionScore ?? 0) * entry.executionEvaluated;
+      entry.executionEvaluated += 1;
+      entry.avgExecutionScore = Math.round((previousTotal + t.executionScore) / entry.executionEvaluated);
     }
-    if (t.followedPlan !== undefined) {
-      entry.planAdherence = entry.planAdherence == null ? (t.followedPlan ? 100 : 0) : Math.round((entry.planAdherence + (t.followedPlan ? 100 : 0)) / 2);
+    if (typeof t.followedPlan === "boolean") {
+      const previousTotal = (entry.planAdherence ?? 0) * entry.planEvaluated;
+      entry.planEvaluated += 1;
+      entry.planAdherence = Math.round((previousTotal + (t.followedPlan ? 100 : 0)) / entry.planEvaluated);
     }
   });
   return map;
 }
 
 export function rDistribution(trades: Trade[]) {
-  const values = trades.map((t) => t.resultR || 0).filter((v) => v !== undefined);
-  if (values.length === 0) return { avg: 0, median: 0, max: 0, min: 0, total: 0 };
+  const values = trades.filter(hasResultR).map((t) => t.resultR);
+  if (values.length === 0) return { avg: null, median: null, max: null, min: null, total: null, count: 0 };
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   return {
     avg: values.reduce((a, b) => a + b, 0) / values.length,
     median,
-    max: values.reduce((m, v) => Math.max(m, v), -Infinity),
-    min: values.reduce((m, v) => Math.min(m, v), Infinity),
+    max: Math.max(...values),
+    min: Math.min(...values),
     total: values.reduce((a, b) => a + b, 0),
+    count: values.length,
   };
 }
 
 export function disciplineStats(trades: Trade[]) {
-  const total = trades.length || 1;
-  const followed = trades.filter((t) => t.followedPlan).length;
-  const notFollowed = trades.length - followed;
+  const evaluatedTrades = trades.filter((t) => typeof t.followedPlan === "boolean");
+  const followed = evaluatedTrades.filter((t) => t.followedPlan === true).length;
+  const notFollowed = evaluatedTrades.filter((t) => t.followedPlan === false).length;
+  const evaluated = evaluatedTrades.length;
   return {
+    total: trades.length,
+    evaluated,
+    unassessed: trades.length - evaluated,
     followedPlan: followed,
     notFollowedPlan: notFollowed,
-    followedPercent: (followed / total) * 100,
-    notFollowedPercent: (notFollowed / total) * 100,
+    followedPercent: evaluated > 0 ? (followed / evaluated) * 100 : 0,
+    notFollowedPercent: evaluated > 0 ? (notFollowed / evaluated) * 100 : 0,
     earlyEntry: trades.filter((t) => t.earlyEntry).length,
     earlyExit: trades.filter((t) => t.earlyExit).length,
     revengeTrade: trades.filter((t) => t.revengeTrade).length,
@@ -148,9 +167,12 @@ export interface Metrics {
   payoffRatio: number;
   avgWin: number;
   avgLoss: number;
-  avgR: number;
-  avgWinR: number;
-  avgLossR: number;
+  avgR: number | null;
+  avgWinR: number | null;
+  avgLossR: number | null;
+  rTrades: number;
+  rWins: number;
+  rLosses: number;
   maxWin: number;
   maxLoss: number;
   maxWinSequence: number;
@@ -173,6 +195,9 @@ export interface Metrics {
 }
 
 export function calculateMetrics(trades: Trade[], initialCapital: number = 10000): Metrics {
+  const chronologicalTrades = [...trades].sort((a, b) =>
+    new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time) || a.id - b.id
+  );
   const wins = trades.filter((t) => t.resultType === "WIN");
   const losses = trades.filter((t) => t.resultType === "LOSS");
   const be = trades.filter((t) => t.resultType === "BREAK EVEN");
@@ -194,12 +219,15 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
   const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : 0;
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 0;
 
-  const avgWinR = winCount > 0 ? wins.reduce((s, t) => s + (t.resultR || 0), 0) / winCount : 0;
-  const avgLossR = lossCount > 0 ? losses.reduce((s, t) => s + Math.abs(t.resultR || 0), 0) / lossCount : 0;
-  const avgR = total > 0 ? trades.reduce((s, t) => s + (t.resultR || 0), 0) / total : 0;
+  const rTrades = trades.filter(hasResultR);
+  const rWins = rTrades.filter((t) => t.resultType === "WIN");
+  const rLosses = rTrades.filter((t) => t.resultType === "LOSS");
+  const avgWinR = rWins.length > 0 ? rWins.reduce((s, t) => s + t.resultR, 0) / rWins.length : null;
+  const avgLossR = rLosses.length > 0 ? rLosses.reduce((s, t) => s + Math.abs(t.resultR), 0) / rLosses.length : null;
+  const avgR = rTrades.length > 0 ? rTrades.reduce((s, t) => s + t.resultR, 0) / rTrades.length : null;
 
-  const maxWin = trades.reduce((m, t) => Math.max(m, t.resultAmount || 0), 0);
-  const maxLoss = trades.reduce((m, t) => Math.min(m, t.resultAmount || 0), 0);
+  const maxWin = Math.max(0, ...trades.map((t) => t.resultAmount || 0));
+  const maxLoss = Math.min(0, ...trades.map((t) => t.resultAmount || 0));
   const maxLossAbs = Math.abs(maxLoss);
 
   // Sequence calculation
@@ -210,7 +238,7 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
   let tempWinSeq = 0;
   let tempLossSeq = 0;
 
-  for (const t of trades) {
+  for (const t of chronologicalTrades) {
     if (t.resultType === "WIN") {
       tempWinSeq++;
       tempLossSeq = 0;
@@ -224,27 +252,22 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
       tempLossSeq = 0;
     }
   }
-  // Current sequences: from end
-  for (let i = trades.length - 1; i >= 0; i--) {
-    if (trades[i].resultType === "WIN") {
-      currWinSeq++;
-      currLossSeq = 0;
-    } else if (trades[i].resultType === "LOSS") {
-      currLossSeq++;
-      currWinSeq = 0;
-    } else {
-      break;
-    }
+  // Current streak: count only consecutive outcomes from the latest trade backwards.
+  const lastResult = chronologicalTrades[chronologicalTrades.length - 1]?.resultType;
+  if (lastResult === "WIN") {
+    for (let i = chronologicalTrades.length - 1; i >= 0 && chronologicalTrades[i].resultType === "WIN"; i--) currWinSeq++;
+  } else if (lastResult === "LOSS") {
+    for (let i = chronologicalTrades.length - 1; i >= 0 && chronologicalTrades[i].resultType === "LOSS"; i--) currLossSeq++;
   }
 
-  // Drawdown
+  // Drawdown uses chronological order regardless of the API's latest-first list.
   let peak = initialCapital;
   let currentCap = initialCapital;
   let maxDD = 0;
   let currentDD = 0;
   let runningCap = initialCapital;
 
-  for (const t of trades) {
+  for (const t of chronologicalTrades) {
     runningCap += t.resultAmount || 0;
     if (runningCap > peak) peak = runningCap;
     const dd = peak > 0 ? ((peak - runningCap) / peak) * 100 : 0;
@@ -259,8 +282,7 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
   // Per day
   const dayResults = new Map<string, number>();
   trades.forEach((t) => {
-    const d = tradeDayKey(t.date);
-    if (!d) return;
+    const d = new Date(t.date).toISOString().split("T")[0];
     dayResults.set(d, (dayResults.get(d) || 0) + (t.resultAmount || 0));
   });
   const tradesPerDay = trades.length / Math.max(dayResults.size, 1);
@@ -323,6 +345,9 @@ export function calculateMetrics(trades: Trade[], initialCapital: number = 10000
     avgR,
     avgWinR,
     avgLossR,
+    rTrades: rTrades.length,
+    rWins: rWins.length,
+    rLosses: rLosses.length,
     maxWin,
     maxLoss: Math.abs(maxLoss),
     maxWinSequence: maxWinSeq,

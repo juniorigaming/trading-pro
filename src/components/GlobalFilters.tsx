@@ -1,7 +1,7 @@
 "use client";
 import { Search } from "lucide-react";
 import { Trade } from "@/lib/types";
-import { dayOrdinal, localTodayKey, tradeDayKey } from "@/lib/date";
+import { marketSymbolLabel } from "@/components/MarketSymbol";
 
 export interface FilterState {
   period: string;
@@ -22,20 +22,19 @@ export const defaultFilters: FilterState = {
 };
 
 export function applyFilters(trades: Trade[], filters: FilterState): Trade[] {
-  const today = localTodayKey();
-  const todayOrdinal = dayOrdinal(today);
-  const [year, month] = today.split("-");
+  const now = new Date();
   return trades.filter((t) => {
-    const key = tradeDayKey(t.date);
-    const tradeOrdinal = dayOrdinal(key);
-    const diffDays = todayOrdinal - tradeOrdinal;
+    const tradeDate = new Date(t.date);
 
     if (filters.period !== "all") {
-      if (filters.period === "today" && diffDays !== 0) return false;
-      if (filters.period === "weekly" && (diffDays < 0 || diffDays > 6)) return false;
-      if (filters.period === "monthly" && (diffDays < 0 || diffDays > 29)) return false;
-      if (filters.period === "this_month" && key.slice(0, 7) !== `${year}-${month}`) return false;
-      if (filters.period === "this_year" && key.slice(0, 4) !== year) return false;
+      const diffDays = (now.getTime() - tradeDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (filters.period === "today" && diffDays > 1) return false;
+      if (filters.period === "weekly" && diffDays > 7) return false;
+      if (filters.period === "monthly" && diffDays > 30) return false;
+      if (filters.period === "this_month") {
+        if (tradeDate.getMonth() !== now.getMonth() || tradeDate.getFullYear() !== now.getFullYear()) return false;
+      }
+      if (filters.period === "this_year" && tradeDate.getFullYear() !== now.getFullYear()) return false;
     }
     if (filters.asset !== "all" && t.asset !== filters.asset) return false;
     if (filters.session !== "all" && t.session !== filters.session) return false;
@@ -55,6 +54,7 @@ interface Props {
 export default function GlobalFilters({ trades, filters, onChange }: Props) {
   const uniqueAssets = Array.from(new Set(trades.map((t) => t.asset))).sort();
   const uniqueSessions = Array.from(new Set(trades.map((t) => t.session))).sort();
+  const filteredCount = applyFilters(trades, filters).length;
   const uniqueSetups = Array.from(new Set(trades.map((t) => t.setup || "Sem setup"))).sort();
 
   const update = (field: keyof FilterState, value: string) => {
@@ -66,7 +66,10 @@ export default function GlobalFilters({ trades, filters, onChange }: Props) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Search size={16} className="text-slate-muted" />
-          <h3 className="text-sm font-bold text-text-primary">Filtros Globais</h3>
+          <div>
+            <h3 className="text-sm font-bold text-text-primary">Filtros Globais</h3>
+            <p className="text-[10px] text-text-muted">{filteredCount} de {trades.length} operações no recorte analítico</p>
+          </div>
         </div>
         {JSON.stringify(filters) !== JSON.stringify(defaultFilters) && (
           <button onClick={() => onChange(defaultFilters)} className="text-[11px] text-emerald hover:underline font-medium">
@@ -85,7 +88,7 @@ export default function GlobalFilters({ trades, filters, onChange }: Props) {
         ]} />
         <FilterSelect label="Ativo" value={filters.asset} onChange={(v) => update("asset", v)} options={[
           { value: "all", label: "Todos" },
-          ...uniqueAssets.map((a) => ({ value: a, label: a })),
+          ...uniqueAssets.map((a) => ({ value: a, label: marketSymbolLabel(a) })),
         ]} />
         <FilterSelect label="Sessão" value={filters.session} onChange={(v) => update("session", v)} options={[
           { value: "all", label: "Todas" },
